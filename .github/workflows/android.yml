@@ -63,7 +63,7 @@ jobs:
           df -h /
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           submodules: recursive
 
@@ -74,7 +74,7 @@ jobs:
           git -C lib/vcpkg cat-file -e "$baseline" 2>/dev/null || git -C lib/vcpkg fetch --depth=1 origin "$baseline"
 
       - name: Get ROM
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: ${{ env.ROM_REPO }}
           token: ${{ secrets.DK64ROM || secrets.SECRET_TOKEN }}
@@ -87,7 +87,7 @@ jobs:
           sudo apt-get install -y ninja-build clang lld llvm make g++ zlib1g-dev
 
       - name: Set up JDK
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 21
@@ -170,7 +170,23 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Build APK
-        run: ./gradlew assembleRelease --stacktrace
+        run: |
+          set -o pipefail
+          if ./gradlew assembleRelease --stacktrace 2>&1 | tee "$RUNNER_TEMP/gradle.log"; then
+            exit 0
+          fi
+          # Surface the actual errors as annotations (shown on the run page, and readable
+          # through the API without downloading the full log).
+          annotate() {
+            local title="$1" text="$2"
+            [ -n "$text" ] || return 0
+            text="${text//'%'/'%25'}"; text="${text//$'\r'/}"; text="${text//$'\n'/'%0A'}"
+            echo "::error title=${title}::${text}"
+          }
+          annotate "Gradle: what went wrong" "$(sed -n '/^\* What went wrong:/,/^\* Try:/p' "$RUNNER_TEMP/gradle.log" | head -n 60)"
+          annotate "First compiler/CMake errors" "$(grep -n -m 25 -E 'error:|CMake Error|FAILED:|fatal error|undefined (symbol|reference)' "$RUNNER_TEMP/gradle.log")"
+          annotate "Log tail" "$(tail -n 40 "$RUNNER_TEMP/gradle.log")"
+          exit 1
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
