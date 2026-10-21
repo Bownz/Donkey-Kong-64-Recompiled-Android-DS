@@ -1,8 +1,8 @@
 diff --git a/plume_vulkan.cpp b/plume_vulkan.cpp
-index f1dd503..3550272 100644
+index f1dd503..bd5d273 100644
 --- a/plume_vulkan.cpp
 +++ b/plume_vulkan.cpp
-@@ -27,6 +27,12 @@
+@@ -27,7 +27,18 @@
  // TODO:
  // - Fix resource pools.
  
@@ -13,9 +13,15 @@ index f1dd503..3550272 100644
 +#endif
 +
  namespace plume {
++#if defined(__ANDROID__)
++    // Per-stage sampled-image limit of the device in use (for RT64's Android texture table).
++    uint32_t VulkanMaxPerStageSampledImages = 0;
++#endif
++
      // Backend constants.
  
-@@ -1880,6 +1886,10 @@ namespace plume {
+     // Required buffer alignment for acceleration structures.
+@@ -1880,6 +1891,10 @@ namespace plume {
          return it->second;
      }
  
@@ -26,7 +32,7 @@ index f1dd503..3550272 100644
      // VulkanDescriptorSet
  
      VulkanDescriptorSet::VulkanDescriptorSet(VulkanDevice *device, const RenderDescriptorSetDesc &desc) {
-@@ -1899,7 +1909,14 @@ namespace plume {
+@@ -1899,7 +1914,14 @@ namespace plume {
              boundlessRangeSize = std::max(desc.boundlessRangeSize, 1U);
  
              const RenderDescriptorRange &lastDescriptorRange = desc.descriptorRanges[desc.descriptorRangesCount - 1];
@@ -41,7 +47,7 @@ index f1dd503..3550272 100644
              rangeCount--;
          }
  
-@@ -1991,6 +2008,13 @@ namespace plume {
+@@ -1991,6 +2013,13 @@ namespace plume {
              imageInfo.imageView = (interfaceTexture != nullptr) ? interfaceTexture->imageView : VK_NULL_HANDLE;
          }
  
@@ -55,7 +61,7 @@ index f1dd503..3550272 100644
          setDescriptor(descriptorIndex, nullptr, &imageInfo, nullptr, nullptr);
      }
  
-@@ -2310,6 +2334,20 @@ namespace plume {
+@@ -2310,6 +2339,20 @@ namespace plume {
      }
  
      bool VulkanSwapChain::resize() {
@@ -76,7 +82,7 @@ index f1dd503..3550272 100644
          getWindowSize(width, height);
  
          // Don't recreate the swap chain at all if the window doesn't have a valid size.
-@@ -2349,6 +2387,12 @@ namespace plume {
+@@ -2349,6 +2392,12 @@ namespace plume {
          VkResult res = vkCreateSwapchainKHR(commandQueue->device->vk, &createInfo, nullptr, &vk);
          if (res != VK_SUCCESS) {
              fprintf(stderr, "vkCreateSwapchainKHR failed with error code 0x%X.\n", res);
@@ -89,7 +95,7 @@ index f1dd503..3550272 100644
              return false;
          }
  
-@@ -2401,6 +2445,12 @@ namespace plume {
+@@ -2401,6 +2450,12 @@ namespace plume {
      }
  
      bool VulkanSwapChain::needsResize() const {
@@ -102,7 +108,7 @@ index f1dd503..3550272 100644
          uint32_t windowWidth, windowHeight;
          getWindowSize(windowWidth, windowHeight);
          return (vk == VK_NULL_HANDLE) || (windowWidth != width) || (windowHeight != height) || (requiredPresentMode != createdPresentMode);
-@@ -2494,6 +2544,42 @@ namespace plume {
+@@ -2494,6 +2549,42 @@ namespace plume {
          return true;
      }
  
@@ -145,7 +151,7 @@ index f1dd503..3550272 100644
      void VulkanSwapChain::releaseSwapChain() {
          if (vk != VK_NULL_HANDLE) {
              vkDestroySwapchainKHR(commandQueue->device->vk, vk, nullptr);
-@@ -3077,12 +3163,31 @@ namespace plume {
+@@ -3077,12 +3168,31 @@ namespace plume {
      }
  
      void VulkanCommandList::setScissors(const RenderRect *scissorRects, uint32_t count) {
@@ -178,7 +184,7 @@ index f1dd503..3550272 100644
              }
  
              if (!scissorVector.empty()) {
-@@ -3091,7 +3196,7 @@ namespace plume {
+@@ -3091,7 +3201,7 @@ namespace plume {
          }
          else {
              // Single element fast path.
@@ -187,7 +193,36 @@ index f1dd503..3550272 100644
              vkCmdSetScissor(vk, 0, 1, &scissor);
          }
      }
-@@ -4464,7 +4569,19 @@ namespace plume {
+@@ -3828,6 +3938,12 @@ namespace plume {
+ 
+         // Store properties.
+         vkGetPhysicalDeviceProperties(physicalDevice, &physicalDeviceProperties);
++#if defined(__ANDROID__)
++        VulkanMaxPerStageSampledImages = std::min(physicalDeviceProperties.limits.maxPerStageDescriptorSampledImages,
++            physicalDeviceProperties.limits.maxDescriptorSetSampledImages);
++        fprintf(stdout, "Vulkan sampled image limits: per stage %u, per set %u\n",
++            physicalDeviceProperties.limits.maxPerStageDescriptorSampledImages, physicalDeviceProperties.limits.maxDescriptorSetSampledImages);
++#endif
+ 
+         // Check for supported features.
+         void *featuresChain = nullptr;
+@@ -4149,7 +4265,15 @@ namespace plume {
+ #   endif
+ 
+         // Fill Vulkan-only capabilities.
++#if defined(__ANDROID__)
++        // LOAD/STORE_OP_NONE on read-only depth leaves depth undefined inside the render pass.
++        // Desktop GPUs keep the old values anyway; tile-based GPUs (Adreno, Mali) don't load them
++        // into tile memory, so depth tests (e.g. DK64's water) pass or fail per tile, giving
++        // rectangular blocks drawn over the scene. Use LOAD/STORE instead.
++        loadStoreOpNoneSupported = false;
++#else
+         loadStoreOpNoneSupported = supportedOptionalExtensions.find(VK_EXT_LOAD_STORE_OP_NONE_EXTENSION_NAME) != supportedOptionalExtensions.end();
++#endif
+ 
+         if (!nullDescriptorSupported) {
+             nullBuffer = createBuffer(RenderBufferDesc::DefaultBuffer(16, RenderBufferFlag::VERTEX));
+@@ -4464,7 +4588,19 @@ namespace plume {
  #else
      VulkanInterface::VulkanInterface() {
  #endif

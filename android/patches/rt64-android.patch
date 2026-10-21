@@ -208,6 +208,76 @@ index 7de5b69..e5ba9d5 100644
              uint32_t textureCount = ext.swapChain->getTextureCount();
              swapChainFramebuffers.resize(textureCount);
              for (uint32_t i = 0; i < textureCount; i++) {
+diff --git a/src/render/rt64_descriptor_sets.h b/src/render/rt64_descriptor_sets.h
+index 69a82ac..3f7dd70 100644
+--- a/src/render/rt64_descriptor_sets.h
++++ b/src/render/rt64_descriptor_sets.h
+@@ -290,9 +290,24 @@ namespace RT64 {
+         }
+     };
+ 
++#if defined(__ANDROID__)
++}
++namespace plume {
++    extern uint32_t VulkanMaxPerStageSampledImages; // plume Android patch
++}
++namespace RT64 {
++#endif
++
+     struct FramebufferRendererDescriptorTextureSet : RenderDescriptorSetBase {
+         static const int UpperRange = 8192;
+ 
++#if defined(__ANDROID__)
++        // Fixed-size table when the device can hold all of it in one draw (see below).
++        static bool useFixedTable() {
++            return plume::VulkanMaxPerStageSampledImages >= uint32_t(UpperRange + 64);
++        }
++#endif
++
+         uint32_t textureCacheSize = 0;
+         uint32_t gTextures;
+         uint32_t gTMEM;
+@@ -303,7 +318,21 @@ namespace RT64 {
+             builder.begin();
+             gTextures = builder.addTexture(0, UpperRange);
+             gTMEM = gTextures;
++#if defined(__ANDROID__)
++            if (!useFixedTable()) {
++                builder.end(true, textureCacheSize);
++            }
++            else
++            // Adreno's handling of the variable-count, partially-bound, update-after-bind
++            // texture table makes draws sample the wrong textures (wrong-coloured or swapped
++            // surfaces). A plain fixed-size table, as Zelda64Recomp-Android does on the same
++            // GPUs, renders correctly. RT64 waits for each workload before rewriting slots.
++            {
++                builder.end();
++            }
++#else
+             builder.end(true, textureCacheSize);
++#endif
+ 
+             if (device != nullptr) {
+                 create(device);
+diff --git a/src/render/rt64_framebuffer_renderer.cpp b/src/render/rt64_framebuffer_renderer.cpp
+index 9fae0d4..67deaa7 100644
+--- a/src/render/rt64_framebuffer_renderer.cpp
++++ b/src/render/rt64_framebuffer_renderer.cpp
+@@ -312,7 +312,14 @@ namespace RT64 {
+         
+         const bool createSet = (descTextureSet == nullptr) || (descTextureSet->textureCacheSize < (textureCacheSize + 1));
+         if (createSet) {
++#if defined(__ANDROID__)
++            // Fixed-size table on Android (see FramebufferRendererDescriptorTextureSet): create it
++            // once at full size instead of regrowing it.
++            descTextureSet = std::make_unique<FramebufferRendererDescriptorTextureSet>(worker->device,
++                FramebufferRendererDescriptorTextureSet::useFixedTable() ? uint32_t(FramebufferRendererDescriptorTextureSet::UpperRange) : ((textureCacheSize + 1) * 3) / 2);
++#else
+             descTextureSet = std::make_unique<FramebufferRendererDescriptorTextureSet>(worker->device, ((textureCacheSize + 1) * 3) / 2);
++#endif
+         }
+ 
+         if (createSet || (descriptorTextureReplacementMapEnabled != textureCacheReplacementMapEnabled)) {
 diff --git a/src/render/rt64_shader_library.cpp b/src/render/rt64_shader_library.cpp
 index d1c5273..0f14d91 100644
 --- a/src/render/rt64_shader_library.cpp
