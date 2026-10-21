@@ -331,7 +331,6 @@ public final class BottomScreenView extends View {
         c.drawText(KONG_NAMES[k], x, y, text);
         y += rowH * 1.1f;
 
-        float iconR = rowH * 0.46f;
         statRow(c, x, y, p.right - pad, rowH, "Golden Bananas", known ? String.valueOf(kong.goldenBananas) : "–", Color.rgb(242, 194, 48));
         y += rowH;
         statRow(c, x, y, p.right - pad, rowH, "Bananas", known ? String.valueOf(kong.colouredBananas) : "–", KONG_COLORS[k]);
@@ -339,12 +338,7 @@ public final class BottomScreenView extends View {
         statRow(c, x, y, p.right - pad, rowH, "Coins", known ? String.valueOf(kong.coins) : "–", Color.rgb(230, 190, 80));
         y += rowH;
 
-        // Weapon and instrument, dimmed until bought.
-        float half = (p.width() - 2 * pad) / 2f;
-        iconR = Math.min(iconR, half * 0.16f);
-        drawOwned(c, x, y, iconR, rowH, half, known && kong.weapon > 0, true, k, DkIcons.weaponName(k));
-        drawOwned(c, x + half, y, iconR, rowH, half, known && kong.instrument > 0, false, k, DkIcons.instrumentName(k));
-        y += rowH * 1.25f;
+        y += rowH * 0.6f;
 
         // Shared items.
         text.setTextAlign(Paint.Align.LEFT);
@@ -371,19 +365,22 @@ public final class BottomScreenView extends View {
         c.drawText(value, right, y, text);
     }
 
-    private void drawOwned(Canvas c, float x, float y, float iconR, float rowH, float width, boolean owned, boolean weapon, int kong, String name) {
-        int saved = c.saveLayerAlpha(x, y - rowH, x + width, y + rowH * 0.5f, owned ? 255 : 80);
-        if (weapon) {
-            DkIcons.weapon(c, kong, x + iconR, y - iconR * 0.5f, iconR);
-        } else {
-            DkIcons.instrument(c, kong, x + iconR, y - iconR * 0.5f, iconR);
+    /**
+     * Whether a move can be used right now: the Kong has bought it and there's something to
+     * use. Unknown (no game running) counts as available so the buttons still work.
+     */
+    private boolean available(Move move) {
+        if (!state.inGame()) {
+            return true;
         }
-        float nameX = x + iconR * 2.4f;
-        text.setTextAlign(Paint.Align.LEFT);
-        text.setColor(TEXT);
-        text.setTextSize(fitText(name, width - (nameX - x) - rowH * 0.2f, rowH * 0.32f));
-        c.drawText(name, nameX, y - iconR * 0.35f, text);
-        c.restoreToCount(saved);
+        GameState.Kong k = state.kongs[state.currentKong];
+        switch (move) {
+            case WEAPON: return k.weapon > 0 && (state.ammo > 0 || state.homingAmmo > 0);
+            case ORANGE: return state.oranges > 0;
+            case INSTRUMENT: return k.instrument > 0 && k.instrumentEnergy > 0;
+            case CAMERA: return state.film > 0;
+            default: return true;
+        }
     }
 
     private void drawActions(Canvas c) {
@@ -391,8 +388,6 @@ public final class BottomScreenView extends View {
         boolean known = state.inGame();
         GameState.Kong k = state.kongs[kong];
         Move[] moves = { Move.WEAPON, Move.ORANGE, Move.INSTRUMENT, Move.CAMERA };
-        String[] labels = { DkIcons.weaponName(kong), "Orange", DkIcons.instrumentName(kong), "Fairy Camera" };
-        String[] combos = { "Z + C◀", "Z + C▶", "Z + C▲", "Z + C▼" };
         String[] counts = known
             ? new String[] { String.valueOf(state.ammo), String.valueOf(state.oranges), String.valueOf(k.instrumentEnergy), String.valueOf(state.film) }
             : new String[] { "", "", "", "" };
@@ -400,42 +395,35 @@ public final class BottomScreenView extends View {
         for (int i = 0; i < 4; i++) {
             RectF r = actionRects[i];
             boolean pressed = running == moves[i];
+            boolean enabled = available(moves[i]);
             float radius = r.height() * 0.18f;
+
+            int saved = c.saveLayerAlpha(r.left - unit * 0.02f, r.top - unit * 0.02f,
+                r.right + unit * 0.02f, r.bottom + unit * 0.02f, enabled ? 255 : 70);
             paint.setColor(pressed ? Color.rgb(78, 70, 52) : PANEL);
             c.drawRoundRect(r, radius, radius, paint);
             goldRing(c, r, radius, pressed);
 
-            // Icon on the left, count and combo on the right, name along the bottom.
-            float labelBand = r.height() * 0.26f;
-            float upperH = r.height() - labelBand;
-            float iconR = Math.min(upperH * 0.36f, r.width() * 0.17f);
-            float iconX = r.left + r.width() * 0.07f + iconR;
-            float iconY = r.top + upperH * 0.55f;
+            // Icon, with the count beside it.
+            boolean hasCount = !counts[i].isEmpty();
+            float iconR = Math.min(r.height() * 0.36f, r.width() * (hasCount ? 0.22f : 0.3f));
+            float iconX = hasCount ? r.left + r.width() * 0.1f + iconR : r.centerX();
+            float iconY = r.centerY();
             switch (moves[i]) {
                 case WEAPON: DkIcons.weapon(c, kong, iconX, iconY, iconR); break;
                 case ORANGE: DkIcons.orange(c, iconX, iconY, iconR); break;
                 case INSTRUMENT: DkIcons.instrument(c, kong, iconX, iconY, iconR); break;
                 default: DkIcons.camera(c, iconX, iconY, iconR); break;
             }
-
-            float rightX = r.right - r.width() * 0.07f;
-            if (!counts[i].isEmpty()) {
+            if (hasCount) {
+                float countLeft = iconX + iconR * 1.2f;
+                float countRight = r.right - r.width() * 0.08f;
                 text.setTextAlign(Paint.Align.RIGHT);
-                text.setTextSize(upperH * 0.3f);
                 text.setColor(GOLD);
-                c.drawText(counts[i], rightX, r.top + upperH * 0.45f, text);
+                text.setTextSize(fitText("000", countRight - countLeft, r.height() * 0.34f));
+                c.drawText(counts[i], countRight, iconY + text.getTextSize() * 0.36f, text);
             }
-            text.setTextAlign(Paint.Align.RIGHT);
-            text.setColor(TEXT_DIM);
-            text.setTextSize(fitText("Z + C◀", rightX - (iconX + iconR * 1.15f), upperH * 0.2f));
-            c.drawText(combos[i], rightX, r.top + upperH * 0.85f, text);
-
-            // One size for every label (fitted to the longest name any Kong has), so the
-            // column doesn't look uneven.
-            text.setTextAlign(Paint.Align.CENTER);
-            text.setColor(TEXT);
-            text.setTextSize(fitText("Pineapple Launcher", r.width() * 0.86f, labelBand * 0.62f));
-            c.drawText(labels[i], r.centerX(), r.bottom - labelBand * 0.4f, text);
+            c.restoreToCount(saved);
         }
     }
 
@@ -470,7 +458,9 @@ public final class BottomScreenView extends View {
         Move[] moves = { Move.WEAPON, Move.ORANGE, Move.INSTRUMENT, Move.CAMERA };
         for (int i = 0; i < 4; i++) {
             if (actionRects[i].contains(x, y)) {
-                perform(moves[i]);
+                if (available(moves[i])) {
+                    perform(moves[i]);
+                }
                 return true;
             }
         }
