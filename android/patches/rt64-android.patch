@@ -224,3 +224,21 @@ index d1c5273..0f14d91 100644
              pipelineDesc.renderTargetBlend[0] = RenderBlendDesc::Copy();
              pipelineDesc.renderTargetCount = 1;
              pipelineDesc.pipelineLayout = videoInterfaceNearest.pipelineLayout.get();
+diff --git a/src/shaders/FbCommon.hlsli b/src/shaders/FbCommon.hlsli
+index 973ee67..51aea3b 100644
+--- a/src/shaders/FbCommon.hlsli
++++ b/src/shaders/FbCommon.hlsli
+@@ -8,7 +8,12 @@
+ #include "Formats.hlsli"
+ 
+ uint EndianSwapUINT16(uint i) {
+-    return ((i << 8) & 0xFF00) | ((i >> 8) & 0xFF);
++    // Some Qualcomm Vulkan compilers fail to build compute shaders with the
++    // OR-of-two-masked-shifts form (vkCreateComputePipelines -> VK_ERROR_UNKNOWN), leaving the
++    // framebuffer read/write pipelines null. Masking once after the OR is equivalent for 16-bit
++    // input and compiles everywhere (see Goemon64Recomp-Android's RT64).
++    i &= 0xFFFFu;
++    return (i << 8 | i >> 8) & 0xFFFFu;
+ }
+ 
+ // This endian swapping function generates a DXC-LLVM code generation bug when optimizations are enabled. All files that include this 

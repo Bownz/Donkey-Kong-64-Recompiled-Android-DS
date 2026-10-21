@@ -236,6 +236,34 @@ public class DK64Activity extends SDLActivity
         return driver;
     }
 
+    /** For the in-game Graphics settings: the selected driver id, then "id\tlabel" lines. */
+    public String getGpuDriverList() {
+        GpuDrivers.Driver selected = GpuDrivers.selected(this);
+        StringBuilder sb = new StringBuilder(selected == null ? "" : selected.id);
+        for (GpuDrivers.Driver d : GpuDrivers.installed(this)) {
+            sb.append('\n').append(d.id).append('\t').append(d.label().replace('\t', ' ').replace('\n', ' '));
+        }
+        return sb.toString();
+    }
+
+    /** From the in-game Graphics settings: use this driver ("" = system) from the next start. */
+    public String selectGpuDriver(String id) {
+        GpuDrivers.Driver pick = null;
+        for (GpuDrivers.Driver d : GpuDrivers.installed(this)) {
+            if (d.id.equals(id)) {
+                pick = d;
+            }
+        }
+        GpuDrivers.select(this, pick);
+        return null;
+    }
+
+    /** From the in-game Graphics settings: install or remove driver packages. */
+    public String openGpuDriverManager() {
+        runOnUiThread(() -> startActivity(new Intent(this, GpuDriverActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)));
+        return null;
+    }
+
     public String getDataDirectory() {
         String dir = storage.resolveDataDirectory();
         RomIcons.dataDirectory = dir;

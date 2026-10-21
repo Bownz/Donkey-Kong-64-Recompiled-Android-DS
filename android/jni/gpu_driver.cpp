@@ -15,12 +15,64 @@
 #include <string>
 #include <vector>
 
+#include "gpu_driver.h"
+
 #if DK64_HAVE_ADRENOTOOLS
 #include <adrenotools/driver.h>
 #endif
 
 namespace {
     constexpr const char* log_tag = "DK64Recomp";
+    std::string active_driver = "System driver";
+
+    // Calls a DK64Activity method taking/returning strings (nullptr arg: no argument).
+    std::string call_activity(const char* name, const char* signature, const std::string* arg) {
+        std::string result;
+        JNIEnv* env = static_cast<JNIEnv*>(SDL_AndroidGetJNIEnv());
+        jobject activity = static_cast<jobject>(SDL_AndroidGetActivity());
+        if (env == nullptr || activity == nullptr) {
+            return result;
+        }
+        jclass activity_class = env->GetObjectClass(activity);
+        jmethodID method = env->GetMethodID(activity_class, name, signature);
+        if (method == nullptr) {
+            env->ExceptionClear();
+        }
+        else {
+            jstring jarg = arg != nullptr ? env->NewStringUTF(arg->c_str()) : nullptr;
+            jobject value = arg != nullptr ? env->CallObjectMethod(activity, method, jarg) : env->CallObjectMethod(activity, method);
+            if (env->ExceptionCheck()) {
+                env->ExceptionDescribe();
+                env->ExceptionClear();
+            }
+            else if (value != nullptr) {
+                const char* chars = env->GetStringUTFChars(static_cast<jstring>(value), nullptr);
+                result = chars;
+                env->ReleaseStringUTFChars(static_cast<jstring>(value), chars);
+                env->DeleteLocalRef(value);
+            }
+            if (jarg != nullptr) {
+                env->DeleteLocalRef(jarg);
+            }
+        }
+        env->DeleteLocalRef(activity_class);
+        env->DeleteLocalRef(activity);
+        return result;
+    }
+
+    std::vector<std::string> split(const std::string& all, char sep) {
+        std::vector<std::string> parts;
+        size_t start = 0;
+        while (start <= all.size()) {
+            size_t end = all.find(sep, start);
+            if (end == std::string::npos) {
+                end = all.size();
+            }
+            parts.emplace_back(all.substr(start, end - start));
+            start = end + 1;
+        }
+        return parts;
+    }
 
     // Asks DK64Activity.getGpuDriver(): null for the system driver, otherwise four lines:
     // driver directory, driver library name, the app's native library directory (where the
@@ -92,8 +144,37 @@ extern "C" void* dk64_android_vulkan_loader() {
         return nullptr;
     }
     __android_log_print(ANDROID_LOG_INFO, log_tag, "GPU driver: custom driver loaded");
+    active_driver = driver.size() > 4 && !driver[4].empty() ? driver[4] : driver[1];
     return get_instance_proc_addr;
 #else
     return nullptr;
 #endif
+}
+
+namespace dk64::android {
+    std::vector<GpuDriverChoice> list_gpu_drivers(std::string& selected_id) {
+        // Lines: selected id, then "id<TAB>label" per installed driver.
+        std::vector<GpuDriverChoice> choices{ { "", "System driver" } };
+        std::vector<std::string> lines = split(call_activity("getGpuDriverList", "()Ljava/lang/String;", nullptr), '\n');
+        selected_id = lines.empty() ? "" : lines[0];
+        for (size_t i = 1; i < lines.size(); i++) {
+            std::vector<std::string> fields = split(lines[i], '\t');
+            if (fields.size() >= 2 && !fields[0].empty()) {
+                choices.push_back({ fields[0], fields[1] });
+            }
+        }
+        return choices;
+    }
+
+    void select_gpu_driver(const std::string& id) {
+        call_activity("selectGpuDriver", "(Ljava/lang/String;)Ljava/lang/String;", &id);
+    }
+
+    void open_gpu_driver_manager() {
+        call_activity("openGpuDriverManager", "()Ljava/lang/String;", nullptr);
+    }
+
+    std::string active_gpu_driver() {
+        return active_driver;
+    }
 }

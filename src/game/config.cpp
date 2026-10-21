@@ -8,6 +8,9 @@
 #include "ultramodern/config.hpp"
 #include "librecomp/files.hpp"
 #include "librecomp/config.hpp"
+#if defined(__ANDROID__)
+#include "../../android/jni/gpu_driver.h"
+#endif
 #include "util/file.h"
 #include <filesystem>
 #include <fstream>
@@ -237,6 +240,72 @@ int dk64::get_sfx_volume() {
     return get_sound_config_number_value<int>(dk64::configkeys::sound::sfx_volume);
 }
 
+#if defined(__ANDROID__)
+// Android: which Vulkan driver the renderer loads (the device's own, or a custom one such
+// as Turnip installed through the "DK64 Graphics Driver" screen). The choice is kept by the
+// Android side and takes effect the next time the game starts.
+static const std::string gpu_driver_option = "android_gpu_driver";
+
+static void add_gpu_driver_option(recomp::config::Config &config) {
+    static std::vector<dk64::android::GpuDriverChoice> drivers;
+    static std::vector<recomp::config::ConfigOptionEnumOption> options;
+    std::string selected;
+    drivers = dk64::android::list_gpu_drivers(selected);
+    options.clear();
+    uint32_t selected_index = 0;
+    for (uint32_t i = 0; i < drivers.size(); i++) {
+        options.emplace_back(i, drivers[i].id.empty() ? std::string("system") : drivers[i].id, drivers[i].label);
+        if (drivers[i].id == selected) {
+            selected_index = i;
+        }
+    }
+    const uint32_t install_index = static_cast<uint32_t>(drivers.size());
+    options.emplace_back(install_index, "install", "Install or remove drivers...");
+
+    config.add_enum_option(
+        gpu_driver_option,
+        "GPU Driver",
+        "The Vulkan driver used for rendering: the device's own, or a custom one (e.g. Turnip). "
+        "Takes effect the next time the game starts. In use now: " + dk64::android::active_gpu_driver() + ".",
+        options,
+        selected_index
+    );
+    config.add_option_change_callback(gpu_driver_option,
+        [&config, install_index](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
+            const uint32_t index = std::get<uint32_t>(cur);
+            std::string selected_now;
+            dk64::android::list_gpu_drivers(selected_now);
+            uint32_t actual = 0;
+            for (uint32_t i = 0; i < drivers.size(); i++) {
+                if (drivers[i].id == selected_now) {
+                    actual = i;
+                }
+            }
+            if (context == recomp::config::OptionChangeContext::Load) {
+                // The Android side keeps the choice (it can also change outside the game);
+                // show its value without marking the tab as changed.
+                if (index != actual) {
+                    config.set_option_value(gpu_driver_option, actual);
+                    config.apply_option_value(gpu_driver_option);
+                    config.modified_options.clear();
+                }
+                return;
+            }
+            if (context != recomp::config::OptionChangeContext::Permanent) {
+                return;
+            }
+            if (index == install_index) {
+                // Opens the driver manager; the shown value is corrected on the next start.
+                dk64::android::open_gpu_driver_manager();
+                return;
+            }
+            if (index < drivers.size()) {
+                dk64::android::select_gpu_driver(drivers[index].id);
+            }
+        });
+}
+#endif
+
 static void add_graphics_options(recomp::config::Config &config) {
     using EnumOptionVector = const std::vector<recomp::config::ConfigOptionEnumOption>;
     // Cutscene borders
@@ -257,6 +326,9 @@ static void add_graphics_options(recomp::config::Config &config) {
         "Controls the draw distance within the game from 0% (vanilla) to 100% (10x vanilla). Some objects do not get a draw distance increase for technical reasons.",
         0.0f
     );
+#if defined(__ANDROID__)
+    add_gpu_driver_option(config);
+#endif
 }
 
 dk64::CutsceneBordersMode dk64::get_cutscene_borders() {

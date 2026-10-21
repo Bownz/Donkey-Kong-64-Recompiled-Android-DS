@@ -126,7 +126,7 @@ final class GpuDrivers {
         File tmp = new File(c.getCacheDir(), "gpu_driver_tmp");
         tmp.mkdirs();
         return new File(root(c), d.id).getAbsolutePath() + "\n" + d.library + "\n"
-            + c.getApplicationInfo().nativeLibraryDir + "\n" + tmp.getAbsolutePath() + "/";
+            + c.getApplicationInfo().nativeLibraryDir + "\n" + tmp.getAbsolutePath() + "/" + "\n" + d.label();
     }
 
     /** The game has been running a while with the selected driver: it works. */
