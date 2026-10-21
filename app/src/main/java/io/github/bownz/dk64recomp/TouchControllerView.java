@@ -178,7 +178,11 @@ public final class TouchControllerView extends View {
         if (!active) {
             releaseAll();
         }
-        TouchInput.setEnabled(active);
+        if (active) {
+            TouchInput.acquire();
+        } else {
+            TouchInput.release();
+        }
         setVisibility(active ? VISIBLE : GONE);
     }
 
@@ -293,7 +297,7 @@ public final class TouchControllerView extends View {
                     return false;
                 }
                 // The gamepad can only be created once SDL is running; retry lazily.
-                TouchInput.setEnabled(true);
+                TouchInput.ensure();
                 break;
             }
             case MotionEvent.ACTION_MOVE: {

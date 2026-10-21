@@ -10,17 +10,16 @@ import android.view.WindowManager;
 import android.widget.FrameLayout;
 
 /**
- * Shows the touch controller full-size on a second display, such as the lower screen of a
- * dual-screen handheld. The game keeps the main display to itself, and the controller
- * doesn't cover any of the picture.
+ * Content for a second display, such as the lower screen of a dual-screen handheld (AYN Thor):
+ * DK64 action buttons ({@link ActionPadView}). The game keeps the main display to itself.
  *
  * A Presentation is a window that belongs to the activity, so it is only shown while the
  * activity is in the foreground; DK64Activity creates and dismisses it with the lifecycle.
  */
-final class ControllerPresentation extends Presentation {
-    private TouchControllerView controller;
+final class SecondScreenPresentation extends Presentation {
+    private ActionPadView actionPad;
 
-    ControllerPresentation(Context outerContext, Display display) {
+    SecondScreenPresentation(Context outerContext, Display display) {
         super(outerContext, display);
     }
 
@@ -38,23 +37,22 @@ final class ControllerPresentation extends Presentation {
 
         FrameLayout root = new FrameLayout(getContext());
         root.setBackgroundColor(Color.rgb(18, 18, 22));
-        controller = new TouchControllerView(getContext());
-        controller.setOpacity(1f); // It has the screen to itself.
-        root.addView(controller, new FrameLayout.LayoutParams(
+        actionPad = new ActionPadView(getContext());
+        root.addView(actionPad, new FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         setContentView(root);
 
-        controller.setActive(true);
+        actionPad.setActive(true);
     }
 
-    TouchControllerView getController() {
-        return controller;
+    ActionPadView getActionPad() {
+        return actionPad;
     }
 
     @Override
     protected void onStop() {
-        if (controller != null) {
-            controller.setActive(false);
+        if (actionPad != null) {
+            actionPad.setActive(false);
         }
         super.onStop();
     }

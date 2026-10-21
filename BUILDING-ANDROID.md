@@ -13,7 +13,8 @@ Vulkan 1.1 GPU.
 | Manifest | `app/src/main/AndroidManifest.xml` | One landscape SDL activity, requires Vulkan 1.1 |
 | Activity | `app/src/main/java/.../DK64Activity.java` | Extends `SDLActivity`: lifecycle, immersive fullscreen, asset extraction, file picker, places the touch controls |
 | Storage | `app/src/main/java/.../StorageAccess.java` | First-launch choice of shared folder vs app storage, and the storage permission flow |
-| Touch controls | `TouchControllerView.java`, `ControllerPresentation.java`, `TouchInput.java`, `android/jni/touch_controller.cpp` | On-screen N64 controller driving an SDL virtual gamepad; on a second screen when there is one |
+| Touch controls | `TouchControllerView.java`, `TouchInput.java`, `android/jni/touch_controller.cpp` | On-screen N64 controller driving an SDL virtual gamepad, when there's no physical gamepad |
+| Second screen | `SecondScreenPresentation.java`, `ActionPadView.java` | Z+C action buttons on a second display (e.g. AYN Thor) |
 | Native entry | `android/jni/android_main.cpp` | `SDL_main` → sets paths and working directory → calls the desktop `main` |
 | File dialogs | `android/jni/nfd_android.cpp` | Replaces nativefiledialog-extended with Android's document picker |
 | CMake glue | `android/cmake/android.cmake` | Builds SDL2 from source, makes the game target `libmain.so` |
@@ -295,8 +296,9 @@ Requires `ninja` on `PATH`.
     C-buttons, D-pad, Start, and ☰ for the recomp menu. It works like a normal controller,
     so you can remap it in the game's settings. Touches outside the controls go to the game,
     so the launcher's menus work by touch.
-  - On a device with a **second screen** (e.g. a dual-screen handheld), the controller goes on
-    that screen at full size and the game keeps the main screen uncovered.
+  - On a device with a **second screen** (e.g. the AYN Thor's lower screen), that screen shows
+    one-tap **action buttons** for the Z + C moves: fruit weapon (Z+C◀), orange (Z+C▶),
+    instrument (Z+C▲) and fairy camera (Z+C▼). They work alongside the built-in controls.
   - Connecting or disconnecting a controller or display switches this live.
 
 ## Known limitations

@@ -44,8 +44,9 @@ import java.util.concurrent.CountDownLatch;
  *  - Storage: where saves, mods and the ROM live, with the permission flow
  *    ({@link StorageAccess}); the native side asks via {@link #getDataDirectory()}.
  *  - A blocking document picker that the native nfd replacement calls over JNI.
- *  - Touch controls ({@link TouchControllerView}) as an overlay, or on a second screen
- *    ({@link ControllerPresentation}), hidden whenever a physical gamepad is present.
+ *  - Touch controls ({@link TouchControllerView}) as an overlay when there's no physical
+ *    gamepad, and DK64 action buttons ({@link ActionPadView}) on a second screen if there is
+ *    one ({@link SecondScreenPresentation}).
  *  - Game-friendly window behaviour: immersive fullscreen, screen kept on, drawing into
  *    the display cutout, sustained-performance mode.
  */
@@ -62,7 +63,7 @@ public class DK64Activity extends SDLActivity
     private StorageAccess storage;
 
     private TouchControllerView overlay;
-    private ControllerPresentation presentation;
+    private SecondScreenPresentation presentation;
     private InputManager inputManager;
     private DisplayManager displayManager;
     private boolean started;
@@ -127,8 +128,8 @@ public class DK64Activity extends SDLActivity
         if (overlay != null) {
             overlay.releaseAll();
         }
-        if (presentation != null && presentation.getController() != null) {
-            presentation.getController().releaseAll();
+        if (presentation != null && presentation.getActionPad() != null) {
+            presentation.getActionPad().cancel();
         }
         inputManager.unregisterInputDeviceListener(this);
         displayManager.unregisterDisplayListener(this);
@@ -146,7 +147,7 @@ public class DK64Activity extends SDLActivity
     @Override
     protected void onDestroy() {
         dismissPresentation();
-        TouchInput.setEnabled(false);
+        TouchInput.shutdown();
         super.onDestroy();
     }
 
@@ -156,6 +157,9 @@ public class DK64Activity extends SDLActivity
         if (hasFocus) {
             // System bars come back after dialogs, the notification shade, etc.
             hideSystemBars();
+            // By now the game has usually started SDL: create the shared virtual gamepad if
+            // the overlay or action pad wanted it before SDL was ready.
+            TouchInput.ensure();
         }
     }
 
@@ -222,30 +226,24 @@ public class DK64Activity extends SDLActivity
     // ------------------------------------------------------------------------------
 
     /**
-     * Physical gamepad present (including a handheld's built-in controls): no touch controls.
-     * Otherwise, a second display if there is one (e.g. a dual-screen handheld's lower
-     * screen), else an overlay on the game.
+     * Main screen: the touch controller overlay, only when there's no physical gamepad
+     * (a handheld's built-in controls count as one).
+     * Second display, if any (e.g. the AYN Thor's lower screen): DK64 action buttons, always,
+     * since they add one-tap Z+C moves on top of whatever controls are in use.
      */
     private void updateTouchControls() {
         if (overlay == null) {
             return;
         }
 
-        boolean gamepad = hasPhysicalGamepad();
-        Display second = (!gamepad && started) ? findControllerDisplay() : null;
+        overlay.setActive(!hasPhysicalGamepad());
 
-        // Switch off the old place before switching on the new one: both drive the same
-        // virtual gamepad.
+        Display second = started ? findSecondDisplay() : null;
         if (second == null || (presentation != null && presentation.getDisplay().getDisplayId() != second.getDisplayId())) {
             dismissPresentation();
         }
-        if (second != null) {
-            overlay.setActive(false);
-            if (presentation == null) {
-                showPresentation(second);
-            }
-        } else {
-            overlay.setActive(!gamepad);
+        if (second != null && presentation == null) {
+            showPresentation(second);
         }
     }
 
@@ -265,7 +263,7 @@ public class DK64Activity extends SDLActivity
     }
 
     /** A display other than ours that can host a presentation, if any. */
-    private Display findControllerDisplay() {
+    private Display findSecondDisplay() {
         Display ours = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
             ? getDisplay() : getDefaultDisplayLegacy();
         for (Display display : displayManager.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION)) {
@@ -283,24 +281,23 @@ public class DK64Activity extends SDLActivity
 
     private void showPresentation(Display display) {
         try {
-            presentation = new ControllerPresentation(this, display);
+            presentation = new SecondScreenPresentation(this, display);
             presentation.setOnDismissListener(d -> {
                 if (presentation == d) {
                     presentation = null;
                 }
             });
             presentation.show();
-            Log.i(TAG, "Touch controller on display " + display.getDisplayId() + " (" + display.getName() + ")");
+            Log.i(TAG, "Action buttons on display " + display.getDisplayId() + " (" + display.getName() + ")");
         } catch (WindowManager.InvalidDisplayException e) {
             Log.w(TAG, "Second display went away", e);
             presentation = null;
-            overlay.setActive(!hasPhysicalGamepad());
         }
     }
 
     private void dismissPresentation() {
         if (presentation != null) {
-            ControllerPresentation old = presentation;
+            SecondScreenPresentation old = presentation;
             presentation = null;
             old.dismiss();
         }

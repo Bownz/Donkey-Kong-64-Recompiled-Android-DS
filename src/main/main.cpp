@@ -344,6 +344,43 @@ void queue_samples(int16_t* audio_data, size_t sample_count) {
     // Queue the swapped audio data.
     // Offset the data start by only half the discarded frame count as the other half of the discarded frames are at the end of the buffer.
     SDL_QueueAudio(audio_device, samples_to_queue, num_bytes_to_queue);
+
+#if defined(__ANDROID__)
+    // Diagnostics: every 5 s, log how much audio the game generated compared to real time
+    // and how full the output queue ran. Below ~100% means the game is running slower than
+    // the N64 would, so the speaker runs dry and audio breaks up.
+    {
+        static uint64_t window_start_ms = 0;
+        static uint64_t produced_frames = 0;
+        static uint32_t chunks = 0, skipped_chunks = 0;
+        static uint64_t min_queued_us = UINT64_MAX, max_queued_us = 0;
+
+        const uint64_t now_ms = SDL_GetTicks64();
+        if (window_start_ms == 0) {
+            window_start_ms = now_ms;
+        }
+        produced_frames += sample_count / input_channels;
+        chunks++;
+        if (skip_factor != 0) {
+            skipped_chunks++;
+        }
+        min_queued_us = std::min(min_queued_us, cur_queued_microseconds);
+        max_queued_us = std::max(max_queued_us, cur_queued_microseconds);
+
+        const uint64_t elapsed_ms = now_ms - window_start_ms;
+        if (elapsed_ms >= 5000) {
+            const double expected_frames = double(sample_rate) * double(elapsed_ms) / 1000.0;
+            printf("Audio stats: game produced %.0f%% of real time (%u Hz), %u chunks, %u trimmed, queue %llu-%llu ms\n",
+                100.0 * double(produced_frames) / expected_frames, sample_rate, chunks, skipped_chunks,
+                (unsigned long long)(min_queued_us / 1000), (unsigned long long)(max_queued_us / 1000));
+            window_start_ms = now_ms;
+            produced_frames = 0;
+            chunks = skipped_chunks = 0;
+            min_queued_us = UINT64_MAX;
+            max_queued_us = 0;
+        }
+    }
+#endif
 }
 
 size_t get_frames_remaining() {

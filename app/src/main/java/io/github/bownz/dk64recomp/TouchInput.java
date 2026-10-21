@@ -41,10 +41,41 @@ final class TouchInput {
     /** Sticks take -1..1 (down/right positive), triggers take 0..1. */
     static native void nativeSetAxis(int axis, float value);
 
+    // Several on-screen controls (the overlay controller, the second-screen action pad) share
+    // one virtual gamepad. It exists while at least one of them holds it.
+    private static int users = 0;
+
+    /** Starts using the virtual gamepad (creating it if needed). Pair with {@link #release()}. */
+    static synchronized void acquire() {
+        users++;
+        setEnabled(true);
+    }
+
+    /** Stops using it; the gamepad is removed once nothing uses it. */
+    static synchronized void release() {
+        if (users > 0) {
+            users--;
+        }
+        if (users == 0) {
+            setEnabled(false);
+        }
+    }
+
+    /** Retries creating the gamepad if it's in use but the game hadn't started SDL yet. */
+    static synchronized void ensure() {
+        setEnabled(users > 0);
+    }
+
     // The natives live in libmain.so, which SDLActivity loads before any view exists.
     // A call that races library loading must not crash the app.
-    static void setEnabled(boolean enabled) {
+    private static void setEnabled(boolean enabled) {
         try { nativeSetEnabled(enabled); } catch (UnsatisfiedLinkError ignored) { }
+    }
+
+    /** Removes the gamepad regardless of users, e.g. when the activity is destroyed. */
+    static synchronized void shutdown() {
+        users = 0;
+        setEnabled(false);
     }
 
     static void setButton(int button, boolean pressed) {
