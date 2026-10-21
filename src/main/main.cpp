@@ -393,7 +393,11 @@ bool reset_audio(uint32_t output_freq) {
         .format = AUDIO_F32,
         .channels = (Uint8)output_channels,
         .silence = 0, // calculated
+#if defined(__ANDROID__)
+        .samples = 0x400, // ~21 ms: Android audio needs more headroom than desktop to avoid underruns
+#else
         .samples = 0x100, // Fairly small sample count to reduce the latency of internal buffering
+#endif
         .padding = 0, // unused
         .size = 0, // calculated
         .callback = nullptr,

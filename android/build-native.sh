@@ -63,6 +63,16 @@ if [ ! -f "$SDL_DIR/CMakeLists.txt" ]; then
     tar -xzf "$archive" -C "$(dirname "$SDL_DIR")"
 fi
 
+# SDL fixes. SDL sits inside this work tree (git-ignored), so apply from the repository root
+# with --directory; from inside the SDL folder git apply silently does nothing.
+sdl_rel="${SDL_DIR#"$ROOT"/}"
+if git -C "$ROOT" apply --reverse --check --ignore-whitespace --directory="$sdl_rel" "$ROOT/android/patches/sdl2-android.patch" 2>/dev/null; then
+    echo "  sdl2-android.patch: already applied"
+else
+    git -C "$ROOT" apply --ignore-whitespace --whitespace=nowarn --directory="$sdl_rel" "$ROOT/android/patches/sdl2-android.patch"
+    echo "  sdl2-android.patch: applied"
+fi
+
 # 3. Submodule patches (idempotent).
 step "Applying Android patches to submodules"
 apply_patch() {

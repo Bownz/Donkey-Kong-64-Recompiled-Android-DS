@@ -72,7 +72,27 @@ def ensurePatches = {
     }
 }
 
+// Fixes for the downloaded SDL2 source (android/patches/sdl2-android.patch). SDL lives inside
+// this repository's work tree (git-ignored), so git apply has to run from the repository
+// root with --directory; run from inside the SDL folder it silently applies nothing.
+def ensureSdlPatch = {
+    def patchFile = new File(repoRoot, 'android/patches/sdl2-android.patch').absolutePath
+    def sdlRelative = repoRoot.toPath().relativize(sdlDir.toPath()).toString().replace('\\', '/')
+    def (alreadyApplied, ignored) = runCommand(
+        ['git', 'apply', '--reverse', '--check', '--ignore-whitespace', "--directory=${sdlRelative}", patchFile], repoRoot)
+    if (alreadyApplied == 0) {
+        return
+    }
+    def (code, output) = runCommand(
+        ['git', 'apply', '--ignore-whitespace', '--whitespace=nowarn', "--directory=${sdlRelative}", patchFile], repoRoot)
+    if (code != 0) {
+        throw new GradleException("Could not apply sdl2-android.patch to ${sdlRelative}:\n${output}")
+    }
+    logger.lifecycle("Applied android/patches/sdl2-android.patch")
+}
+
 ensureSdl2()
+ensureSdlPatch()
 ensurePatches()
 
 def signingValue = { String name -> System.getenv(name) ?: findProperty(name) }

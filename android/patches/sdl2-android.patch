@@ -1,0 +1,41 @@
+diff --git a/src/audio/aaudio/SDL_aaudio.c b/src/audio/aaudio/SDL_aaudio.c
+index 93bcaf3..b14fe5b 100644
+--- a/src/audio/aaudio/SDL_aaudio.c
++++ b/src/audio/aaudio/SDL_aaudio.c
+@@ -300,15 +300,28 @@ static void aaudio_PlayDevice(_THIS)
+ {
+     struct SDL_PrivateAudioData *private = this->hidden;
+     aaudio_result_t res;
+-    int64_t timeoutNanoseconds = 1 * 1000 * 1000; /* 8 ms */
+-    res = ctx.AAudioStream_write(private->stream, private->mixbuf, private->mixlen / private->frame_size, timeoutNanoseconds);
+-    if (res < 0) {
+-        LOGI("%s : %s", __func__, ctx.AAudio_convertResultToText(res));
+-        if (RecoverAAudioDevice(this) < 0) {
+-            return;  /* oh well, we went down hard. */
++    /* DK64 Android port: write the whole buffer. Upstream writes once with a 1 ms timeout and
++       drops whatever didn't fit, which makes audio choppy whenever the device buffer is
++       momentarily full. Block (bounded) until every frame is accepted instead; the wait is
++       what paces the audio thread. */
++    const int32_t total_frames = private->mixlen / private->frame_size;
++    const int64_t timeoutNanoseconds = 100 * 1000 * 1000; /* 100 ms per attempt */
++    int32_t written = 0;
++    int attempts = 0;
++    while (written < total_frames && attempts < 4) {
++        res = ctx.AAudioStream_write(private->stream, private->mixbuf + written * private->frame_size,
++                                     total_frames - written, timeoutNanoseconds);
++        if (res < 0) {
++            LOGI("%s : %s", __func__, ctx.AAudio_convertResultToText(res));
++            if (RecoverAAudioDevice(this) < 0) {
++                return;  /* oh well, we went down hard. */
++            }
++            return;
+         }
+-    } else {
+-        LOGI("SDL AAudio play: %d frames, wanted:%d frames", (int)res, private->mixlen / private->frame_size);
++        if (res == 0) {
++            attempts++; /* Timed out without progress (stream paused or stalled). */
++        }
++        written += res;
+     }
+ 
+ #if 0
