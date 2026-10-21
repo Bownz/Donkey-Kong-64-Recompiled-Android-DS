@@ -1,14 +1,27 @@
 package io.github.bownz.dk64recomp;
 
 import android.content.ClipData;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.content.res.AssetManager;
 import android.database.Cursor;
+import android.hardware.display.DisplayManager;
+import android.hardware.input.InputManager;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.PowerManager;
 import android.provider.OpenableColumns;
 import android.util.Log;
+import android.view.Display;
+import android.view.InputDevice;
+import android.view.View;
+import android.view.ViewGroup;
+import android.view.Window;
+import android.view.WindowInsets;
+import android.view.WindowInsetsController;
+import android.view.WindowManager;
 
 import org.libsdl.app.SDLActivity;
 
@@ -25,12 +38,19 @@ import java.util.concurrent.CountDownLatch;
  * Hosts DK64: Recompiled. SDLActivity (compiled from the SDL2 source tree Gradle
  * downloads) loads libSDL2.so and libmain.so and runs SDL_main on its own thread.
  *
- * This subclass adds two things the desktop build gets for free:
- *  1. The UI assets that sit next to the desktop executable are packaged in the APK
- *     and extracted to internal storage, where the native code can open them.
- *  2. A blocking file picker that the native nfd replacement calls over JNI.
+ * On top of SDLActivity this adds:
+ *  - Asset extraction: the UI files that sit next to the desktop executable are packaged in
+ *    the APK and extracted to internal storage, where the native code can open them.
+ *  - Storage: where saves, mods and the ROM live, with the permission flow
+ *    ({@link StorageAccess}); the native side asks via {@link #getDataDirectory()}.
+ *  - A blocking document picker that the native nfd replacement calls over JNI.
+ *  - Touch controls ({@link TouchControllerView}) as an overlay, or on a second screen
+ *    ({@link ControllerPresentation}), hidden whenever a physical gamepad is present.
+ *  - Game-friendly window behaviour: immersive fullscreen, screen kept on, drawing into
+ *    the display cutout, sustained-performance mode.
  */
-public class DK64Activity extends SDLActivity {
+public class DK64Activity extends SDLActivity
+        implements InputManager.InputDeviceListener, DisplayManager.DisplayListener {
     private static final String TAG = "DK64Recomp";
     private static final String ASSET_ROOT = "game";
     private static final int PICK_REQUEST_CODE = 0x6E6664; // "nfd"
@@ -38,6 +58,14 @@ public class DK64Activity extends SDLActivity {
     // Must match RequestMode in android/jni/nfd_android.cpp.
     private static final int MODE_OPEN_FILE = 0;
     private static final int MODE_OPEN_MULTIPLE = 1;
+
+    private StorageAccess storage;
+
+    private TouchControllerView overlay;
+    private ControllerPresentation presentation;
+    private InputManager inputManager;
+    private DisplayManager displayManager;
+    private boolean started;
 
     private final Object pickLock = new Object();
     private CountDownLatch pickLatch;
@@ -48,13 +76,242 @@ public class DK64Activity extends SDLActivity {
         return new String[] { "c++_shared", "SDL2", "main" };
     }
 
+    // ------------------------------------------------------------------------------
+    // Lifecycle
+    // ------------------------------------------------------------------------------
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         // Must finish before SDL starts the native thread, which happens in super.onCreate
         // and later lifecycle callbacks.
         extractAssetsIfNeeded();
+        storage = new StorageAccess(this);
+
         super.onCreate(savedInstanceState);
+
+        configureWindow();
+
+        inputManager = (InputManager) getSystemService(Context.INPUT_SERVICE);
+        displayManager = (DisplayManager) getSystemService(Context.DISPLAY_SERVICE);
+
+        // SDLActivity builds its layout (with the game surface) in onCreate. If the native
+        // libraries failed to load it shows an error instead and mLayout stays null.
+        if (mLayout != null) {
+            overlay = new TouchControllerView(this);
+            mLayout.addView(overlay, new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        }
     }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        started = true;
+        updateTouchControls();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        storage.onResume();
+        inputManager.registerInputDeviceListener(this, null);
+        displayManager.registerDisplayListener(this, null);
+        hideSystemBars();
+        // Controllers or displays may have changed while we were away.
+        updateTouchControls();
+    }
+
+    @Override
+    protected void onPause() {
+        // Nothing may stay held while the game can't see the player's fingers.
+        if (overlay != null) {
+            overlay.releaseAll();
+        }
+        if (presentation != null && presentation.getController() != null) {
+            presentation.getController().releaseAll();
+        }
+        inputManager.unregisterInputDeviceListener(this);
+        displayManager.unregisterDisplayListener(this);
+        super.onPause();
+    }
+
+    @Override
+    protected void onStop() {
+        // A Presentation is a window of this activity: it must go when the activity stops.
+        started = false;
+        dismissPresentation();
+        super.onStop();
+    }
+
+    @Override
+    protected void onDestroy() {
+        dismissPresentation();
+        TouchInput.setEnabled(false);
+        super.onDestroy();
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) {
+            // System bars come back after dialogs, the notification shade, etc.
+            hideSystemBars();
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        if (!storage.onRequestPermissionsResult(requestCode)) {
+            super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        }
+    }
+
+    private void configureWindow() {
+        Window window = getWindow();
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+
+        // Use the whole panel, including the area beside a notch or camera cutout.
+        WindowManager.LayoutParams attributes = window.getAttributes();
+        attributes.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+        window.setAttributes(attributes);
+
+        // Steadier clocks over a long session instead of bursts followed by throttling.
+        PowerManager power = (PowerManager) getSystemService(Context.POWER_SERVICE);
+        if (power != null && power.isSustainedPerformanceModeSupported()) {
+            window.setSustainedPerformanceMode(true);
+        }
+    }
+
+    @SuppressWarnings("deprecation")
+    private void hideSystemBars() {
+        Window window = getWindow();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            window.setDecorFitsSystemWindows(false);
+            WindowInsetsController controller = window.getInsetsController();
+            if (controller != null) {
+                controller.hide(WindowInsets.Type.systemBars());
+                controller.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            }
+        } else {
+            window.getDecorView().setSystemUiVisibility(
+                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    | View.SYSTEM_UI_FLAG_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
+        }
+    }
+
+    // ------------------------------------------------------------------------------
+    // Storage (called from android/jni/android_main.cpp before the game starts)
+    // ------------------------------------------------------------------------------
+
+    /**
+     * Where saves, config, mods and the imported ROM go. On first launch this asks the
+     * player (and requests the storage permission if needed), blocking the native thread
+     * until they answer. That happens before the game creates its window.
+     */
+    @SuppressWarnings("unused")
+    public String getDataDirectory() {
+        return storage.resolveDataDirectory();
+    }
+
+    // ------------------------------------------------------------------------------
+    // Touch controls: overlay, second screen, or none
+    // ------------------------------------------------------------------------------
+
+    /**
+     * Physical gamepad present (including a handheld's built-in controls): no touch controls.
+     * Otherwise, a second display if there is one (e.g. a dual-screen handheld's lower
+     * screen), else an overlay on the game.
+     */
+    private void updateTouchControls() {
+        if (overlay == null) {
+            return;
+        }
+
+        boolean gamepad = hasPhysicalGamepad();
+        Display second = (!gamepad && started) ? findControllerDisplay() : null;
+
+        // Switch off the old place before switching on the new one: both drive the same
+        // virtual gamepad.
+        if (second == null || (presentation != null && presentation.getDisplay().getDisplayId() != second.getDisplayId())) {
+            dismissPresentation();
+        }
+        if (second != null) {
+            overlay.setActive(false);
+            if (presentation == null) {
+                showPresentation(second);
+            }
+        } else {
+            overlay.setActive(!gamepad);
+        }
+    }
+
+    private boolean hasPhysicalGamepad() {
+        for (int id : InputDevice.getDeviceIds()) {
+            InputDevice device = InputDevice.getDevice(id);
+            if (device == null || device.isVirtual()) {
+                continue;
+            }
+            int sources = device.getSources();
+            if ((sources & InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD
+                    || (sources & InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** A display other than ours that can host a presentation, if any. */
+    private Display findControllerDisplay() {
+        Display ours = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+            ? getDisplay() : getDefaultDisplayLegacy();
+        for (Display display : displayManager.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION)) {
+            if (display.getDisplayId() != ours.getDisplayId() && display.isValid()) {
+                return display;
+            }
+        }
+        return null;
+    }
+
+    @SuppressWarnings("deprecation")
+    private Display getDefaultDisplayLegacy() {
+        return getWindowManager().getDefaultDisplay();
+    }
+
+    private void showPresentation(Display display) {
+        try {
+            presentation = new ControllerPresentation(this, display);
+            presentation.setOnDismissListener(d -> {
+                if (presentation == d) {
+                    presentation = null;
+                }
+            });
+            presentation.show();
+            Log.i(TAG, "Touch controller on display " + display.getDisplayId() + " (" + display.getName() + ")");
+        } catch (WindowManager.InvalidDisplayException e) {
+            Log.w(TAG, "Second display went away", e);
+            presentation = null;
+            overlay.setActive(!hasPhysicalGamepad());
+        }
+    }
+
+    private void dismissPresentation() {
+        if (presentation != null) {
+            ControllerPresentation old = presentation;
+            presentation = null;
+            old.dismiss();
+        }
+    }
+
+    @Override public void onInputDeviceAdded(int deviceId) { updateTouchControls(); }
+    @Override public void onInputDeviceRemoved(int deviceId) { updateTouchControls(); }
+    @Override public void onInputDeviceChanged(int deviceId) { updateTouchControls(); }
+    @Override public void onDisplayAdded(int displayId) { updateTouchControls(); }
+    @Override public void onDisplayRemoved(int displayId) { updateTouchControls(); }
+    @Override public void onDisplayChanged(int displayId) { }
 
     // ------------------------------------------------------------------------------
     // Asset extraction
@@ -117,8 +374,9 @@ public class DK64Activity extends SDLActivity {
 
     /**
      * Called from a native (non-UI) thread. Shows the system picker, waits for the user,
-     * copies the chosen documents into app storage and returns their paths separated by
-     * '\n', or null if the user cancelled.
+     * and returns real paths for the chosen documents, separated by '\n', or null if the
+     * user cancelled. Documents the app can read directly (shared-folder mode) are used in
+     * place; anything else is copied into app storage first.
      */
     @SuppressWarnings("unused")
     public String nfdRequest(int mode) {
@@ -179,11 +437,14 @@ public class DK64Activity extends SDLActivity {
             StringBuilder paths = new StringBuilder();
             for (Uri uri : uris) {
                 try {
-                    File copy = importDocument(uri);
+                    File file = storage.directFileFor(uri);
+                    if (file == null) {
+                        file = importDocument(uri);
+                    }
                     if (paths.length() > 0) {
                         paths.append('\n');
                     }
-                    paths.append(copy.getAbsolutePath());
+                    paths.append(file.getAbsolutePath());
                 } catch (IOException e) {
                     Log.e(TAG, "Could not import " + uri, e);
                 }
@@ -199,7 +460,7 @@ public class DK64Activity extends SDLActivity {
         }
     }
 
-    /** Copies a picked document into <external files>/imports, keeping its display name. */
+    /** Copies a picked document into <app external files>/imports, keeping its display name. */
     private File importDocument(Uri uri) throws IOException {
         File base = getExternalFilesDir(null);
         if (base == null) {

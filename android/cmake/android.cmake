@@ -107,7 +107,9 @@ function(dk64_configure_android_target target)
     # Android shim can set up paths first and then call it.
     set_source_files_properties("${CMAKE_SOURCE_DIR}/src/main/main.cpp"
         PROPERTIES COMPILE_DEFINITIONS "main=dk64_main")
-    target_sources(${target} PRIVATE "${CMAKE_SOURCE_DIR}/android/jni/android_main.cpp")
+    target_sources(${target} PRIVATE
+        "${CMAKE_SOURCE_DIR}/android/jni/android_main.cpp"
+        "${CMAKE_SOURCE_DIR}/android/jni/touch_controller.cpp")
 
     target_link_libraries(${target} PRIVATE SDL2::SDL2 android log)
 

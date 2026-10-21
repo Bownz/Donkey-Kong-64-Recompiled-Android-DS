@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     android:installLocation="auto">
 
     <!-- RT64 renders through Vulkan only; there is no GLES fallback.
@@ -28,8 +29,14 @@
     <!-- The in-game mod browser downloads mods over HTTPS (libcurl). -->
     <uses-permission android:name="android.permission.INTERNET" />
 
-    <!-- No storage permission is needed: the ROM is chosen with the system document
-         picker and copied into app-specific storage. -->
+    <!-- Storage. Only used if the player picks the shared "DK64Recompiled" folder on first
+         launch (StorageAccess); app storage and the document picker need no permission.
+         Android 9-10 use the classic permissions; Android 11+ uses "All files access",
+         which the player grants on a Settings screen. -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
 
     <application
         android:label="@string/app_name"
@@ -40,9 +47,12 @@
         android:appCategory="game"
         android:hasFragileUserData="true"
         android:enableOnBackInvokedCallback="false"
+        android:requestLegacyExternalStorage="true"
         android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen">
-        <!-- enableOnBackInvokedCallback=false: SDL 2.30 handles Back as a key event, which
-             predictive back (the default when targeting API 36) would swallow. -->
+        <!-- enableOnBackInvokedCallback=false: SDL 2 handles Back as a key event, which
+             predictive back (the default when targeting API 36) would swallow.
+             requestLegacyExternalStorage: lets Android 10 use the shared folder with the
+             classic permission (ignored on 11+, which uses All files access). -->
 
         <!-- SDL routes window, input and lifecycle through this single activity.
              configChanges keeps Android from restarting it (and tearing down the

@@ -11,7 +11,9 @@ Vulkan 1.1 GPU.
 |---|---|---|
 | Gradle project | `settings.gradle`, `build.gradle`, `app/build.gradle` | Builds the CMake project with the NDK, packages the APK |
 | Manifest | `app/src/main/AndroidManifest.xml` | One landscape SDL activity, requires Vulkan 1.1 |
-| Activity | `app/src/main/java/.../DK64Activity.java` | Extends `SDLActivity`; extracts UI assets on first run; hosts the file picker |
+| Activity | `app/src/main/java/.../DK64Activity.java` | Extends `SDLActivity`: lifecycle, immersive fullscreen, asset extraction, file picker, places the touch controls |
+| Storage | `app/src/main/java/.../StorageAccess.java` | First-launch choice of shared folder vs app storage, and the storage permission flow |
+| Touch controls | `TouchControllerView.java`, `ControllerPresentation.java`, `TouchInput.java`, `android/jni/touch_controller.cpp` | On-screen N64 controller driving an SDL virtual gamepad; on a second screen when there is one |
 | Native entry | `android/jni/android_main.cpp` | `SDL_main` → sets paths and working directory → calls the desktop `main` |
 | File dialogs | `android/jni/nfd_android.cpp` | Replaces nativefiledialog-extended with Android's document picker |
 | CMake glue | `android/cmake/android.cmake` | Builds SDL2 from source, makes the game target `libmain.so` |
@@ -99,10 +101,28 @@ Requires `ninja` on `PATH`.
 
 ## On the device
 
-- Pick the ROM from the launcher as usual. Android's file picker opens; the chosen file
-  is copied into the app's folder. Use the normal (compressed) US ROM.
-- Saves, config and mods live in `Android/data/io.github.bownz.dk64recomp/files/`,
-  reachable over USB or with a file manager.
+- **First launch** asks where to keep saves, settings, mods and the ROM:
+  - **Shared folder**: `DK64Recompiled` at the top of your storage. Easy to reach from a
+    PC or file manager for mods, and kept if you uninstall. Needs file access: Android 11+
+    opens the "All files access" setting (turn it on, then come back); Android 9–10 shows
+    the usual permission dialog. If access is refused, the game falls back to app storage.
+  - **App storage**: `Android/data/io.github.bownz.dk64recomp/files/`. No permission needed;
+    removed on uninstall.
+
+  To change your mind later, clear the app's data (or reinstall).
+- **Pick the ROM** from the launcher as usual. Android's file picker opens. In shared-folder
+  mode a ROM on your storage is used in place; otherwise it's copied into the app's folder.
+  Use the normal (compressed) US ROM.
+- **Controls**:
+  - A physical gamepad, including a handheld's built-in controls, is used automatically and
+    hides the touch controls.
+  - With no gamepad, an on-screen N64 controller appears: analog stick, A, B, Z, R,
+    C-buttons, D-pad, Start, and ☰ for the recomp menu. It works like a normal controller,
+    so you can remap it in the game's settings. Touches outside the controls go to the game,
+    so the launcher's menus work by touch.
+  - On a device with a **second screen** (e.g. a dual-screen handheld), the controller goes on
+    that screen at full size and the game keeps the main screen uncovered.
+  - Connecting or disconnecting a controller or display switches this live.
 
 ## Known limitations
 
@@ -113,5 +133,5 @@ Requires `ninja` on `PATH`.
 - **Mod function patching** uses `mprotect` on code pages; recent Android versions may
   refuse this for app libraries. The base game doesn't need it.
 - Folder and save dialogs are not available (Android's picker returns documents, not paths).
-- No touch controls yet; use a controller.
+- Touch controls have a fixed layout; there's no editor for button positions or size yet.
 - The mod browser's HTTPS downloads may need a CA bundle configured for libcurl.

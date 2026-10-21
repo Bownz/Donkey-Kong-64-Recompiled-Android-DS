@@ -8,6 +8,7 @@
 #include <SDL.h>
 #include <SDL_system.h>
 #include <android/log.h>
+#include <jni.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -45,6 +46,40 @@ namespace {
             }
         }).detach();
     }
+
+    // Asks DK64Activity.getDataDirectory() where saves, config, mods and the ROM go. On
+    // first launch that shows the storage choice (and any permission prompt) and blocks
+    // until the user answers, which is why it runs before the game creates its window.
+    std::string data_directory_from_activity() {
+        JNIEnv* env = static_cast<JNIEnv*>(SDL_AndroidGetJNIEnv());
+        jobject activity = static_cast<jobject>(SDL_AndroidGetActivity());
+        if (env == nullptr || activity == nullptr) {
+            return {};
+        }
+
+        std::string result;
+        jclass activity_class = env->GetObjectClass(activity);
+        jmethodID method = env->GetMethodID(activity_class, "getDataDirectory", "()Ljava/lang/String;");
+        if (method == nullptr) {
+            env->ExceptionClear();
+        }
+        else {
+            auto path = static_cast<jstring>(env->CallObjectMethod(activity, method));
+            if (env->ExceptionCheck()) {
+                env->ExceptionDescribe();
+                env->ExceptionClear();
+            }
+            else if (path != nullptr) {
+                const char* chars = env->GetStringUTFChars(path, nullptr);
+                result = chars;
+                env->ReleaseStringUTFChars(path, chars);
+                env->DeleteLocalRef(path);
+            }
+        }
+        env->DeleteLocalRef(activity_class);
+        env->DeleteLocalRef(activity);
+        return result;
+    }
 }
 
 extern "C" int SDL_main(int argc, char* argv[]) {
@@ -53,8 +88,10 @@ extern "C" int SDL_main(int argc, char* argv[]) {
     // Internal storage: private to the app. DK64Activity extracts the UI assets,
     // icons and controller database from the APK into <internal>/game.
     const char* internal_path = SDL_AndroidGetInternalStoragePath();
-    // External app storage (Android/data/<package>/files): visible over USB and in
-    // file managers, so saves, config, mods and the imported ROM live here.
+    // User data: either a shared "DK64Recompiled" folder (with the storage permission) or
+    // the app's own external folder (Android/data/<package>/files). Both are reachable over
+    // USB and in file managers. DK64Activity decides; this is the fallback.
+    const std::string chosen_data_path = data_directory_from_activity();
     const char* external_path = SDL_AndroidGetExternalStoragePath();
 
     if (internal_path == nullptr) {
@@ -63,8 +100,8 @@ extern "C" int SDL_main(int argc, char* argv[]) {
     }
 
     const std::filesystem::path game_dir = std::filesystem::path{internal_path} / "game";
-    const std::filesystem::path data_dir = external_path != nullptr
-        ? std::filesystem::path{external_path}
+    const std::filesystem::path data_dir = !chosen_data_path.empty() ? std::filesystem::path{chosen_data_path}
+        : external_path != nullptr ? std::filesystem::path{external_path}
         : std::filesystem::path{internal_path} / "data";
 
     std::error_code ec;
