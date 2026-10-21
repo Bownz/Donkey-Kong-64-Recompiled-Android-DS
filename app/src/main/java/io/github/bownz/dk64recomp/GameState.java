@@ -30,7 +30,7 @@ final class GameState {
     int oranges;
     int crystals;
     int film;
-    int freedKongs;            // bit k: Kong k has been freed
+    int progress;              // bits 0-4: Kong k freed; 5: oranges learned; 6: camera
     final Kong[] kongs = new Kong[KONG_COUNT];
 
     private final int[] raw = new int[COUNT];
@@ -79,13 +79,23 @@ final class GameState {
             kong.goldenBananas = raw[base + 4];
             kong.colouredBananas = raw[base + 5];
         }
-        freedKongs = raw[8 + KONG_COUNT * 6];
+        progress = raw[8 + KONG_COUNT * 6];
         return true;
     }
 
     /** Whether Kong k is playable: freed, or the one being played (DK always is). */
     boolean isFreed(int k) {
-        return k == DK || k == currentKong || (freedKongs & (1 << k)) != 0;
+        return k == DK || k == currentKong || (progress & (1 << k)) != 0;
+    }
+
+    /** Orange grenades learned (training barrel). */
+    boolean hasOranges() {
+        return (progress & (1 << 5)) != 0;
+    }
+
+    /** Fairy camera received. */
+    boolean hasCamera() {
+        return (progress & (1 << 6)) != 0;
     }
 
     /**

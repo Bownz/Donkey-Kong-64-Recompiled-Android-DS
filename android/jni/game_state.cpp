@@ -23,8 +23,9 @@ namespace {
     constexpr uint32_t kFileBitsBase = 0x807ECEA0;          // s16, used to size a save file
     constexpr uint32_t kFileMapping = 0x807EDEA8;           // u8[4]: file index per slot
     constexpr uint32_t kCurrentFile = 0x807467C8;           // u8
-    // "Kong freed" flags for DK, Diddy, Lanky, Tiny, Chunky.
-    constexpr int16_t kKongFreedFlags[5] = { 0x181, 0x006, 0x046, 0x042, 0x075 };
+    // Reported as bits: "Kong freed" for DK, Diddy, Lanky, Tiny, Chunky, then orange
+    // throwing (training barrel) and the fairy camera (with Shockwave).
+    constexpr int16_t kProgressFlags[7] = { 0x181, 0x006, 0x046, 0x042, 0x075, 0x184, 0x179 };
 
     // PlayerProgress layout.
     constexpr uint32_t kCharacterProgressSize = 0x5E;       // 6 entries at offset 0
@@ -54,8 +55,8 @@ namespace {
         return *reinterpret_cast<const uint16_t*>(rdram + ((address ^ 2) - 0x80000000u));
     }
 
-    // Bit k set when Kong k has been freed, per the current file's permanent flags.
-    int read_freed_kongs(const uint8_t* rdram) {
+    // Bit i set when kProgressFlags[i] is set in the current file's permanent flags.
+    int read_progress_flags(const uint8_t* rdram) {
         const int32_t bits = static_cast<int16_t>(read_u16(rdram, kFileBitsBase));
         const int32_t file_size_bits = (((bits + 0x6B7) & -64) + 0x27) & -8;
         const uint8_t file = read_u8(rdram, kCurrentFile);
@@ -70,14 +71,14 @@ namespace {
             return 0;
         }
         const uint32_t block = kEepromCopy + slot * static_cast<uint32_t>(file_size_bits / 8);
-        int freed = 0;
-        for (int k = 0; k < 5; k++) {
-            const int16_t flag = kKongFreedFlags[k];
+        int set = 0;
+        for (int i = 0; i < 7; i++) {
+            const int16_t flag = kProgressFlags[i];
             if ((read_u8(rdram, block + (flag >> 3)) >> (flag & 7)) & 1) {
-                freed |= 1 << k;
+                set |= 1 << i;
             }
         }
-        return freed;
+        return set;
     }
 }
 
@@ -91,7 +92,7 @@ extern "C" void dk64_android_set_rdram(uint8_t* rdram) {
 //   [3] standard ammo, [4] homing ammo, [5] oranges, [6] crystals, [7] film,
 //   then for each of the 5 Kongs (8 + k * 6):
 //   weapon, instrument, coins, instrument ammo, golden bananas (total), coloured bananas (total)
-//   then [38] a bitmask of freed Kongs (bit 0 DK ... bit 4 Chunky)
+//   then [38] progress bits: Kongs freed (bit 0 DK ... bit 4 Chunky), 5 oranges, 6 camera
 extern "C" JNIEXPORT jboolean JNICALL
 Java_io_github_bownz_dk64recomp_GameState_nativeRead(JNIEnv* env, jclass, jintArray out) {
     const uint8_t* rdram = g_rdram.load();
@@ -126,7 +127,7 @@ Java_io_github_bownz_dk64recomp_GameState_nativeRead(JNIEnv* env, jclass, jintAr
         dst[5] = coloured;
     }
 
-    values[38] = read_freed_kongs(rdram);
+    values[38] = read_progress_flags(rdram);
 
     env->SetIntArrayRegion(out, 0, kCount, values);
     return JNI_TRUE;

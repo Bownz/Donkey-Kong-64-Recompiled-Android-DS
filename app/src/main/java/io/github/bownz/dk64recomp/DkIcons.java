@@ -223,6 +223,25 @@ final class DkIcons {
         c.drawCircle(cx + r * 0.5f, cy - r * 0.22f, r * 0.08f, fill(Color.rgb(250, 230, 120)));
     }
 
+    /** A single yellow banana. */
+    static void banana(Canvas c, float cx, float cy, float r) {
+        PATH.reset();
+        PATH.moveTo(cx - r * 0.85f, cy - r * 0.45f);
+        PATH.quadTo(cx - r * 0.2f, cy + r * 0.95f, cx + r * 0.85f, cy - r * 0.15f);
+        PATH.quadTo(cx - r * 0.05f, cy + r * 0.35f, cx - r * 0.85f, cy - r * 0.45f);
+        PATH.close();
+        c.drawPath(PATH, fill(Color.rgb(255, 214, 40)));
+        c.drawPath(PATH, stroke(Color.rgb(120, 80, 10), r * 0.1f));
+        c.drawLine(cx + r * 0.85f, cy - r * 0.15f, cx + r * 0.95f, cy - r * 0.35f, stroke(Color.rgb(90, 60, 20), r * 0.14f));
+    }
+
+    /** A gold coin. */
+    static void coin(Canvas c, float cx, float cy, float r) {
+        c.drawCircle(cx, cy, r, fill(Color.rgb(196, 140, 30)));
+        c.drawCircle(cx, cy, r * 0.8f, fill(Color.rgb(248, 200, 60)));
+        c.drawCircle(cx, cy, r * 0.5f, stroke(Color.rgb(196, 140, 30), r * 0.12f));
+    }
+
     static void eye(Canvas c, float cx, float cy, float r) {
         PATH.reset();
         PATH.moveTo(cx - r * 0.85f, cy);

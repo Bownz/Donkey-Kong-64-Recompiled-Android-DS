@@ -31,6 +31,7 @@ final class RomIcons {
     private static final long POINTER_TABLE = 0x101C50;
     private static final int TABLE_COUNT = 32;
     private static final int TEXTURES_UNCOMPRESSED = 7;
+    private static final int TEXTURES_HUD = 14;
     private static final int TEXTURES_GEOMETRY = 25;
 
     /** Where each icon lives: table, file, width, height, stored upside down. */
@@ -80,6 +81,9 @@ final class RomIcons {
     };
 
     static volatile Bitmap melon, orange, film, goldenBanana;
+    // The HUD / pause-screen health melon by quarters left: [0] = 1 quarter ... [3] = full.
+    // The game draws the full one faintly behind the current one (code_10D2D0.c).
+    static final Bitmap[] healthMelon = new Bitmap[4];
     static final Bitmap[] face = new Bitmap[5];
     static final Bitmap[] banana = new Bitmap[5];
     static final Bitmap[] weapon = new Bitmap[5];
@@ -119,6 +123,10 @@ final class RomIcons {
                 film = load(f, FILM);
                 goldenBanana = load(f, GOLDEN_BANANA);
                 int found = count(melon, orange, film, goldenBanana);
+                for (int q = 0; q < 4; q++) {
+                    healthMelon[q] = load(f, new Spec(TEXTURES_HUD, 0x5A + q, 48, 42, true));
+                    found += count(healthMelon[q]);
+                }
                 for (int k = 0; k < 5; k++) {
                     banana[k] = load(f, BANANA[k]);
                     weapon[k] = load(f, WEAPON[k]);
@@ -126,7 +134,7 @@ final class RomIcons {
                     face[k] = loadFace(f, FACE_HALVES[k]);
                     found += count(banana[k], weapon[k], instrument[k], face[k]);
                 }
-                Log.i(TAG, "Bottom screen: " + found + " of 24 icons loaded from the ROM");
+                Log.i(TAG, "Bottom screen: " + found + " of 28 icons loaded from the ROM");
             } catch (IOException | RuntimeException e) {
                 Log.w(TAG, "Bottom screen: couldn't read icons from the ROM", e);
             }
@@ -232,7 +240,7 @@ final class RomIcons {
             if (data == null) {
                 return null;
             }
-            if (spec.table != TEXTURES_UNCOMPRESSED) {
+            if (data.length > 2 && (data[0] & 0xFF) == 0x1F && (data[1] & 0xFF) == 0x8B) {
                 data = gunzip(data);
             }
             return decode(data, spec);
