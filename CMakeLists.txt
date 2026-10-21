@@ -4,18 +4,39 @@ if(NOT DEFINED ENV{VCPKG_ROOT})
     set(ENV{VCPKG_ROOT} ${CMAKE_SOURCE_DIR}/lib/vcpkg)
 endif()
 
-# Android (configured by the Android Gradle plugin, see app/build.gradle): vcpkg is the
-# toolchain file and chain-loads the NDK toolchain. vcpkg's Android triplets locate the
-# NDK through ANDROID_NDK_HOME, so point it at the NDK Gradle selected.
-if(DEFINED ANDROID_ABI AND NOT DEFINED ENV{ANDROID_NDK_HOME})
-    if(DEFINED CMAKE_ANDROID_NDK)
-        set(ENV{ANDROID_NDK_HOME} "${CMAKE_ANDROID_NDK}")
-    elseif(DEFINED ANDROID_NDK)
-        set(ENV{ANDROID_NDK_HOME} "${ANDROID_NDK}")
+# Android: the Android Gradle plugin (or android/build-native.sh) passes the NDK's
+# toolchain file. Route it through vcpkg so curl/freetype are built for Android too:
+# vcpkg becomes the toolchain and chain-loads the NDK's. This must happen before project().
+if(DEFINED ANDROID_ABI)
+    if(NOT CMAKE_TOOLCHAIN_FILE MATCHES "vcpkg\\.cmake$")
+        set(VCPKG_CHAINLOAD_TOOLCHAIN_FILE "${CMAKE_TOOLCHAIN_FILE}" CACHE FILEPATH "NDK toolchain, loaded by vcpkg" FORCE)
+        set(CMAKE_TOOLCHAIN_FILE "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" CACHE FILEPATH "" FORCE)
     endif()
-endif()
 
-if(NOT CMAKE_TOOLCHAIN_FILE MATCHES "vcpkg\\.cmake$")
+    if(NOT DEFINED VCPKG_TARGET_TRIPLET)
+        if(ANDROID_ABI STREQUAL "arm64-v8a")
+            set(VCPKG_TARGET_TRIPLET "arm64-android" CACHE STRING "")
+        elseif(ANDROID_ABI STREQUAL "x86_64")
+            set(VCPKG_TARGET_TRIPLET "x64-android" CACHE STRING "")
+        else()
+            message(FATAL_ERROR "Unsupported ANDROID_ABI '${ANDROID_ABI}' (use arm64-v8a).")
+        endif()
+    endif()
+
+    # vcpkg's Android triplets find the NDK through ANDROID_NDK_HOME.
+    if(NOT DEFINED ENV{ANDROID_NDK_HOME})
+        if(DEFINED CMAKE_ANDROID_NDK)
+            set(ENV{ANDROID_NDK_HOME} "${CMAKE_ANDROID_NDK}")
+        elseif(DEFINED ANDROID_NDK)
+            set(ENV{ANDROID_NDK_HOME} "${ANDROID_NDK}")
+        elseif(VCPKG_CHAINLOAD_TOOLCHAIN_FILE MATCHES "build/cmake/android\\.toolchain\\.cmake$")
+            # <ndk>/build/cmake/android.toolchain.cmake -> <ndk>
+            get_filename_component(_ndk_dir "${VCPKG_CHAINLOAD_TOOLCHAIN_FILE}" DIRECTORY)
+            get_filename_component(_ndk_dir "${_ndk_dir}/../.." ABSOLUTE)
+            set(ENV{ANDROID_NDK_HOME} "${_ndk_dir}")
+        endif()
+    endif()
+elseif(NOT CMAKE_TOOLCHAIN_FILE MATCHES "vcpkg\\.cmake$")
     include($ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake)
 endif()
 

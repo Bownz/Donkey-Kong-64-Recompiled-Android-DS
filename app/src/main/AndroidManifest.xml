@@ -39,7 +39,10 @@
         android:isGame="true"
         android:appCategory="game"
         android:hasFragileUserData="true"
+        android:enableOnBackInvokedCallback="false"
         android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen">
+        <!-- enableOnBackInvokedCallback=false: SDL 2.30 handles Back as a key event, which
+             predictive back (the default when targeting API 36) would swallow. -->
 
         <!-- SDL routes window, input and lifecycle through this single activity.
              configChanges keeps Android from restarting it (and tearing down the

@@ -4,6 +4,8 @@
         "curl",
         {
             "name": "freetype",
+            "default-features": false,
+            "features": [ "zlib" ],
             "platform": "android"
         }
     ]

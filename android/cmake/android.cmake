@@ -17,10 +17,29 @@ if (NOT DEFINED DK64_ANDROID_SDL2_DIR OR NOT EXISTS "${DK64_ANDROID_SDL2_DIR}/CM
         "or pass -DDK64_ANDROID_SDL2_DIR=<path to SDL2 source>.")
 endif()
 
-if (NOT DEFINED RT64_HOST_FILE_TO_C OR NOT EXISTS "${RT64_HOST_FILE_TO_C}")
-    message(FATAL_ERROR
-        "RT64_HOST_FILE_TO_C must point to a file_to_c binary built for the build machine. "
-        "Gradle builds it automatically into build/host-tools.")
+# ---------------------------------------------------------------------------
+# file_to_c for the build machine
+# ---------------------------------------------------------------------------
+# RT64's file_to_c runs during the build, so a copy compiled for Android can't be used.
+# Unless a host binary is supplied, run the equivalent CMake script (file_to_c.cmake)
+# through a small wrapper, so no host C++ compiler is needed (notably on Windows).
+if (NOT DEFINED RT64_HOST_FILE_TO_C)
+    set(_ftc_script "${CMAKE_CURRENT_LIST_DIR}/file_to_c.cmake")
+    if (CMAKE_HOST_WIN32)
+        set(RT64_HOST_FILE_TO_C "${CMAKE_BINARY_DIR}/host-tools/file_to_c.cmd")
+        file(TO_NATIVE_PATH "${CMAKE_COMMAND}" _ftc_cmake)
+        file(TO_NATIVE_PATH "${_ftc_script}" _ftc_script_native)
+        file(WRITE "${RT64_HOST_FILE_TO_C}"
+            "@\"${_ftc_cmake}\" -P \"${_ftc_script_native}\" %*\r\n@exit /b %ERRORLEVEL%\r\n")
+    else()
+        set(RT64_HOST_FILE_TO_C "${CMAKE_BINARY_DIR}/host-tools/file_to_c")
+        file(WRITE "${RT64_HOST_FILE_TO_C}"
+            "#!/bin/sh\nexec \"${CMAKE_COMMAND}\" -P \"${_ftc_script}\" \"$@\"\n")
+        file(CHMOD "${RT64_HOST_FILE_TO_C}" PERMISSIONS
+            OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+    endif()
+elseif (NOT EXISTS "${RT64_HOST_FILE_TO_C}")
+    message(FATAL_ERROR "RT64_HOST_FILE_TO_C is set but does not exist: ${RT64_HOST_FILE_TO_C}")
 endif()
 
 # ---------------------------------------------------------------------------
@@ -42,8 +61,10 @@ if (NOT TARGET SDL2::SDL2)
 endif()
 
 # RT64, plume, ultramodern, recompui and recompinput all expect SDL headers on the
-# include path (desktop builds get them from the system or vcpkg).
-set(SDL2_INCLUDE_DIRS "${DK64_ANDROID_SDL2_DIR}/include")
+# include path (desktop builds get them from the system or vcpkg), some as <SDL.h> and
+# some as <SDL2/SDL_video.h>. SDL's own target exports directories for both styles, plus
+# the config header generated for this build, so use exactly those.
+set(SDL2_INCLUDE_DIRS "$<TARGET_PROPERTY:SDL2,INTERFACE_INCLUDE_DIRECTORIES>")
 include_directories(${SDL2_INCLUDE_DIRS})
 
 # RT64 calls find_package(SDL2 REQUIRED) on every non-Windows platform. Answer it with
@@ -59,6 +80,13 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 # Keeps RT64 away from its X11 code paths. On Android, RT64/plume still build the
 # Vulkan surface from the window's ANativeWindow (see android/patches).
 add_compile_definitions(RT64_SDL_WINDOW_VULKAN)
+
+# ---------------------------------------------------------------------------
+# zstd (bundled with RT64)
+# ---------------------------------------------------------------------------
+# zstd's dictionary builder calls qsort_r, which Android's libc only provides from API 36.
+# RT64 only compresses/decompresses and never builds dictionaries, so leave it out.
+set(ZSTD_BUILD_DICTBUILDER OFF CACHE BOOL "" FORCE)
 
 # ---------------------------------------------------------------------------
 # nfd replacement (must exist before lib/rt64 is added; the rt64 patch checks for it)

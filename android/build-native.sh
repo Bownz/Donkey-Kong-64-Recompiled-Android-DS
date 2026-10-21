@@ -10,22 +10,21 @@
 # APK; keep the two in step (SDL version, CMake arguments).
 #
 # Usage:
-#   ANDROID_NDK_HOME=/path/to/android-ndk-r27c android/build-native.sh
-# Optional: ANDROID_ABI (arm64-v8a), ANDROID_PLATFORM (26), BUILD_TYPE (Release),
+#   ANDROID_NDK_HOME=/path/to/android-ndk-r30 android/build-native.sh
+# Optional: ANDROID_ABI (arm64-v8a), ANDROID_PLATFORM (28), BUILD_TYPE (Release),
 #           BUILD_DIR, OUT_DIR, VCPKG_ROOT.
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-: "${ANDROID_NDK_HOME:?Set ANDROID_NDK_HOME to your Android NDK (r27c recommended)}"
+: "${ANDROID_NDK_HOME:?Set ANDROID_NDK_HOME to your Android NDK (r30 recommended)}"
 ABI="${ANDROID_ABI:-arm64-v8a}"
-API="${ANDROID_PLATFORM:-26}"
+API="${ANDROID_PLATFORM:-28}"
 BUILD_TYPE="${BUILD_TYPE:-Release}"
-SDL_VERSION="2.30.3"
+SDL_VERSION="2.32.10"  # keep in step with app/build.gradle
 BUILD_DIR="${BUILD_DIR:-$ROOT/build/android-$ABI}"
 OUT_DIR="${OUT_DIR:-$ROOT/build/android-libs/$ABI}"
-HOST_TOOLS="$ROOT/build/android-host-tools"
 SDL_DIR="$ROOT/android/third_party/SDL2-$SDL_VERSION"
 VCPKG_ROOT="${VCPKG_ROOT:-$ROOT/lib/vcpkg}"
 
@@ -58,8 +57,8 @@ fi
 # 2. SDL2 source (its Java glue must match, so Gradle uses this same tree).
 if [ ! -f "$SDL_DIR/CMakeLists.txt" ]; then
     step "Downloading SDL2 $SDL_VERSION"
-    mkdir -p "$HOST_TOOLS" "$(dirname "$SDL_DIR")"
-    archive="$HOST_TOOLS/SDL2-$SDL_VERSION.tar.gz"
+    mkdir -p "$ROOT/build/android-downloads" "$(dirname "$SDL_DIR")"
+    archive="$ROOT/build/android-downloads/SDL2-$SDL_VERSION.tar.gz"
     curl -fL -o "$archive" "https://github.com/libsdl-org/SDL/releases/download/release-$SDL_VERSION/SDL2-$SDL_VERSION.tar.gz"
     tar -xzf "$archive" -C "$(dirname "$SDL_DIR")"
 fi
@@ -68,43 +67,32 @@ fi
 step "Applying Android patches to submodules"
 apply_patch() {
     local submodule="$1" patch="$ROOT/$2"
-    if git -C "$ROOT/$submodule" apply --reverse --check "$patch" 2>/dev/null; then
+    if git -C "$ROOT/$submodule" apply --reverse --check --ignore-whitespace "$patch" 2>/dev/null; then
         echo "  $2: already applied"
     else
-        git -C "$ROOT/$submodule" apply --whitespace=nowarn "$patch"
+        git -C "$ROOT/$submodule" apply --ignore-whitespace --whitespace=nowarn "$patch"
         echo "  $2: applied"
     fi
 }
 apply_patch lib/rt64 android/patches/rt64-android.patch
 apply_patch lib/RecompFrontend android/patches/recompfrontend-android.patch
 
-# 4. file_to_c runs during the build, so it is compiled for this machine.
-if [ ! -x "$HOST_TOOLS/file_to_c" ]; then
-    step "Building host file_to_c"
-    cmake -S "$ROOT/lib/rt64/src/tools/file_to_c" -B "$HOST_TOOLS/file_to_c-build" -DCMAKE_BUILD_TYPE=Release >/dev/null
-    cmake --build "$HOST_TOOLS/file_to_c-build" --config Release >/dev/null
-    cp "$(find "$HOST_TOOLS/file_to_c-build" -type f -name file_to_c -perm -u+x | head -n1)" "$HOST_TOOLS/file_to_c"
-fi
-
-# 5. Configure and build with the NDK. vcpkg is the toolchain and chain-loads the NDK's,
-#    so curl and freetype are built for Android too.
+# 4. Configure and build with the NDK. The top-level CMakeLists.txt routes the NDK
+#    toolchain through vcpkg (so curl and freetype are built for Android too) and runs
+#    file_to_c as a CMake script, so no host compiler is needed.
 step "Configuring ($ABI, android-$API, $BUILD_TYPE)"
-export ANDROID_NDK_HOME
 cmake -S "$ROOT" -B "$BUILD_DIR" -G Ninja \
     -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
-    -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
-    -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
-    -DVCPKG_TARGET_TRIPLET="$TRIPLET" \
+    -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
     -DANDROID_ABI="$ABI" \
     -DANDROID_PLATFORM="android-$API" \
     -DANDROID_STL=c++_shared \
-    -DDK64_ANDROID_SDL2_DIR="$SDL_DIR" \
-    -DRT64_HOST_FILE_TO_C="$HOST_TOOLS/file_to_c"
+    -DDK64_ANDROID_SDL2_DIR="$SDL_DIR"
 
 step "Building libmain.so"
 cmake --build "$BUILD_DIR" --target DK64Recompiled
 
-# 6. Collect and strip the libraries an APK needs under lib/<abi>/.
+# 5. Collect and strip the libraries an APK needs under lib/<abi>/.
 step "Collecting libraries into $OUT_DIR"
 mkdir -p "$OUT_DIR"
 cp "$BUILD_DIR/libmain.so" "$BUILD_DIR/libSDL2.so" "$OUT_DIR/"

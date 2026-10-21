@@ -2,7 +2,8 @@
 
 The Android port builds the same top-level `CMakeLists.txt` as the desktop versions,
 driven by Gradle and the NDK. The result is an `arm64-v8a` APK that runs the game
-through SDL2 and RT64's Vulkan renderer.
+through SDL2 and RT64's Vulkan renderer. It needs Android 9 (API 28) or newer and a
+Vulkan 1.1 GPU.
 
 ## How the port is put together
 
@@ -20,69 +21,78 @@ Desktop builds are unaffected: everything Android-specific is behind `if (ANDROI
 
 ## Prerequisites
 
-- Android Studio (recent), with **NDK 27.2.12479018** and **CMake 3.22.1** from the SDK Manager
-- On the build machine: `git`, `cmake`, a C++ compiler, and the tools from `BUILDING.md`
-  (`clang`, `ld.lld`, `make`) — host tools still run here during the build
-- A Linux or macOS build machine (Windows: use WSL). RT64's shader compiler is picked
-  for the host OS.
-- The full submodule checkout, **not shallow** for `lib/vcpkg` (vcpkg needs its history
-  to resolve the `builtin-baseline`)
+- **Android Studio** with, from *SDK Manager → SDK Tools* (tick "Show Package Details"):
+  - **NDK 30.0.16248370** (r30)
+  - **CMake 4.1.2**
+  - SDK Platform **Android 37**
+  The project is set up for AGP 9.4.1 / Gradle 9.6.0, the versions Android Studio
+  currently generates.
+- **Git** on `PATH` (Git for Windows on Windows). Gradle uses it to apply
+  `android/patches/` to two submodules.
+- The full submodule checkout (`git clone --recurse-submodules`). Don't make `lib/vcpkg`
+  shallow: vcpkg needs its history to resolve the `builtin-baseline`.
+- For **generating the recompiled code** (step 1), the same tools as a desktop build:
+  N64Recomp/RSPRecomp, plus `make`, `clang` and `ld.lld` for the `patches/` step
+  (see `BUILDING.md`; on Windows: LLVM and `choco install make`).
+
+No host C++ compiler is needed for the Android part itself: the build-time `file_to_c`
+step runs as a CMake script, and RT64's shader compiler (`dxc`) ships prebuilt for
+Windows, Linux and macOS.
 
 ## Steps
 
-1. **Generate the recompiled code on the host**, exactly as for desktop
-   (`BUILDING.md` steps 3–4). You need `RecompiledFuncs/`, `RecompiledPatches/` and
-   `rsp/n_aspMain.cpp` before Gradle will build.
+1. **Generate the recompiled code**, exactly as for desktop (`BUILDING.md` steps 3–4).
+   You need `RecompiledFuncs/`, `RecompiledPatches/` and `rsp/n_aspMain.cpp` before
+   the APK will build.
 
-   ```bash
-   ./N64Recomp us.toml
-   ./RSPRecomp n_aspMain.toml
+   ```
+   N64Recomp us.toml
+   RSPRecomp n_aspMain.toml
    ```
 
-2. **Bootstrap vcpkg** once (it builds curl and freetype for Android):
-
-   ```bash
-   ./lib/vcpkg/bootstrap-vcpkg.sh
-   ```
-
-3. **Open the repository root in Android Studio** and let it sync. On the first sync,
-   Gradle will:
-   - download SDL2 2.30.3 into `android/third_party/` (SDLActivity's Java comes from here)
+2. **Open the repository root in Android Studio** (*File → Open*, pick the folder with
+   `settings.gradle`) and let it sync. On the first sync, Gradle will:
+   - download SDL2 2.32.10 into `android/third_party/` (SDLActivity's Java comes from here)
    - apply `android/patches/` to `lib/rt64` and `lib/RecompFrontend`
-   - build a host copy of RT64's `file_to_c` into `build/android-host-tools/`
+   - configure CMake, during which vcpkg bootstraps itself and builds curl (with
+     OpenSSL and zlib) and FreeType for arm64-android. This first sync takes several
+     minutes.
 
-4. **Build** with *Build → Build APK(s)*, or from a terminal:
+3. **Build** with *Build → Generate App Bundles or APKs → Generate APKs*, or from a terminal:
 
-   ```bash
-   gradle wrapper          # once, if you don't have gradlew yet
-   ./gradlew assembleRelease
+   ```
+   gradlew assembleRelease
    ```
 
-   The first native build is long; vcpkg builds curl, OpenSSL and freetype for arm64.
+   (If there's no `gradlew` yet, let Android Studio create it, or run `gradle wrapper`.)
 
-5. **Install and run**: `adb install -r app/build/outputs/apk/release/app-release.apk`.
+4. **Install and run**: `adb install -r app/build/outputs/apk/release/app-release.apk`.
    Logs: `adb logcat -s DK64Recomp`.
 
 ## Native libraries only (no Gradle)
 
-To cross-compile just the `.so` files with the NDK (e.g. in CI, or to package yourself):
+To cross-compile just the `.so` files with the NDK (e.g. in CI, or to package yourself),
+on Linux, macOS or WSL:
 
 ```bash
-ANDROID_NDK_HOME=/path/to/android-ndk-r27c android/build-native.sh
+ANDROID_NDK_HOME=/path/to/android-ndk-r30 android/build-native.sh
 ```
 
-It does the same preparation as Gradle (SDL2 download, submodule patches, host
-`file_to_c`), configures with the NDK toolchain chained through vcpkg, builds the
-`DK64Recompiled` target and leaves stripped `libmain.so`, `libSDL2.so` and
-`libc++_shared.so` in `build/android-libs/arm64-v8a/`. Requires `ninja` on `PATH`.
+It does the same preparation as Gradle (SDL2 download, submodule patches), configures
+with the NDK toolchain, builds the `DK64Recompiled` target and leaves stripped
+`libmain.so`, `libSDL2.so` and `libc++_shared.so` in `build/android-libs/arm64-v8a/`.
+Requires `ninja` on `PATH`.
 
 ### What the CMake changes do on Android
 
 - `DK64Recompiled` becomes a shared library named `libmain.so` (what `SDLActivity` loads)
   instead of an executable; SDL2 is built in-tree as `libSDL2.so`.
 - All static libraries are built position-independent, since they link into `libmain.so`.
-- Tools that run during the build (`dxc` for shaders, `file_to_c`) are chosen for the
-  **build machine**, not the target.
+- Tools that run during the build are chosen for the **build machine**, not the target:
+  RT64's prebuilt `dxc` for shaders, and `android/cmake/file_to_c.cmake` in place of the
+  compiled `file_to_c` (same output, no host compiler needed).
+- The NDK toolchain that Gradle passes is routed through vcpkg automatically, so curl
+  and FreeType are built for Android without extra Gradle configuration.
 - `find_package(SDL2)` in RT64 is answered by `android/cmake/sdl2/SDL2Config.cmake`.
 - X11, `-static-libstdc++` and the other desktop-Linux link settings are not used
   (Android's `CMAKE_SYSTEM_NAME` is `Android`, not `Linux`).

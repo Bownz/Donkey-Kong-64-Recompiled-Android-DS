@@ -5,8 +5,8 @@
 // See BUILDING-ANDROID.md.
 
 plugins {
-    // AGP 8.7 requires Gradle 8.9+ and JDK 17 (bundled with recent Android Studio).
-    id 'com.android.application' version '8.7.3' apply false
+    // Matches the Android Studio this was set up with: AGP 9.4.1 on Gradle 9.6.0.
+    id 'com.android.application' version '9.4.1' apply false
 }
 
 tasks.register('clean', Delete) {
