@@ -121,6 +121,12 @@ extern "C" int SDL_main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
 
+    // Prefer AAudio, Android's current audio API, over SDL's default OpenSL ES. On an AYN Thor
+    // the OpenSL ES player was stopped and restarted ~80 times a second, flooding the system
+    // audio and Bluetooth services. OpenSL ES stays as the fallback. An explicit
+    // SDL_AUDIODRIVER in the environment still wins.
+    SDL_SetHintWithPriority(SDL_HINT_AUDIODRIVER, "aaudio,openslES", SDL_HINT_DEFAULT);
+
     __android_log_print(ANDROID_LOG_INFO, log_tag, "Assets: %s", game_dir.c_str());
     __android_log_print(ANDROID_LOG_INFO, log_tag, "User data: %s", data_dir.c_str());
 

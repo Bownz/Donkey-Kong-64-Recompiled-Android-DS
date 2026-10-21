@@ -70,7 +70,7 @@ index 79dfc38..ff188ea 100644
  # Add any Apple-specific source files and libraries
  if (APPLE)
 diff --git a/src/hle/rt64_application.cpp b/src/hle/rt64_application.cpp
-index ee8bc1f..812cfe9 100644
+index ee8bc1f..e18b2e0 100644
 --- a/src/hle/rt64_application.cpp
 +++ b/src/hle/rt64_application.cpp
 @@ -18,11 +18,13 @@
@@ -97,6 +97,20 @@ index ee8bc1f..812cfe9 100644
          return plume::CreateVulkanInterface(renderWindow);
  #else
          return plume::CreateVulkanInterface();
+@@ -325,7 +327,13 @@ namespace RT64 {
+         // Create the swap chain with the texture count specified from the configuration.
+         RenderSwapChainDesc swapChainDesc;
+         swapChainDesc.renderWindow = appWindow->windowHandle;
++#   if defined(__ANDROID__)
++        // Android guarantees RGBA8 for window surfaces; BGRA8 is often not offered (e.g. Adreno),
++        // and plume refuses to create a swap chain in a format the surface doesn't list.
++        swapChainDesc.format = RenderFormat::R8G8B8A8_UNORM;
++#   else
+         swapChainDesc.format = RenderFormat::B8G8R8A8_UNORM;
++#   endif
+         swapChainDesc.textureCount = (userConfig.displayBuffering == UserConfiguration::DisplayBuffering::Triple) ? 3 : 2;
+ 
+         // Enable present wait if supported by the device. We specify a max latency of 1 as we use it to wait right before the next
 diff --git a/src/hle/rt64_application_window.cpp b/src/hle/rt64_application_window.cpp
 index 08f83e5..104cf49 100755
 --- a/src/hle/rt64_application_window.cpp
@@ -178,3 +192,19 @@ index 08f83e5..104cf49 100755
  #   elif defined(__linux__)
          XWindowAttributes attributes;
          XGetWindowAttributes(windowHandle.display, windowHandle.window, &attributes);
+diff --git a/src/render/rt64_shader_library.cpp b/src/render/rt64_shader_library.cpp
+index d1c5273..0f14d91 100644
+--- a/src/render/rt64_shader_library.cpp
++++ b/src/render/rt64_shader_library.cpp
+@@ -599,7 +599,11 @@ namespace RT64 {
+             RenderGraphicsPipelineDesc pipelineDesc;
+             pipelineDesc.vertexShader = fullScreenVertexShader.get();
+             pipelineDesc.pixelShader = regularShader.get();
++#       if defined(__ANDROID__)
++            pipelineDesc.renderTargetFormat[0] = RenderFormat::R8G8B8A8_UNORM; // Must match the swap chain (rt64_application.cpp).
++#       else
+             pipelineDesc.renderTargetFormat[0] = RenderFormat::B8G8R8A8_UNORM; // TODO: Use whatever format the swap chain was created with.
++#       endif
+             pipelineDesc.renderTargetBlend[0] = RenderBlendDesc::Copy();
+             pipelineDesc.renderTargetCount = 1;
+             pipelineDesc.pipelineLayout = videoInterfaceNearest.pipelineLayout.get();

@@ -31,3 +31,36 @@ index a7954c7..445b787 100644
      appCore.window = window_handle;
  #elif defined(__APPLE__)
      appCore.window.window = window_handle.window;
+diff --git a/recompui/src/renderer/ui_renderer.cpp b/recompui/src/renderer/ui_renderer.cpp
+index 556df18..30cbf36 100644
+--- a/recompui/src/renderer/ui_renderer.cpp
++++ b/recompui/src/renderer/ui_renderer.cpp
+@@ -109,7 +109,12 @@ class RmlRenderInterface_RT64_impl : public Rml::RenderInterfaceCompatibility {
+     static constexpr uint32_t initial_index_buffer_size = 1024 * sizeof(int);
+     static constexpr plume::RenderFormat RmlTextureFormat = plume::RenderFormat::R8G8B8A8_UNORM;
+     static constexpr plume::RenderFormat RmlTextureFormatBgra = plume::RenderFormat::B8G8R8A8_UNORM;
++#if defined(__ANDROID__)
++    // Must match RT64's swap chain format, which is RGBA8 on Android (see rt64_application.cpp).
++    static constexpr plume::RenderFormat SwapChainFormat = plume::RenderFormat::R8G8B8A8_UNORM;
++#else
+     static constexpr plume::RenderFormat SwapChainFormat = plume::RenderFormat::B8G8R8A8_UNORM;
++#endif
+     static constexpr uint32_t RmlTextureFormatBytesPerPixel = RenderFormatSize(RmlTextureFormat);
+     static_assert(RenderFormatSize(RmlTextureFormatBgra) == RmlTextureFormatBytesPerPixel);
+     plume::RenderInterface* interface_;
+diff --git a/recompui/src/util/file.cpp b/recompui/src/util/file.cpp
+index 7ee84ed..f8d0cf9 100644
+--- a/recompui/src/util/file.cpp
++++ b/recompui/src/util/file.cpp
+@@ -119,6 +119,11 @@ namespace recompui {
+         return file::apple::get_bundle_resource_directory();
+ #elif defined(__linux__) && defined(RECOMP_FLATPAK)
+         return "/app/bin";
++#elif defined(__ANDROID__)
++        // SDL on Android opens *relative* paths from inside the APK, so files next to the
++        // program (e.g. recompcontrollerdb.txt) need an absolute path. The Android entry
++        // point sets the working directory to the extracted program files.
++        return std::filesystem::current_path();
+ #else
+         return "";
+ #endif
