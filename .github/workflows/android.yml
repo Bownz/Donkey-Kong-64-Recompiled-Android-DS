@@ -3,8 +3,8 @@ name: android
 # Builds the Android APK (arm64-v8a).
 #
 # Needs the same ROM secrets as the desktop builds (validate.yml):
-#   SECRET_NAME   owner/name of a PRIVATE repository holding
-#                 donkeykong64.decompressed.us.z64 at its root
+#   SECRET_NAME   owner/name of a PRIVATE repository holding, at its root, either the
+#                 normal NTSC-U 1.0 ROM (.z64) or donkeykong64.decompressed.us.z64
 #   SECRET_TOKEN  a token that can read that repository
 # Optional, for a stable release signature (installable over previous builds):
 #   ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
@@ -24,6 +24,8 @@ env:
   # Same N64Recomp as the desktop builds (validate.yml).
   N64RECOMP_COMMIT: 2b6f05688de2abc7d86da5b4a89b84c2c6acbabe
   NDK_VERSION: 30.0.16248370
+  # NTSC-U 1.0 ROM (BUILDING.md).
+  ROM_SHA1: cf806ff2603640a748fca5026ded28802f1f4a50
   CMAKE_VERSION: 4.1.2
 
 jobs:
@@ -79,7 +81,7 @@ jobs:
         # clang/lld/make build the game's MIPS patches; ninja and the toolchain build N64Recomp.
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build clang lld llvm make
+          sudo apt-get install -y ninja-build clang lld llvm make g++ zlib1g-dev
 
       - name: Set up JDK
         uses: actions/setup-java@v4
@@ -119,6 +121,21 @@ jobs:
       - name: Generate recompiled code
         run: |
           cp extra/* .
+          if [ ! -f donkeykong64.decompressed.us.z64 ]; then
+            # Accept the normal ROM too: check it's the US 1.0 release, then decompress it
+            # with the repository's own tool (decompressor.cpp).
+            rom=""
+            for f in *.z64; do
+              [ -f "$f" ] || continue
+              if [ "$(sha1sum "$f" | cut -d' ' -f1)" = "$ROM_SHA1" ]; then rom="$f"; fi
+            done
+            if [ -z "$rom" ]; then
+              echo "::error title=No usable ROM::The ROM repository needs donkeykong64.decompressed.us.z64, or the NTSC-U 1.0 ROM in .z64 (big-endian) format with sha1 $ROM_SHA1."
+              exit 1
+            fi
+            g++ -std=c++17 -O2 decompressor.cpp -o decompressor -lz
+            ./decompressor "$rom"
+          fi
           ./N64Recomp us.toml
           ./RSPRecomp n_aspMain.toml
           # The ROM is no longer needed; keep it out of every later step.

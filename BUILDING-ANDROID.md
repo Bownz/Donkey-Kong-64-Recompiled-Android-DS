@@ -35,10 +35,14 @@ Option B mirrors the configuration that was test-built for this port (Linux host
 NDK r30, CMake 4.1.2). Building on a **Windows** host is supported by the build files but
 hasn't been test-built yet; if vcpkg's OpenSSL build gives trouble there, use Option B or WSL.
 
-Both need a **decompressed** ROM: the NTSC-U 1.0 Donkey Kong 64 ROM (sha1
-`cf806ff2603640a748fca5026ded28802f1f4a50`), decompressed as described in `BUILDING.md`
-step 3 and named `donkeykong64.decompressed.us.z64`. It's only needed to *generate* the
-code; the game itself still asks for your normal ROM on first launch.
+Both need your ROM at build time: the NTSC-U 1.0 Donkey Kong 64 ROM in `.z64` format
+(sha1 `cf806ff2603640a748fca5026ded28802f1f4a50`). The build translates the game's code
+from it into C, so there is no way to build without it. The finished APK doesn't contain
+the ROM; it asks for your ROM again on the device, through Android's file picker.
+
+The code generator wants the ROM *decompressed*. The repository has a tool for that,
+`decompressor.cpp`: given your normal ROM, it writes `donkeykong64.decompressed.us.z64`.
+GitHub Actions runs it for you; locally, see step A3.
 
 ## Option A: Android Studio on your PC (Windows)
 
@@ -78,7 +82,16 @@ Don't make `lib/vcpkg` shallow: vcpkg needs its history.
 
 ### A3. Generate the recompiled code
 
-1. Put `donkeykong64.decompressed.us.z64` in the repository root.
+1. Decompress your ROM into the repository root. The decompressor needs zlib, which is
+   simplest in WSL (Ubuntu). From WSL:
+   ```
+   sudo apt install g++ zlib1g-dev
+   cd /mnt/c/dk64
+   g++ -std=c++17 -O2 decompressor.cpp -o decompressor -lz
+   ./decompressor "/mnt/c/path/to/Donkey Kong 64 (USA).z64"
+   ```
+   This writes `donkeykong64.decompressed.us.z64` next to it. (The DK64 decomp's Python
+   script, mentioned in `BUILDING.md`, produces the same file.)
 2. Build N64Recomp and RSPRecomp, at the commit the CI uses. In
    *Developer PowerShell for VS 2022*:
    ```
@@ -139,7 +152,8 @@ so if those are already set up, skip to B3.
 ### B1. Put the ROM in a private repository
 
 1. On GitHub, create a new repository, e.g. `dk64-rom`, and make it **Private**.
-2. Upload `donkeykong64.decompressed.us.z64` to its root.
+2. Upload your normal ROM (`.z64`) to its root. The workflow checks its SHA-1 and
+   decompresses it. (Uploading `donkeykong64.decompressed.us.z64` instead also works.)
 
 Never put the ROM in the main repository.
 
@@ -217,6 +231,8 @@ Use the same key locally and in CI and you can switch between the two freely.
 ## Troubleshooting
 
 - **"Recompiled sources are missing"**: run step A3 (CI: check the ROM secrets).
+- **CI "No usable ROM"**: the ROM repository has neither the decompressed ROM nor a `.z64`
+  matching the US 1.0 hash. `.n64`/`.v64` files are byte-swapped; convert them to `.z64`.
 - **"Could not run 'git'"** or **"Could not apply …patch"** during sync: Git isn't on
   `PATH`, or a submodule was updated. Run `git submodule update --init --recursive` and
   sync again.
