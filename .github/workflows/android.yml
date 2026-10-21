@@ -2,10 +2,12 @@ name: android
 
 # Builds the Android APK (arm64-v8a).
 #
-# Needs the same ROM secrets as the desktop builds (validate.yml):
-#   SECRET_NAME   owner/name of a PRIVATE repository holding, at its root, either the
-#                 normal NTSC-U 1.0 ROM (.z64) or donkeykong64.decompressed.us.z64
-#   SECRET_TOKEN  a token that can read that repository
+# The ROM comes from a PRIVATE repository, by default <owner>/dk64-rom (e.g. Bownz/dk64-rom),
+# holding at its root either the normal NTSC-U 1.0 ROM (.z64) or
+# donkeykong64.decompressed.us.z64. One secret is required:
+#   DK64ROM       a token that can read that repository
+# (The desktop builds' SECRET_NAME / SECRET_TOKEN secrets also work, and SECRET_NAME
+#  overrides the repository name.)
 # Optional, for a stable release signature (installable over previous builds):
 #   ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
 # See BUILDING-ANDROID.md.
@@ -21,6 +23,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  ROM_REPO: ${{ secrets.SECRET_NAME || format('{0}/dk64-rom', github.repository_owner) }}
   # Same N64Recomp as the desktop builds (validate.yml).
   N64RECOMP_COMMIT: 2b6f05688de2abc7d86da5b4a89b84c2c6acbabe
   NDK_VERSION: 30.0.16248370
@@ -36,14 +39,14 @@ jobs:
     steps:
       - id: check
         env:
-          ROM_REPO: ${{ secrets.SECRET_NAME }}
-          ROM_TOKEN: ${{ secrets.SECRET_TOKEN }}
+          ROM_TOKEN: ${{ secrets.DK64ROM || secrets.SECRET_TOKEN }}
         run: |
-          if [ -n "$ROM_REPO" ] && [ -n "$ROM_TOKEN" ]; then
+          if [ -n "$ROM_TOKEN" ]; then
             echo "has-rom=true" >> "$GITHUB_OUTPUT"
+            echo "ROM repository: $ROM_REPO"
           else
             echo "has-rom=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=Android build skipped::Set the SECRET_NAME and SECRET_TOKEN repository secrets (a private repo with the decompressed ROM). See BUILDING-ANDROID.md."
+            echo "::notice title=Android build skipped::Add a DK64ROM repository secret: a token that can read $ROM_REPO (a private repo with your ROM). See BUILDING-ANDROID.md."
           fi
 
   build-android:
@@ -73,8 +76,8 @@ jobs:
       - name: Get ROM
         uses: actions/checkout@v4
         with:
-          repository: ${{ secrets.SECRET_NAME }}
-          token: ${{ secrets.SECRET_TOKEN }}
+          repository: ${{ env.ROM_REPO }}
+          token: ${{ secrets.DK64ROM || secrets.SECRET_TOKEN }}
           path: extra
 
       - name: Install host tools

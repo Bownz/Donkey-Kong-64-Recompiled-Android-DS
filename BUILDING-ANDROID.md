@@ -159,16 +159,19 @@ Never put the ROM in the main repository.
 
 ### B2. Give the workflow access to it
 
+The workflow reads the ROM from `<your-username>/dk64-rom`, using a token you store as a
+secret.
+
 1. Create a token: *GitHub → Settings → Developer settings → Personal access tokens →
    Fine-grained tokens → Generate new token*.
    - *Repository access*: **Only select repositories** → your `dk64-rom` repo.
    - *Permissions → Repository permissions → Contents*: **Read-only**.
 2. In the **main** repository: *Settings → Secrets and variables → Actions → New repository
-   secret*, add:
-   - `SECRET_NAME` = `your-username/dk64-rom`
-   - `SECRET_TOKEN` = the token from step 1
+   secret*, named **`DK64ROM`**, containing the token.
 
-Without these, the workflow's build job is skipped with a notice explaining what's missing.
+If your ROM repository has a different name, also add a secret `SECRET_NAME` with its full
+name (`owner/name`). The desktop builds' `SECRET_NAME`/`SECRET_TOKEN` pair also works.
+Without a token, the workflow's build job is skipped with a notice explaining what's missing.
 
 ### B3. (Recommended) Add a signing key
 
