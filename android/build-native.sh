@@ -29,7 +29,7 @@ SDL_DIR="$ROOT/android/third_party/SDL2-$SDL_VERSION"
 VCPKG_ROOT="${VCPKG_ROOT:-$ROOT/lib/vcpkg}"
 
 case "$ABI" in
-    arm64-v8a) TRIPLET=arm64-android; NDK_TRIPLE=aarch64-linux-android ;;
+    arm64-v8a) NDK_TRIPLE=aarch64-linux-android ;;
     *) echo "error: only arm64-v8a is supported (RT64 and the recompiled code target 64-bit ARM)" >&2; exit 1 ;;
 esac
 

@@ -74,6 +74,12 @@ def ensurePatches = {
 ensureSdl2()
 ensurePatches()
 
+def signingValue = { String name -> System.getenv(name) ?: findProperty(name) }
+def releaseKeystore = signingValue('DK64_KEYSTORE_FILE')
+if (releaseKeystore && !file(releaseKeystore).isFile()) {
+    throw new GradleException("DK64_KEYSTORE_FILE is set but not found: ${releaseKeystore}")
+}
+
 // ---------------------------------------------------------------------------------
 // Android application
 // ---------------------------------------------------------------------------------
@@ -111,6 +117,24 @@ android {
         }
     }
 
+    // Release signing from the environment (or ~/.gradle/gradle.properties), so no secrets
+    // live in the repo. Keep using the same key: Android only installs an update over an
+    // existing install when both are signed with the same key.
+    //   DK64_KEYSTORE_FILE      path to the .jks/.keystore file
+    //   DK64_KEYSTORE_PASSWORD  keystore password
+    //   DK64_KEY_ALIAS          key alias
+    //   DK64_KEY_PASSWORD       key password (defaults to the keystore password)
+    signingConfigs {
+        release {
+            if (releaseKeystore) {
+                storeFile file(releaseKeystore)
+                storePassword signingValue('DK64_KEYSTORE_PASSWORD')
+                keyAlias signingValue('DK64_KEY_ALIAS')
+                keyPassword signingValue('DK64_KEY_PASSWORD') ?: signingValue('DK64_KEYSTORE_PASSWORD')
+            }
+        }
+    }
+
     buildTypes {
         debug {
             externalNativeBuild {
@@ -122,9 +146,9 @@ android {
             }
         }
         release {
-            // Signed with the debug key so `assembleRelease` produces an installable APK.
-            // Replace with your own signing config before distributing anything.
-            signingConfig signingConfigs.debug
+            // Your own key if DK64_KEYSTORE_FILE is set (see signingConfigs below), else the
+            // debug key so `assembleRelease` always produces an installable APK.
+            signingConfig releaseKeystore ? signingConfigs.release : signingConfigs.debug
         }
     }
 

@@ -18,58 +18,214 @@ Vulkan 1.1 GPU.
 | File dialogs | `android/jni/nfd_android.cpp` | Replaces nativefiledialog-extended with Android's document picker |
 | CMake glue | `android/cmake/android.cmake` | Builds SDL2 from source, makes the game target `libmain.so` |
 | Submodule patches | `android/patches/*.patch` | Small fixes to RT64 and RecompFrontend for Android (applied automatically) |
+| CI | `.github/workflows/android.yml` | Builds the APK on GitHub Actions |
 
 Desktop builds are unaffected: everything Android-specific is behind `if (ANDROID)`.
 
-## Prerequisites
+## Two ways to build
 
-- **Android Studio** with, from *SDK Manager → SDK Tools* (tick "Show Package Details"):
-  - **NDK 30.0.16248370** (r30)
-  - **CMake 4.1.2**
-  - SDK Platform **Android 37**
-  The project is set up for AGP 9.4.1 / Gradle 9.6.0, the versions Android Studio
-  currently generates.
-- **Git** on `PATH` (Git for Windows on Windows). Gradle uses it to apply
-  `android/patches/` to two submodules.
-- The full submodule checkout (`git clone --recurse-submodules`). Don't make `lib/vcpkg`
-  shallow: vcpkg needs its history to resolve the `builtin-baseline`.
-- For **generating the recompiled code** (step 1), the same tools as a desktop build:
-  N64Recomp/RSPRecomp, plus `make`, `clang` and `ld.lld` for the `patches/` step
-  (see `BUILDING.md`; on Windows: LLVM and `choco install make`).
+| | Option A: Android Studio on your PC | Option B: GitHub Actions |
+|---|---|---|
+| Where it runs | Your Windows/Linux/macOS machine | GitHub's Linux servers |
+| You provide the ROM | As a local file | In a private GitHub repo, read via a token |
+| Result | `app/build/outputs/apk/release/app-release.apk` | A zip in the workflow run's *Artifacts* |
+| Best for | Iterating on the code, debugging | Repeatable builds; no local toolchain setup |
 
-No host C++ compiler is needed for the Android part itself: the build-time `file_to_c`
-step runs as a CMake script, and RT64's shader compiler (`dxc`) ships prebuilt for
-Windows, Linux and macOS.
+Option B mirrors the configuration that was test-built for this port (Linux host,
+NDK r30, CMake 4.1.2). Building on a **Windows** host is supported by the build files but
+hasn't been test-built yet; if vcpkg's OpenSSL build gives trouble there, use Option B or WSL.
 
-## Steps
+Both need a **decompressed** ROM: the NTSC-U 1.0 Donkey Kong 64 ROM (sha1
+`cf806ff2603640a748fca5026ded28802f1f4a50`), decompressed as described in `BUILDING.md`
+step 3 and named `donkeykong64.decompressed.us.z64`. It's only needed to *generate* the
+code; the game itself still asks for your normal ROM on first launch.
 
-1. **Generate the recompiled code**, exactly as for desktop (`BUILDING.md` steps 3–4).
-   You need `RecompiledFuncs/`, `RecompiledPatches/` and `rsp/n_aspMain.cpp` before
-   the APK will build.
+## Option A: Android Studio on your PC (Windows)
 
+### A1. Install the tools (once)
+
+1. **Android Studio**, then in *Tools → SDK Manager → SDK Tools*, tick "Show Package
+   Details" and install:
+   - **NDK (Side by side) 30.0.16248370**
+   - **CMake 4.1.2**
+   - and under *SDK Platforms*, **Android 37**
+2. **Git for Windows**, with long paths enabled (vcpkg and the submodules nest deeply):
    ```
-   N64Recomp us.toml
-   RSPRecomp n_aspMain.toml
+   git config --global core.longpaths true
    ```
-
-2. **Open the repository root in Android Studio** (*File → Open*, pick the folder with
-   `settings.gradle`) and let it sync. On the first sync, Gradle will:
-   - download SDL2 2.32.10 into `android/third_party/` (SDLActivity's Java comes from here)
-   - apply `android/patches/` to `lib/rt64` and `lib/RecompFrontend`
-   - configure CMake, during which vcpkg bootstraps itself and builds curl (with
-     OpenSSL and zlib) and FreeType for arm64-android. This first sync takes several
-     minutes.
-
-3. **Build** with *Build → Generate App Bundles or APKs → Generate APKs*, or from a terminal:
-
+3. **Visual Studio 2022** (Community is fine) with *Desktop development with C++* and
+   *C++ Clang Compiler for Windows* and *C++ CMake tools for Windows*. This is only to
+   build N64Recomp (step A3); the Android build itself needs no host compiler.
+4. **LLVM** and **make**, for the step that compiles the game's MIPS patches:
    ```
-   gradlew assembleRelease
+   winget install LLVM.LLVM
+   winget install ezwinports.make
    ```
+   Make sure `clang`, `ld.lld` and `make` work in a *new* terminal. If not, add
+   `C:\Program Files\LLVM\bin` to `PATH`. Restart Android Studio afterwards so it sees
+   the new `PATH`.
 
-   (If there's no `gradlew` yet, let Android Studio create it, or run `gradle wrapper`.)
+### A2. Get the code
 
-4. **Install and run**: `adb install -r app/build/outputs/apk/release/app-release.apk`.
-   Logs: `adb logcat -s DK64Recomp`.
+Clone into a **short path** (Windows has path-length limits):
+```
+cd C:\
+git clone --recurse-submodules -b android-port https://github.com/Bownz/Donkey-Kong-64-Recompiled-Android-DS.git dk64
+cd dk64
+```
+If you forgot `--recurse-submodules`: `git submodule update --init --recursive`.
+Don't make `lib/vcpkg` shallow: vcpkg needs its history.
+
+### A3. Generate the recompiled code
+
+1. Put `donkeykong64.decompressed.us.z64` in the repository root.
+2. Build N64Recomp and RSPRecomp, at the commit the CI uses. In
+   *Developer PowerShell for VS 2022*:
+   ```
+   cd C:\
+   git clone --recurse-submodules https://github.com/Mr-Wiseguy/N64Recomp.git
+   cd N64Recomp
+   git checkout 2b6f05688de2abc7d86da5b4a89b84c2c6acbabe
+   git submodule update --init --recursive
+   cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+   cmake --build build --target N64RecompCLI RSPRecomp
+   copy build\N64Recomp.exe C:\dk64\
+   copy build\RSPRecomp.exe C:\dk64\
+   ```
+3. Run them from the repository root:
+   ```
+   cd C:\dk64
+   .\N64Recomp.exe us.toml
+   .\RSPRecomp.exe n_aspMain.toml
+   ```
+   This creates `RecompiledFuncs\`, `RecompiledPatches\` and `rsp\n_aspMain.cpp`. Redo
+   this step only when the game patches or N64Recomp change.
+
+### A4. Open and build in Android Studio
+
+1. *File → Open*, select `C:\dk64` (the folder containing `settings.gradle`), and trust
+   the project.
+2. Let **Gradle sync** finish. The first sync is slow: it downloads SDL2 2.32.10, patches
+   two submodules, and vcpkg builds curl (with OpenSSL and zlib) and FreeType for Android.
+3. Choose the release variant: *Build → Select Build Variant…*, set `app` to **release**.
+   Debug builds work too, but are slower to run.
+4. *Build → Generate App Bundles or APKs → Generate APKs*. Or in Android Studio's
+   *Terminal*:
+   ```
+   .\gradlew.bat assembleRelease
+   ```
+5. The APK is `app\build\outputs\apk\release\app-release.apk`. Android Studio's
+   "locate" link in the build notification opens the folder.
+
+Without your own key, this APK is signed with the debug key (see *Release signing*).
+
+### A5. Install it
+
+- **USB**: enable *Developer options → USB debugging* on the device, then
+  ```
+  %LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe install -r app\build\outputs\apk\release\app-release.apk
+  ```
+- **Or** copy the APK to the device and open it in a file manager; allow "install unknown
+  apps" for that file manager when asked.
+
+Logs: `adb logcat -s DK64Recomp`.
+
+## Option B: GitHub Actions
+
+The workflow is `.github/workflows/android.yml`. It runs on every push to the
+`android-port` branch and on demand. It uses the **same ROM secrets as the desktop builds**,
+so if those are already set up, skip to B3.
+
+### B1. Put the ROM in a private repository
+
+1. On GitHub, create a new repository, e.g. `dk64-rom`, and make it **Private**.
+2. Upload `donkeykong64.decompressed.us.z64` to its root.
+
+Never put the ROM in the main repository.
+
+### B2. Give the workflow access to it
+
+1. Create a token: *GitHub → Settings → Developer settings → Personal access tokens →
+   Fine-grained tokens → Generate new token*.
+   - *Repository access*: **Only select repositories** → your `dk64-rom` repo.
+   - *Permissions → Repository permissions → Contents*: **Read-only**.
+2. In the **main** repository: *Settings → Secrets and variables → Actions → New repository
+   secret*, add:
+   - `SECRET_NAME` = `your-username/dk64-rom`
+   - `SECRET_TOKEN` = the token from step 1
+
+Without these, the workflow's build job is skipped with a notice explaining what's missing.
+
+### B3. (Recommended) Add a signing key
+
+So each CI build installs over the previous one, add the four `ANDROID_*` secrets described
+under *Release signing* below. Without them the APK still builds, but with a throwaway key.
+
+### B4. Run it
+
+- Push to `android-port`, or open the **Actions** tab → **android** → **Run workflow**,
+  pick the `android-port` branch, and run.
+- The first run is the slowest: vcpkg builds its dependencies from source. Later runs reuse
+  cached N64Recomp and vcpkg packages.
+
+### B5. Download the APK
+
+Open the finished run, scroll to **Artifacts**, and download
+`DK64Recompiled-Android-arm64-v8a`. It's a zip containing the APK; install it as in A5.
+
+**Artifacts contain code generated from the ROM.** On a public repository, anyone with access
+to the repository can download them. The workflow keeps them for 7 days only; making the
+repository private keeps them to you (GitHub then counts the build against your Actions
+minutes).
+
+## Release signing
+
+Android only installs an update over an existing install when both are signed with the
+same key; otherwise you have to uninstall first, which deletes app storage (saves included,
+unless you chose the shared folder). Builds use your key when these are set, otherwise the
+debug key:
+
+| Gradle setting / environment variable | Value |
+|---|---|
+| `DK64_KEYSTORE_FILE` | Path to the keystore (use forward slashes on Windows) |
+| `DK64_KEYSTORE_PASSWORD` | Keystore password |
+| `DK64_KEY_ALIAS` | Key alias |
+| `DK64_KEY_PASSWORD` | Key password (defaults to the keystore password) |
+
+**Create a key once** (keep the file and passwords safe; losing them means users must
+reinstall):
+```
+"C:\Program Files\Android\Android Studio\jbr\bin\keytool.exe" -genkeypair -v -keystore C:\keys\dk64-release.jks -keyalg RSA -keysize 2048 -validity 10000 -alias dk64
+```
+
+**Local builds**: put the four values in `%USERPROFILE%\.gradle\gradle.properties` (outside
+the repository):
+```
+DK64_KEYSTORE_FILE=C:/keys/dk64-release.jks
+DK64_KEYSTORE_PASSWORD=...
+DK64_KEY_ALIAS=dk64
+DK64_KEY_PASSWORD=...
+```
+
+**GitHub Actions**: add these repository secrets:
+- `ANDROID_KEYSTORE_BASE64`: the keystore file, base64-encoded. In PowerShell:
+  `[Convert]::ToBase64String([IO.File]::ReadAllBytes("C:\keys\dk64-release.jks")) | Set-Clipboard`
+- `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`
+
+Use the same key locally and in CI and you can switch between the two freely.
+
+## Troubleshooting
+
+- **"Recompiled sources are missing"**: run step A3 (CI: check the ROM secrets).
+- **"Could not run 'git'"** or **"Could not apply …patch"** during sync: Git isn't on
+  `PATH`, or a submodule was updated. Run `git submodule update --init --recursive` and
+  sync again.
+- **`make`, `clang` or `ld.lld` not found** in the `PatchesBin` step: see A1 step 4, then
+  restart Android Studio.
+- **vcpkg fails during sync**: the error names a log file under `lib\vcpkg\buildtrees`.
+  Path-length problems: move the clone to a shorter path. Other failures building OpenSSL on
+  Windows: use Option B, or WSL with `android/build-native.sh`.
+- **"App not installed" over an older version**: signature mismatch; see *Release signing*.
 
 ## Native libraries only (no Gradle)
 

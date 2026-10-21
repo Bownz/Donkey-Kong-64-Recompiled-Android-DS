@@ -1,0 +1,162 @@
+name: android
+
+# Builds the Android APK (arm64-v8a).
+#
+# Needs the same ROM secrets as the desktop builds (validate.yml):
+#   SECRET_NAME   owner/name of a PRIVATE repository holding
+#                 donkeykong64.decompressed.us.z64 at its root
+#   SECRET_TOKEN  a token that can read that repository
+# Optional, for a stable release signature (installable over previous builds):
+#   ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
+# See BUILDING-ANDROID.md.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ android-port ]
+    paths-ignore: [ '**.md' ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Same N64Recomp as the desktop builds (validate.yml).
+  N64RECOMP_COMMIT: 2b6f05688de2abc7d86da5b4a89b84c2c6acbabe
+  NDK_VERSION: 30.0.16248370
+  CMAKE_VERSION: 4.1.2
+
+jobs:
+  check-secrets:
+    runs-on: ubuntu-24.04
+    outputs:
+      has-rom: ${{ steps.check.outputs.has-rom }}
+    steps:
+      - id: check
+        env:
+          ROM_REPO: ${{ secrets.SECRET_NAME }}
+          ROM_TOKEN: ${{ secrets.SECRET_TOKEN }}
+        run: |
+          if [ -n "$ROM_REPO" ] && [ -n "$ROM_TOKEN" ]; then
+            echo "has-rom=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-rom=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Android build skipped::Set the SECRET_NAME and SECRET_TOKEN repository secrets (a private repo with the decompressed ROM). See BUILDING-ANDROID.md."
+          fi
+
+  build-android:
+    needs: check-secrets
+    if: needs.check-secrets.outputs.has-rom == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - name: Free disk space
+        # The NDK, vcpkg and the recompiled game need more room than the runner leaves free.
+        # Leaves the Android SDK in place.
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/share/swift /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Fetch vcpkg baseline
+        # vcpkg.json pins a baseline commit, which a shallow submodule may not include.
+        run: |
+          baseline=$(python3 -c "import json; print(json.load(open('vcpkg.json'))['builtin-baseline'])")
+          git -C lib/vcpkg cat-file -e "$baseline" 2>/dev/null || git -C lib/vcpkg fetch --depth=1 origin "$baseline"
+
+      - name: Get ROM
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ secrets.SECRET_NAME }}
+          token: ${{ secrets.SECRET_TOKEN }}
+          path: extra
+
+      - name: Install host tools
+        # clang/lld/make build the game's MIPS patches; ninja and the toolchain build N64Recomp.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build clang lld llvm make
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Set up Gradle
+        # Also validates gradle-wrapper.jar against Gradle's published checksums.
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Install NDK and CMake
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;${NDK_VERSION}" "cmake;${CMAKE_VERSION}"
+
+      - name: Cache N64Recomp
+        id: n64recomp-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            N64Recomp
+            RSPRecomp
+          key: n64recomp-${{ runner.os }}-${{ env.N64RECOMP_COMMIT }}
+
+      - name: Build N64Recomp and RSPRecomp
+        if: steps.n64recomp-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone https://github.com/Mr-Wiseguy/N64Recomp.git --recurse-submodules N64RecompSource
+          cd N64RecompSource
+          git checkout "$N64RECOMP_COMMIT"
+          git submodule update --init --recursive
+          cmake -S . -B cmake-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+          cmake --build cmake-build --target N64RecompCLI RSPRecomp -j "$(nproc)"
+          cp cmake-build/N64Recomp cmake-build/RSPRecomp ..
+
+      - name: Generate recompiled code
+        run: |
+          cp extra/* .
+          ./N64Recomp us.toml
+          ./RSPRecomp n_aspMain.toml
+          # The ROM is no longer needed; keep it out of every later step.
+          rm -f ./*.z64 extra/*.z64
+
+      - name: Cache vcpkg packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/vcpkg/archives
+          key: vcpkg-arm64-android-ndk${{ env.NDK_VERSION }}-${{ hashFiles('vcpkg.json') }}
+
+      - name: Set up release signing
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::warning title=Debug-signed APK::No ANDROID_KEYSTORE_BASE64 secret. The APK is signed with a throwaway key, so it can't be installed over a previous build without uninstalling first."
+            exit 0
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+          {
+            echo "DK64_KEYSTORE_FILE=$RUNNER_TEMP/release.keystore"
+            echo "DK64_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
+            echo "DK64_KEY_ALIAS=$KEY_ALIAS"
+            echo "DK64_KEY_PASSWORD=$KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
+
+      - name: Build APK
+        run: ./gradlew assembleRelease --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: DK64Recompiled-Android-arm64-v8a
+          path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+          # The APK contains code generated from the ROM: keep artifacts short-lived.
+          retention-days: 7
