@@ -45,7 +45,7 @@ import java.util.concurrent.CountDownLatch;
  *    ({@link StorageAccess}); the native side asks via {@link #getDataDirectory()}.
  *  - A blocking document picker that the native nfd replacement calls over JNI.
  *  - Touch controls ({@link TouchControllerView}) as an overlay when there's no physical
- *    gamepad, and DK64 action buttons ({@link ActionPadView}) on a second screen if there is
+ *    gamepad, and the DK64 bottom screen ({@link BottomScreenView}): health, collectibles and action buttons on a second screen if there is
  *    one ({@link SecondScreenPresentation}).
  *  - Game-friendly window behaviour: immersive fullscreen, screen kept on, drawing into
  *    the display cutout, sustained-performance mode.
@@ -128,8 +128,8 @@ public class DK64Activity extends SDLActivity
         if (overlay != null) {
             overlay.releaseAll();
         }
-        if (presentation != null && presentation.getActionPad() != null) {
-            presentation.getActionPad().cancel();
+        if (presentation != null && presentation.getBottomScreen() != null) {
+            presentation.getBottomScreen().cancel();
         }
         inputManager.unregisterInputDeviceListener(this);
         displayManager.unregisterDisplayListener(this);

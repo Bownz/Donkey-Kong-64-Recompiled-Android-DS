@@ -14,7 +14,7 @@ Vulkan 1.1 GPU.
 | Activity | `app/src/main/java/.../DK64Activity.java` | Extends `SDLActivity`: lifecycle, immersive fullscreen, asset extraction, file picker, places the touch controls |
 | Storage | `app/src/main/java/.../StorageAccess.java` | First-launch choice of shared folder vs app storage, and the storage permission flow |
 | Touch controls | `TouchControllerView.java`, `TouchInput.java`, `android/jni/touch_controller.cpp` | On-screen N64 controller driving an SDL virtual gamepad, when there's no physical gamepad |
-| Second screen | `SecondScreenPresentation.java`, `ActionPadView.java` | Z+C action buttons on a second display (e.g. AYN Thor) |
+| Second screen | `SecondScreenPresentation.java`, `BottomScreenView.java`, `DkIcons.java`, `GameState.java`, `android/jni/game_state.cpp` | Companion display on a second screen (e.g. AYN Thor): health, Kong collectibles, Z+C action buttons. Reads game memory, never writes it |
 | Native entry | `android/jni/android_main.cpp` | `SDL_main` → sets paths and working directory → calls the desktop `main` |
 | File dialogs | `android/jni/nfd_android.cpp` | Replaces nativefiledialog-extended with Android's document picker |
 | CMake glue | `android/cmake/android.cmake` | Builds SDL2 from source, makes the game target `libmain.so` |
@@ -296,9 +296,16 @@ Requires `ninja` on `PATH`.
     C-buttons, D-pad, Start, and ☰ for the recomp menu. It works like a normal controller,
     so you can remap it in the game's settings. Touches outside the controls go to the game,
     so the launcher's menus work by touch.
-  - On a device with a **second screen** (e.g. the AYN Thor's lower screen), that screen shows
-    one-tap **action buttons** for the Z + C moves: fruit weapon (Z+C◀), orange (Z+C▶),
-    instrument (Z+C▲) and fairy camera (Z+C▼). They work alongside the built-in controls.
+  - On a device with a **second screen** (e.g. the AYN Thor's lower screen), that screen is a
+    companion display:
+    - **Watermelon health**, live from the game.
+    - **Action buttons** (right column) for the Z + C moves, with the current Kong's weapon and
+      instrument and their ammo: fruit weapon (Z+C◀), orange (Z+C▶), instrument (Z+C▲),
+      fairy camera (Z+C▼). They work alongside the built-in controls.
+    - **First-person view** button (top-left), which taps C▲.
+    - **Kong tabs** showing each Kong's golden bananas, bananas, coins, and whether they have
+      their weapon and instrument yet. It follows the Kong you're playing; tap a tab to look at
+      another, tap again to go back.
   - Connecting or disconnecting a controller or display switches this live.
 
 ## Known limitations

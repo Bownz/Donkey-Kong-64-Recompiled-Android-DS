@@ -109,7 +109,8 @@ function(dk64_configure_android_target target)
         PROPERTIES COMPILE_DEFINITIONS "main=dk64_main")
     target_sources(${target} PRIVATE
         "${CMAKE_SOURCE_DIR}/android/jni/android_main.cpp"
-        "${CMAKE_SOURCE_DIR}/android/jni/touch_controller.cpp")
+        "${CMAKE_SOURCE_DIR}/android/jni/touch_controller.cpp"
+        "${CMAKE_SOURCE_DIR}/android/jni/game_state.cpp")
 
     target_link_libraries(${target} PRIVATE SDL2::SDL2 android log)
 

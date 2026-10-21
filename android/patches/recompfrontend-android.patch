@@ -1,8 +1,8 @@
 diff --git a/recompui/src/renderer/rt64_render_context.cpp b/recompui/src/renderer/rt64_render_context.cpp
-index a7954c7..8eda29f 100644
+index a7954c7..dec1073 100644
 --- a/recompui/src/renderer/rt64_render_context.cpp
 +++ b/recompui/src/renderer/rt64_render_context.cpp
-@@ -3,6 +3,36 @@
+@@ -3,6 +3,40 @@
  #include <variant>
  #include <algorithm>
  
@@ -15,6 +15,10 @@ index a7954c7..8eda29f 100644
 +    // Defined in plume_vulkan.cpp (Android patch): lets swap chains follow surface changes.
 +    extern ANativeWindow *(*AndroidWindowProvider)();
 +}
++
++// Defined by the game's Android glue (android/jni/game_state.cpp), if present: gives the
++// second-screen UI read-only access to RDRAM.
++extern "C" void dk64_android_set_rdram(uint8_t* rdram) __attribute__((weak));
 +
 +namespace {
 +    SDL_Window *android_game_window = nullptr;
@@ -39,7 +43,7 @@ index a7954c7..8eda29f 100644
  #include "hle/rt64_application.h"
  #include "rt64_render_hooks.h"
  #include "overloaded.h"
-@@ -225,7 +255,18 @@ renderer::RT64Context::RT64Context(uint8_t* rdram, ultramodern::renderer::Window
+@@ -225,7 +259,22 @@ renderer::RT64Context::RT64Context(uint8_t* rdram, ultramodern::renderer::Window
      RT64::Application::Core appCore{};
  #if defined(_WIN32)
      appCore.window = window_handle.window;
@@ -54,6 +58,10 @@ index a7954c7..8eda29f 100644
 +
 +        android_game_window = window_handle;
 +        plume::AndroidWindowProvider = android_current_native_window;
++
++        if (dk64_android_set_rdram != nullptr) {
++            dk64_android_set_rdram(rdram);
++        }
 +    }
 +#elif defined(__linux__)
      appCore.window = window_handle;

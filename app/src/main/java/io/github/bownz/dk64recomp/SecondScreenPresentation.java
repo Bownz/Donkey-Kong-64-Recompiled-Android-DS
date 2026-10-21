@@ -11,13 +11,13 @@ import android.widget.FrameLayout;
 
 /**
  * Content for a second display, such as the lower screen of a dual-screen handheld (AYN Thor):
- * DK64 action buttons ({@link ActionPadView}). The game keeps the main display to itself.
+ * the DK64 bottom screen ({@link BottomScreenView}): health, collectibles and action buttons. The game keeps the main display to itself.
  *
  * A Presentation is a window that belongs to the activity, so it is only shown while the
  * activity is in the foreground; DK64Activity creates and dismisses it with the lifecycle.
  */
 final class SecondScreenPresentation extends Presentation {
-    private ActionPadView actionPad;
+    private BottomScreenView bottomScreen;
 
     SecondScreenPresentation(Context outerContext, Display display) {
         super(outerContext, display);
@@ -37,22 +37,22 @@ final class SecondScreenPresentation extends Presentation {
 
         FrameLayout root = new FrameLayout(getContext());
         root.setBackgroundColor(Color.rgb(18, 18, 22));
-        actionPad = new ActionPadView(getContext());
-        root.addView(actionPad, new FrameLayout.LayoutParams(
+        bottomScreen = new BottomScreenView(getContext());
+        root.addView(bottomScreen, new FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         setContentView(root);
 
-        actionPad.setActive(true);
+        bottomScreen.setActive(true);
     }
 
-    ActionPadView getActionPad() {
-        return actionPad;
+    BottomScreenView getBottomScreen() {
+        return bottomScreen;
     }
 
     @Override
     protected void onStop() {
-        if (actionPad != null) {
-            actionPad.setActive(false);
+        if (bottomScreen != null) {
+            bottomScreen.setActive(false);
         }
         super.onStop();
     }

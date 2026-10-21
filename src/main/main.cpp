@@ -331,7 +331,13 @@ void queue_samples(int16_t* audio_data, size_t sample_count) {
 
     // Prevent audio latency from building up by skipping samples in incoming audio when too many samples are already queued.
     // Skip samples based on how many microseconds of samples are queued already.
+#if defined(__ANDROID__)
+    // Android output drains in bursts, so the queue naturally swings by over 100 ms; trimming
+    // at 100 ms (the desktop value) dropped ~20% of chunks on an AYN Thor and garbled audio.
+    uint32_t skip_factor = cur_queued_microseconds / 300000;
+#else
     uint32_t skip_factor = cur_queued_microseconds / 100000;
+#endif
     if (skip_factor != 0) {
         uint32_t skip_ratio = 1 << skip_factor;
         num_bytes_to_queue /= skip_ratio;
