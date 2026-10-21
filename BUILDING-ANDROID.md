@@ -14,7 +14,7 @@ Vulkan 1.1 GPU.
 | Activity | `app/src/main/java/.../DK64Activity.java` | Extends `SDLActivity`: lifecycle, immersive fullscreen, asset extraction, file picker, places the touch controls |
 | Storage | `app/src/main/java/.../StorageAccess.java` | First-launch choice of shared folder vs app storage, and the storage permission flow |
 | Touch controls | `TouchControllerView.java`, `TouchInput.java`, `android/jni/touch_controller.cpp` | On-screen N64 controller driving an SDL virtual gamepad, when there's no physical gamepad |
-| Second screen | `SecondScreenPresentation.java`, `BottomScreenView.java`, `DkIcons.java`, `GameState.java`, `android/jni/game_state.cpp` | Companion display on a second screen (e.g. AYN Thor): health, Kong collectibles, Z+C action buttons. Reads game memory, never writes it |
+| Second screen | `SecondScreenPresentation.java`, `BottomScreenView.java`, `RomIcons.java`, `DkIcons.java`, `GameState.java`, `android/jni/game_state.cpp` | Companion display on a second screen (e.g. AYN Thor): health, Kong collectibles, Z+C action buttons (greyed out until the move is bought and has ammo). Reads game memory, never writes it. Icons are decoded on the device from the player's own ROM (`RomIcons`); no game art is in the APK or this repository, and the built-in vector icons (`DkIcons`) are used if the ROM can't be read |
 | Native entry | `android/jni/android_main.cpp` | `SDL_main` → sets paths and working directory → calls the desktop `main` |
 | File dialogs | `android/jni/nfd_android.cpp` | Replaces nativefiledialog-extended with Android's document picker |
 | CMake glue | `android/cmake/android.cmake` | Builds SDL2 from source, makes the game target `libmain.so` |

@@ -72,6 +72,7 @@ public final class BottomScreenView extends View {
             if (state.refresh()) {
                 invalidate();
             }
+            RomIcons.ensureLoaded(BottomScreenView.this::postInvalidate);
             if (active) {
                 handler.postDelayed(this, POLL_MS);
             }
@@ -274,7 +275,7 @@ public final class BottomScreenView extends View {
         int remaining = state.health;
         for (int i = 0; i < state.melons; i++) {
             int quarters = Math.max(0, Math.min(4, remaining));
-            DkIcons.melon(c, x, healthY, melonR, quarters);
+            drawMelon(c, x, healthY, melonR, quarters);
             remaining -= 4;
             x += melonR * 2.3f;
         }
@@ -286,6 +287,21 @@ public final class BottomScreenView extends View {
         if (nameW > melonR) {
             text.setTextSize(fitText(KONG_NAMES[kong], nameW, melonR * 0.75f));
             c.drawText(KONG_NAMES[kong], nameX, healthY + melonR * 0.28f, text);
+        }
+    }
+
+    /** The game's melon if the ROM gave us one, with lost quarters shaded; else ours. */
+    private void drawMelon(Canvas c, float cx, float cy, float r, int quarters) {
+        if (!RomIcons.draw(c, RomIcons.melon, cx, cy, r)) {
+            DkIcons.melon(c, cx, cy, r, quarters);
+            return;
+        }
+        if (quarters < 4) {
+            float hh = r * 42f / 48f;
+            tmp.set(cx - r, cy - hh, cx + r, cy + hh);
+            paint.setColor(Color.argb(190, 16, 14, 12));
+            // Quarters go clockwise from the top; the lost ones are the last ones.
+            c.drawArc(tmp, -90 + quarters * 90, (4 - quarters) * 90, true, paint);
         }
     }
 
@@ -331,11 +347,11 @@ public final class BottomScreenView extends View {
         c.drawText(KONG_NAMES[k], x, y, text);
         y += rowH * 1.1f;
 
-        statRow(c, x, y, p.right - pad, rowH, "Golden Bananas", known ? String.valueOf(kong.goldenBananas) : "–", Color.rgb(242, 194, 48));
+        statRow(c, x, y, p.right - pad, rowH, "Golden Bananas", known ? String.valueOf(kong.goldenBananas) : "–", Color.rgb(242, 194, 48), RomIcons.goldenBanana);
         y += rowH;
-        statRow(c, x, y, p.right - pad, rowH, "Bananas", known ? String.valueOf(kong.colouredBananas) : "–", KONG_COLORS[k]);
+        statRow(c, x, y, p.right - pad, rowH, "Bananas", known ? String.valueOf(kong.colouredBananas) : "–", KONG_COLORS[k], RomIcons.of(RomIcons.banana, k));
         y += rowH;
-        statRow(c, x, y, p.right - pad, rowH, "Coins", known ? String.valueOf(kong.coins) : "–", Color.rgb(230, 190, 80));
+        statRow(c, x, y, p.right - pad, rowH, "Coins", known ? String.valueOf(kong.coins) : "–", Color.rgb(230, 190, 80), null);
         y += rowH;
 
         y += rowH * 0.6f;
@@ -350,11 +366,13 @@ public final class BottomScreenView extends View {
         c.drawText(shared, x, Math.min(y, p.bottom - rowH * 0.3f), text);
     }
 
-    private void statRow(Canvas c, float x, float y, float right, float rowH, String label, String value, int dot) {
-        paint.setColor(dot);
-        c.drawCircle(x + rowH * 0.18f, y - rowH * 0.17f, rowH * 0.16f, paint);
+    private void statRow(Canvas c, float x, float y, float right, float rowH, String label, String value, int dot, android.graphics.Bitmap icon) {
+        if (!RomIcons.draw(c, icon, x + rowH * 0.26f, y - rowH * 0.17f, rowH * 0.3f)) {
+            paint.setColor(dot);
+            c.drawCircle(x + rowH * 0.26f, y - rowH * 0.17f, rowH * 0.16f, paint);
+        }
         // Room for the label plus a gap and a 4-digit value.
-        float labelX = x + rowH * 0.5f;
+        float labelX = x + rowH * 0.7f;
         text.setTextSize(rowH * 0.42f);
         float valueW = text.measureText("0000");
         text.setTextSize(fitText(label, right - labelX - valueW - rowH * 0.3f, rowH * 0.42f));
@@ -410,10 +428,26 @@ public final class BottomScreenView extends View {
             float iconX = hasCount ? r.left + r.width() * 0.1f + iconR : r.centerX();
             float iconY = r.centerY();
             switch (moves[i]) {
-                case WEAPON: DkIcons.weapon(c, kong, iconX, iconY, iconR); break;
-                case ORANGE: DkIcons.orange(c, iconX, iconY, iconR); break;
-                case INSTRUMENT: DkIcons.instrument(c, kong, iconX, iconY, iconR); break;
-                default: DkIcons.camera(c, iconX, iconY, iconR); break;
+                case WEAPON:
+                    if (!RomIcons.draw(c, RomIcons.of(RomIcons.weapon, kong), iconX, iconY, iconR)) {
+                        DkIcons.weapon(c, kong, iconX, iconY, iconR);
+                    }
+                    break;
+                case ORANGE:
+                    if (!RomIcons.draw(c, RomIcons.orange, iconX, iconY, iconR)) {
+                        DkIcons.orange(c, iconX, iconY, iconR);
+                    }
+                    break;
+                case INSTRUMENT:
+                    if (!RomIcons.draw(c, RomIcons.of(RomIcons.instrument, kong), iconX, iconY, iconR)) {
+                        DkIcons.instrument(c, kong, iconX, iconY, iconR);
+                    }
+                    break;
+                default:
+                    if (!RomIcons.draw(c, RomIcons.film, iconX, iconY, iconR)) {
+                        DkIcons.camera(c, iconX, iconY, iconR);
+                    }
+                    break;
             }
             if (hasCount) {
                 float countLeft = iconX + iconR * 1.2f;

@@ -218,7 +218,9 @@ public class DK64Activity extends SDLActivity
      */
     @SuppressWarnings("unused")
     public String getDataDirectory() {
-        return storage.resolveDataDirectory();
+        String dir = storage.resolveDataDirectory();
+        RomIcons.dataDirectory = dir;
+        return dir;
     }
 
     // ------------------------------------------------------------------------------
