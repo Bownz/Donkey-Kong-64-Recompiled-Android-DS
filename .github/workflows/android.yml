@@ -8,7 +8,7 @@ name: android
 #   DK64ROM       a token that can read that repository
 # (The desktop builds' SECRET_NAME / SECRET_TOKEN secrets also work, and SECRET_NAME
 #  overrides the repository name.)
-# Optional, for a stable release signature (installable over previous builds):
+# For a stable release signature, so each APK installs as an update and keeps your saves:
 #   ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD (ANDROID_KEY_ALIAS defaults to "dk64",
 #   ANDROID_KEY_PASSWORD to the keystore password)
 # See BUILDING-ANDROID.md.

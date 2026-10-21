@@ -228,7 +228,8 @@ DK64_KEY_PASSWORD=...
 **GitHub Actions**: add these repository secrets:
 - `ANDROID_KEYSTORE_BASE64`: the keystore file, base64-encoded. In PowerShell:
   `[Convert]::ToBase64String([IO.File]::ReadAllBytes("C:\keys\dk64-release.jks")) | Set-Clipboard`
-- `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`
+- `ANDROID_KEYSTORE_PASSWORD`
+- optionally `ANDROID_KEY_ALIAS` (default `dk64`) and `ANDROID_KEY_PASSWORD` (default: the keystore password)
 
 Use the same key locally and in CI and you can switch between the two freely.
 
