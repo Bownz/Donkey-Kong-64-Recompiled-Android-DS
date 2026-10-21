@@ -58,7 +58,7 @@ public final class BottomScreenView extends View {
 
     private enum Move { WEAPON, ORANGE, INSTRUMENT, CAMERA, FIRST_PERSON }
 
-    private static final Move[] ACTIONS = { Move.WEAPON, Move.ORANGE, Move.INSTRUMENT, Move.CAMERA };
+    private static final Move[] ACTIONS = { Move.ORANGE, Move.WEAPON, Move.INSTRUMENT, Move.CAMERA };
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final GameState state = new GameState();
@@ -75,6 +75,8 @@ public final class BottomScreenView extends View {
     private boolean showTotals;      // location bar: this level, or the whole game
     private final RectF panelRect = new RectF();
     private final RectF tmp = new RectF();
+    private final RectF tmp2 = new RectF();
+    private final RectF boardRect = new RectF();
     private final RectF barrelRect = new RectF();
     private final Path path = new Path();
     private float fpX, fpY, fpR;
@@ -89,7 +91,11 @@ public final class BottomScreenView extends View {
     private final Runnable poll = new Runnable() {
         @Override
         public void run() {
+            int levelBefore = state.level;
             if (state.refresh()) {
+                if (state.level != levelBefore && state.level >= 0) {
+                    showTotals = false;   // entering a new place shows that place first
+                }
                 invalidate();
             }
             RomIcons.ensureLoaded(BottomScreenView.this::postInvalidate);
@@ -292,12 +298,31 @@ public final class BottomScreenView extends View {
     @Override
     protected void onDraw(Canvas canvas) {
         drawJungle(canvas, getWidth(), getHeight());
+        if (!state.inGame()) {
+            drawTitle(canvas, getWidth(), getHeight());
+            return;
+        }
         drawFirstPersonButton(canvas);
         drawHealth(canvas);
         drawTabs(canvas);
         drawKongPanel(canvas);
         drawLocationBar(canvas);
         drawActions(canvas);
+    }
+
+    /**
+     * Shown until a save is loaded: just the game's name over the jungle. (Our own lettering;
+     * the official logo artwork isn't something this app ships.)
+     */
+    private void drawTitle(Canvas c, int w, int h) {
+        text.setTextAlign(Paint.Align.CENTER);
+        float big = fitText("DONKEY KONG", w * 0.8f, h * 0.2f);
+        text.setTextSize(big);
+        text.setTextSkewX(-0.12f);
+        outlined(c, "DONKEY KONG", w / 2f, h * 0.48f, BANANA);
+        text.setTextSize(big * 1.5f);
+        outlined(c, "64", w / 2f, h * 0.48f + big * 1.45f, Color.rgb(230, 60, 50));
+        text.setTextSkewX(0f);
     }
 
     /** Deep jungle backdrop with big leaves around the edges. */
@@ -575,6 +600,7 @@ public final class BottomScreenView extends View {
         final Bitmap icon;
         final int fallback;   // drawn icon if the ROM one is missing: 0 banana, 1 coin, 2 star
         final int have, total;
+        int color = Color.rgb(90, 160, 60);
 
         Row(String label, Bitmap icon, int fallback, int have, int total) {
             this.label = label;
@@ -590,11 +616,17 @@ public final class BottomScreenView extends View {
         return showTotals || state.level < 0 ? -1 : state.level;
     }
 
+    private static Row colored(Row r, int color) {
+        r.color = color;
+        return r;
+    }
+
     private java.util.List<Row> rowsFor(int tab, int level) {
         java.util.List<Row> rows = new java.util.ArrayList<>();
         boolean all = level < 0;
         if (tab == SHARED_TAB) {
             int[][][] lists = { GameState.FAIRY_FLAGS, GameState.CROWN_FLAGS, GameState.KEY_FLAGS, GameState.RAINBOW_COIN_FLAGS };
+            int[] colors = { Color.rgb(226, 90, 170), Color.rgb(200, 60, 50), Color.rgb(70, 110, 200), Color.rgb(130, 70, 200) };
             String[] labels = { "Banana Fairies", "Battle Crowns", "Boss Keys", "Rainbow Coins" };
             Bitmap[] icons = { RomIcons.fairy, RomIcons.crown, RomIcons.key, RomIcons.rainbowCoin };
             for (int i = 0; i < lists.length; i++) {
@@ -605,14 +637,14 @@ public final class BottomScreenView extends View {
                         total += lists[i][l].length;
                     }
                 }
-                rows.add(new Row(labels[i], icons[i], 2, have, total));
+                rows.add(colored(new Row(labels[i], icons[i], 2, have, total), colors[i]));
             }
             if (all) {
                 int golden = 0;
                 for (GameState.Kong k : state.kongs) {
                     golden += k.goldenBananas;
                 }
-                rows.add(0, new Row("Golden Bananas", RomIcons.goldenBanana, 0, golden, 201));
+                rows.add(0, colored(new Row("Golden Bananas", RomIcons.goldenBanana, 0, golden, 201), Color.rgb(60, 150, 60)));
             }
             return rows;
         }
@@ -643,66 +675,108 @@ public final class BottomScreenView extends View {
             golden = kong.goldenBananas;
             coloured = kong.colouredBananas;
         }
-        rows.add(new Row("Golden Bananas", RomIcons.goldenBanana, 0, golden, goldenTotal));
-        rows.add(new Row("Bananas", RomIcons.of(RomIcons.banana, tab), 0, coloured, colouredTotal));
-        rows.add(new Row(printsTotal == 1 ? "Blueprint" : "Blueprints", RomIcons.blueprint, 2, prints, printsTotal));
-        rows.add(new Row(medalsTotal == 1 ? "Banana Medal" : "Banana Medals", RomIcons.medal, 2, medals, medalsTotal));
-        rows.add(new Row("Coins", null, 1, kong.coins, -1));
+        rows.add(colored(new Row("Golden Bananas", RomIcons.goldenBanana, 0, golden, goldenTotal), Color.rgb(60, 150, 60)));
+        rows.add(colored(new Row("Bananas", RomIcons.of(RomIcons.banana, tab), 0, coloured, colouredTotal), KONG_COLORS[tab]));
+        rows.add(colored(new Row("Blueprints", RomIcons.blueprint, 2, prints, printsTotal), Color.rgb(60, 120, 200)));
+        rows.add(colored(new Row("Banana Medals", RomIcons.medal, 2, medals, medalsTotal), Color.rgb(200, 150, 40)));
+        rows.add(colored(new Row("Coins", null, 1, kong.coins, -1), Color.rgb(220, 180, 40)));
         return rows;
     }
 
+    /**
+     * Collectibles as a grid of round badges with wooden value tags, in the style of DKC
+     * Returns 3D's item screen: a wooden frame around a dark inset board.
+     */
     private void drawKongPanel(Canvas c) {
         RectF p = panelRect;
         woodPanel(c, p, unit * 0.03f, false);
 
         int tab = displayedKong();
-        boolean known = state.inGame();
         java.util.List<Row> rows = rowsFor(tab, shownLevel());
         rows.removeIf(r -> r.total == 0);   // nothing of that kind here (e.g. bananas in Helm)
 
-        float pad = p.width() * 0.06f;
-        float rowH = Math.min((p.height() - pad * 0.5f) / (rows.size() + 1.75f), unit * 0.13f);
-        float x = p.left + pad;
-        float y = p.top + pad * 0.4f + rowH * 0.85f;
+        // Dark inset board.
+        float frame = unit * 0.035f;
+        RectF board = boardRect;
+        board.set(p.left + frame, p.top + frame, p.right - frame, p.bottom - frame);
+        float br = unit * 0.02f;
+        paint.setStyle(Paint.Style.FILL);
+        paint.setShader(new LinearGradient(0, board.top, 0, board.bottom, Color.rgb(46, 26, 12), Color.rgb(70, 40, 18), Shader.TileMode.CLAMP));
+        c.drawRoundRect(board, br, br, paint);
+        paint.setShader(null);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(unit * 0.008f);
+        paint.setColor(Color.rgb(30, 16, 6));
+        c.drawRoundRect(board, br, br, paint);
+        paint.setStyle(Paint.Style.FILL);
 
-        String title = tab == SHARED_TAB ? "Shared Items" : KONG_NAMES[tab];
-        text.setTextAlign(Paint.Align.LEFT);
-        text.setTextSize(fitText(title, p.width() - 2 * pad, rowH * 0.62f));
-        outlined(c, title, x, y, tab == SHARED_TAB ? BANANA : KONG_COLORS[tab]);
-        y += rowH * 1.2f;
-
-        // One text size for every row, set by the longest label.
-        float labelX = x + rowH * 0.8f;
-        text.setTextSize(rowH * 0.46f);
-        float valueW = text.measureText("000/000");
-        rowText = rowH * 0.46f;
-        for (Row r : rows) {
-            rowText = Math.min(rowText, fitText(r.label, p.right - pad - labelX - valueW - rowH * 0.3f, rowH * 0.46f));
-        }
-        for (Row r : rows) {
-            String value = !known ? "–" : r.total < 0 ? String.valueOf(r.have) : r.have + "/" + r.total;
-            boolean complete = known && r.total > 0 && r.have >= r.total;
-            statRow(c, x, y, p.right - pad, rowH, r.label, value, r.icon, r.fallback, complete);
-            y += rowH;
+        int cols = 2;
+        int lines = (rows.size() + cols - 1) / cols;
+        float cellW = board.width() / cols;
+        float cellH = board.height() / Math.max(lines, 1);
+        float badgeR = Math.min(cellH * 0.34f, cellW * 0.17f);
+        for (int i = 0; i < rows.size(); i++) {
+            Row r = rows.get(i);
+            float cx = board.left + (i % cols) * cellW, cy = board.top + (i / cols) * cellH + cellH / 2;
+            float bx = cx + cellW * 0.08f + badgeR;
+            String value = r.total < 0 ? String.valueOf(r.have) : r.have + "/" + r.total;
+            boolean complete = r.total > 0 && r.have >= r.total;
+            // Tag first, so the badge overlaps its left end.
+            tmp.set(bx + badgeR * 0.4f, cy - badgeR * 0.55f, cx + cellW * 0.93f, cy + badgeR * 0.55f);
+            tag(c, tmp, value, complete);
+            badge(c, bx, cy, badgeR, r);
         }
     }
 
-    private void statRow(Canvas c, float x, float y, float right, float rowH, String label, String value,
-                         Bitmap icon, int fallback, boolean complete) {
-        float iconX = x + rowH * 0.3f, iconY = y - rowH * 0.18f, iconR = rowH * 0.34f;
-        if (!RomIcons.draw(c, icon, iconX, iconY, iconR)) {
-            switch (fallback) {
-                case 0: DkIcons.banana(c, iconX, iconY, iconR * 0.8f); break;
-                case 1: DkIcons.coin(c, iconX, iconY, iconR * 0.7f); break;
-                default: DkIcons.star(c, iconX, iconY, iconR * 0.8f); break;
+    /** A round coloured badge with the item's icon. */
+    private void badge(Canvas c, float x, float y, float r, Row row) {
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(OUTLINE);
+        c.drawCircle(x, y, r, paint);
+        int base = row.color;
+        paint.setShader(new LinearGradient(0, y - r, 0, y + r, lighten(base), base, Shader.TileMode.CLAMP));
+        c.drawCircle(x, y, r * 0.86f, paint);
+        paint.setShader(null);
+        // Gloss.
+        paint.setColor(Color.argb(70, 255, 255, 255));
+        tmp2.set(x - r * 0.55f, y - r * 0.78f, x + r * 0.55f, y - r * 0.1f);
+        c.drawOval(tmp2, paint);
+        if (!RomIcons.draw(c, row.icon, x, y, r * 0.62f)) {
+            switch (row.fallback) {
+                case 0: DkIcons.banana(c, x, y, r * 0.55f); break;
+                case 1: DkIcons.coin(c, x, y, r * 0.5f); break;
+                default: DkIcons.star(c, x, y, r * 0.55f); break;
             }
         }
-        float labelX = x + rowH * 0.8f;
-        text.setTextSize(rowText);
-        text.setTextAlign(Paint.Align.LEFT);
-        outlined(c, label, labelX, y, CREAM);
-        text.setTextAlign(Paint.Align.RIGHT);
-        outlined(c, value, right, y, complete ? COMPLETE : BANANA);
+    }
+
+    /** An orange wooden tag with a value on it. */
+    private void tag(Canvas c, RectF r, String value, boolean complete) {
+        float rad = r.height() * 0.3f;
+        paint.setStyle(Paint.Style.FILL);
+        paint.setShader(new LinearGradient(0, r.top, 0, r.bottom, Color.rgb(240, 150, 50), Color.rgb(184, 96, 26), Shader.TileMode.CLAMP));
+        c.drawRoundRect(r, rad, rad, paint);
+        paint.setShader(null);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(unit * 0.0025f);
+        paint.setColor(Color.argb(70, 90, 40, 6));
+        c.drawLine(r.left + rad, r.top + r.height() * 0.3f, r.right - rad, r.top + r.height() * 0.34f, paint);
+        c.drawLine(r.left + rad * 2, r.top + r.height() * 0.72f, r.right - rad * 1.5f, r.top + r.height() * 0.7f, paint);
+        paint.setStrokeWidth(unit * 0.007f);
+        paint.setColor(OUTLINE);
+        c.drawRoundRect(r, rad, rad, paint);
+        paint.setStyle(Paint.Style.FILL);
+        text.setTextAlign(Paint.Align.CENTER);
+        float textLeft = r.left + r.height() * 0.55f;   // clear of the badge
+        text.setTextSize(fitText(value, r.right - textLeft - rad, r.height() * 0.68f));
+        outlined(c, value, (textLeft + r.right) / 2, r.centerY() + text.getTextSize() * 0.36f, complete ? COMPLETE : CREAM);
+    }
+
+    private static int lighten(int color) {
+        int r = Math.min(255, ((color >> 16) & 0xFF) + 70);
+        int g = Math.min(255, ((color >> 8) & 0xFF) + 70);
+        int b = Math.min(255, (color & 0xFF) + 70);
+        return Color.rgb(r, g, b);
     }
 
     /** Wooden sign under the panel: the level shown, with arrows to switch to all levels. */
@@ -744,9 +818,17 @@ public final class BottomScreenView extends View {
         int kong = playingKong();
         boolean known = state.inGame();
         GameState.Kong k = state.kongs[kong];
-        String[] counts = known
-            ? new String[] { String.valueOf(state.ammo), String.valueOf(state.oranges), String.valueOf(k.instrumentEnergy), String.valueOf(state.film) }
-            : new String[] { "", "", "", "" };
+        String[] counts = new String[4];
+        for (int i = 0; i < 4; i++) {
+            int n;
+            switch (ACTIONS[i]) {
+                case ORANGE: n = state.oranges; break;
+                case WEAPON: n = state.ammo; break;
+                case INSTRUMENT: n = k.instrumentEnergy; break;
+                default: n = state.film; break;
+            }
+            counts[i] = known ? String.valueOf(n) : "";
+        }
 
         for (int i = 0; i < 4; i++) {
             Move move = ACTIONS[i];
@@ -815,7 +897,7 @@ public final class BottomScreenView extends View {
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
-        if (!active) {
+        if (!active || !state.inGame()) {
             return false;
         }
         int action = event.getActionMasked();
