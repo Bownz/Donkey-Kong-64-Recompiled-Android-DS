@@ -26,6 +26,8 @@ namespace {
     constexpr uint32_t kCurrentMap = 0x8076A0A8;            // s32 (Maps)
     constexpr uint32_t kLevelIndexByMap = 0x807445E0;       // u8[map] (getLevelIndex)
     constexpr int kLevelSlots = 9;                          // 0-6 levels, 7 Isles, 8 Helm
+    constexpr uint32_t kPlayerPointer = 0x807FBB4C; // Actor* gPlayerPointer
+    constexpr uint32_t kPlayerGunOut = 0x20C;               // u8 in the player actor: gun held
     // Reported as bits: "Kong freed" for DK, Diddy, Lanky, Tiny, Chunky, then orange
     // throwing (training barrel) and the fairy camera (with Shockwave).
     constexpr int16_t kProgressFlags[7] = { 0x181, 0x006, 0x046, 0x042, 0x075, 0x184, 0x179 };
@@ -113,10 +115,11 @@ extern "C" void dk64_android_set_rdram(uint8_t* rdram) {
 //   then [38] progress bits: Kongs freed (bit 0 DK ... bit 4 Chunky), 5 oranges, 6 camera
 //   then [39] level index of the current map (0-6 levels, 7 Isles, 8 Helm; -1 elsewhere)
 //   then [40 + (k * 9 + level) * 2] golden bananas, coloured bananas for Kong k in that level
+//   then [130] 1 while the Kong is holding their gun out
 extern "C" JNIEXPORT jboolean JNICALL
 Java_io_github_bownz_dk64recomp_GameState_nativeRead(JNIEnv* env, jclass, jintArray out) {
     const uint8_t* rdram = g_rdram.load();
-    constexpr jsize kCount = 8 + 5 * 6 + 2 + 5 * kLevelSlots * 2;
+    constexpr jsize kCount = 8 + 5 * 6 + 2 + 5 * kLevelSlots * 2 + 1;
     if (rdram == nullptr || out == nullptr || env->GetArrayLength(out) < kCount) {
         return JNI_FALSE;
     }
@@ -160,6 +163,12 @@ Java_io_github_bownz_dk64recomp_GameState_nativeRead(JNIEnv* env, jclass, jintAr
             dst[0] = read_u16(rdram, cp + kCpGoldenBananas + level * 2);
             dst[1] = read_u16(rdram, cp + kCpColouredBananas + level * 2);
         }
+    }
+
+    {
+        const uint32_t player = read_u32(rdram, kPlayerPointer);
+        values[kCount - 1] = (player >= 0x80000000u && player < 0x80800000u - 0x300)
+            ? (read_u8(rdram, player + kPlayerGunOut) != 0 ? 1 : 0) : 0;
     }
 
     env->SetIntArrayRegion(out, 0, kCount, values);

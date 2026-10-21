@@ -54,7 +54,7 @@ public final class BottomScreenView extends View {
     private static final long Z_LEAD_MS = 100;
     private static final long C_HOLD_MS = 150;
     private static final long Z_TAIL_MS = 60;
-    private static final long POLL_MS = 250;
+    private static final long POLL_MS = 150;
 
     private enum Move { WEAPON, ORANGE, INSTRUMENT, CAMERA, FIRST_PERSON }
 
@@ -75,6 +75,9 @@ public final class BottomScreenView extends View {
     private boolean showTotals;      // location bar: this level, or the whole game
     private final RectF panelRect = new RectF();
     private final RectF tmp = new RectF();
+    private final Paint bitmapPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
+    private Bitmap logo;
+    private boolean logoTried;
     private final RectF tmp2 = new RectF();
     private final RectF boardRect = new RectF();
     private final RectF barrelRect = new RectF();
@@ -315,14 +318,26 @@ public final class BottomScreenView extends View {
      * the official logo artwork isn't something this app ships.)
      */
     private void drawTitle(Canvas c, int w, int h) {
-        text.setTextAlign(Paint.Align.CENTER);
-        float big = fitText("DONKEY KONG", w * 0.8f, h * 0.2f);
-        text.setTextSize(big);
-        text.setTextSkewX(-0.12f);
-        outlined(c, "DONKEY KONG", w / 2f, h * 0.48f, BANANA);
-        text.setTextSize(big * 1.5f);
-        outlined(c, "64", w / 2f, h * 0.48f + big * 1.45f, Color.rgb(230, 60, 50));
-        text.setTextSkewX(0f);
+        Bitmap logo = logo();
+        if (logo != null) {
+            float scale = Math.min(w * 0.78f / logo.getWidth(), h * 0.62f / logo.getHeight());
+            float lw = logo.getWidth() * scale, lh = logo.getHeight() * scale;
+            tmp.set((w - lw) / 2, (h - lh) / 2, (w + lw) / 2, (h + lh) / 2);
+            c.drawBitmap(logo, null, tmp, bitmapPaint);
+        }
+    }
+
+    /** The app's logo, from the APK's assets (the same one the launcher shows). */
+    private Bitmap logo() {
+        if (logo == null && !logoTried) {
+            logoTried = true;
+            try (java.io.InputStream in = getContext().getAssets().open("game/assets/Logo.png")) {
+                logo = android.graphics.BitmapFactory.decodeStream(in);
+            } catch (Exception | LinkageError e) {
+                logo = null;
+            }
+        }
+        return logo;
     }
 
     /** Deep jungle backdrop with big leaves around the edges. */
@@ -485,27 +500,39 @@ public final class BottomScreenView extends View {
         paint.setStyle(Paint.Style.FILL);
     }
 
+    /**
+     * First-person view: a round badge (like the item badges) with the game's aiming
+     * crosshair, and a small wooden tag naming it.
+     */
     private void drawFirstPersonButton(Canvas c) {
         boolean pressed = running == Move.FIRST_PERSON;
-        // Barrel lid: rings of wood.
+        float r = fpR * 0.92f;
+        float cy = fpY - fpR * 0.08f;
         paint.setStyle(Paint.Style.FILL);
-        paint.setColor(WOOD_EDGE);
-        c.drawCircle(fpX, fpY, fpR, paint);
-        paint.setColor(pressed ? Color.rgb(186, 124, 64) : WOOD_LIGHT);
-        c.drawCircle(fpX, fpY, fpR * 0.9f, paint);
+        paint.setColor(OUTLINE);
+        c.drawCircle(fpX, cy, r, paint);
+        int top = pressed ? Color.rgb(120, 200, 230) : Color.rgb(70, 150, 190);
+        int bottom = pressed ? Color.rgb(40, 120, 160) : Color.rgb(24, 80, 120);
+        paint.setShader(new LinearGradient(0, cy - r, 0, cy + r, top, bottom, Shader.TileMode.CLAMP));
+        c.drawCircle(fpX, cy, r * 0.87f, paint);
+        paint.setShader(null);
+        paint.setColor(Color.argb(60, 255, 255, 255));
+        tmp2.set(fpX - r * 0.55f, cy - r * 0.8f, fpX + r * 0.55f, cy - r * 0.12f);
+        c.drawOval(tmp2, paint);
         paint.setStyle(Paint.Style.STROKE);
-        paint.setStrokeWidth(unit * 0.003f);
-        paint.setColor(Color.argb(90, 60, 32, 10));
-        c.drawCircle(fpX, fpY, fpR * 0.7f, paint);
-        c.drawCircle(fpX, fpY, fpR * 0.48f, paint);
-        paint.setStrokeWidth(unit * (pressed ? 0.012f : 0.008f));
-        paint.setColor(pressed ? BANANA : Color.rgb(58, 58, 64));
-        c.drawCircle(fpX, fpY, fpR * 0.95f, paint);
+        paint.setStrokeWidth(unit * 0.006f);
+        paint.setColor(pressed ? BANANA : Color.argb(140, 255, 255, 255));
+        c.drawCircle(fpX, cy, r * 0.87f, paint);
         paint.setStyle(Paint.Style.FILL);
-        DkIcons.eye(c, fpX, fpY - fpR * 0.12f, fpR * 0.5f);
+        if (!RomIcons.draw(c, RomIcons.crosshair, fpX, cy, r * 0.62f)) {
+            DkIcons.eye(c, fpX, cy, r * 0.5f);
+        }
+        // Name tag across the bottom.
+        tmp.set(fpX - fpR * 0.78f, fpY + fpR * 0.58f, fpX + fpR * 0.78f, fpY + fpR * 0.98f);
+        tagPlate(c, tmp);
         text.setTextAlign(Paint.Align.CENTER);
-        text.setTextSize(fitText("1st person", fpR * 1.3f, fpR * 0.27f));
-        outlined(c, "1st person", fpX, fpY + fpR * 0.58f, CREAM);
+        text.setTextSize(fitText("1st Person", tmp.width() * 0.84f, tmp.height() * 0.66f));
+        outlined(c, "1st Person", tmp.centerX(), tmp.centerY() + text.getTextSize() * 0.36f, CREAM);
     }
 
     private void drawHealth(Canvas c) {
@@ -678,8 +705,8 @@ public final class BottomScreenView extends View {
         rows.add(colored(new Row("Golden Bananas", RomIcons.goldenBanana, 0, golden, goldenTotal), Color.rgb(60, 150, 60)));
         rows.add(colored(new Row("Bananas", RomIcons.of(RomIcons.banana, tab), 0, coloured, colouredTotal), KONG_COLORS[tab]));
         rows.add(colored(new Row("Blueprints", RomIcons.blueprint, 2, prints, printsTotal), Color.rgb(60, 120, 200)));
-        rows.add(colored(new Row("Banana Medals", RomIcons.medal, 2, medals, medalsTotal), Color.rgb(200, 150, 40)));
-        rows.add(colored(new Row("Coins", null, 1, kong.coins, -1), Color.rgb(220, 180, 40)));
+        rows.add(colored(new Row("Banana Medals", RomIcons.of(RomIcons.medalByKong, tab), 2, medals, medalsTotal), darker(KONG_COLORS[tab])));
+        rows.add(colored(new Row("Coins", RomIcons.of(RomIcons.coin, tab), 1, kong.coins, -1), darker(KONG_COLORS[tab])));
         return rows;
     }
 
@@ -750,6 +777,20 @@ public final class BottomScreenView extends View {
         }
     }
 
+    /** An orange wooden plate (the item tags and the first-person label). */
+    private void tagPlate(Canvas c, RectF r) {
+        float rad = r.height() * 0.3f;
+        paint.setStyle(Paint.Style.FILL);
+        paint.setShader(new LinearGradient(0, r.top, 0, r.bottom, Color.rgb(240, 150, 50), Color.rgb(184, 96, 26), Shader.TileMode.CLAMP));
+        c.drawRoundRect(r, rad, rad, paint);
+        paint.setShader(null);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(unit * 0.006f);
+        paint.setColor(OUTLINE);
+        c.drawRoundRect(r, rad, rad, paint);
+        paint.setStyle(Paint.Style.FILL);
+    }
+
     /** An orange wooden tag with a value on it. */
     private void tag(Canvas c, RectF r, String value, boolean complete) {
         float rad = r.height() * 0.3f;
@@ -770,6 +811,10 @@ public final class BottomScreenView extends View {
         float textLeft = r.left + r.height() * 0.55f;   // clear of the badge
         text.setTextSize(fitText(value, r.right - textLeft - rad, r.height() * 0.68f));
         outlined(c, value, (textLeft + r.right) / 2, r.centerY() + text.getTextSize() * 0.36f, complete ? COMPLETE : CREAM);
+    }
+
+    private static int darker(int color) {
+        return Color.rgb(((color >> 16) & 0xFF) * 3 / 5, ((color >> 8) & 0xFF) * 3 / 5, (color & 0xFF) * 3 / 5);
     }
 
     private static int lighten(int color) {
@@ -839,7 +884,8 @@ public final class BottomScreenView extends View {
                 c.drawRoundRect(r, r.height() * 0.18f, r.height() * 0.18f, paint);
                 continue;
             }
-            boolean pressed = running == move;
+            // The weapon button stays lit while the Kong has the gun out.
+            boolean pressed = running == move || (move == Move.WEAPON && state.gunOut);
             boolean enabled = available(move);
 
             int saved = c.saveLayerAlpha(r.left - unit * 0.02f, r.top - unit * 0.02f,

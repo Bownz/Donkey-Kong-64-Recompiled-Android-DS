@@ -34,23 +34,25 @@ final class RomIcons {
     private static final int TEXTURES_HUD = 14;
     private static final int TEXTURES_GEOMETRY = 25;
 
+    private static final int RGBA5551 = 0, RGBA32 = 1, IA8 = 2;
+
     /** Where each icon lives: table, file, width, height, stored upside down. */
     private static final class Spec {
         final int table, file, width, height;
         final boolean flipped;
-        final boolean rgba32;   // RGBA8888 instead of RGBA5551
+        final int format;       // RGBA5551, RGBA32 or IA8
 
         Spec(int table, int file, int width, int height, boolean flipped) {
-            this(table, file, width, height, flipped, false);
+            this(table, file, width, height, flipped, RGBA5551);
         }
 
-        Spec(int table, int file, int width, int height, boolean flipped, boolean rgba32) {
+        Spec(int table, int file, int width, int height, boolean flipped, int format) {
             this.table = table;
             this.file = file;
             this.width = width;
             this.height = height;
             this.flipped = flipped;
-            this.rgba32 = rgba32;
+            this.format = format;
         }
     }
 
@@ -62,8 +64,18 @@ final class RomIcons {
     private static final Spec BLUEPRINT = new Spec(TEXTURES_GEOMETRY, 0x15FC, 48, 42, true);
     private static final Spec CROWN = new Spec(TEXTURES_GEOMETRY, 5893, 44, 44, true);
     private static final Spec KEY = new Spec(TEXTURES_GEOMETRY, 0x16F5, 44, 44, true);
-    private static final Spec RAINBOW_COIN = new Spec(TEXTURES_GEOMETRY, 5963, 48, 44, true);
-    private static final Spec FAIRY = new Spec(TEXTURES_GEOMETRY, 5869, 32, 32, true, true);
+    private static final Spec RAINBOW_COIN = new Spec(TEXTURES_GEOMETRY, 5963, 48, 42, true);
+    private static final Spec FAIRY = new Spec(TEXTURES_GEOMETRY, 5869, 32, 32, true, RGBA32);
+    // The first-person / gun crosshair from the HUD.
+    private static final Spec CROSSHAIR = new Spec(TEXTURES_HUD, 0x38, 64, 64, false, IA8);
+    // Banana Coins, face-on frame of each Kong's spinning coin: DK, Diddy, Lanky, Tiny, Chunky.
+    private static final Spec[] COIN = {
+        new Spec(TEXTURES_UNCOMPRESSED, 0x112, 44, 44, true),
+        new Spec(TEXTURES_UNCOMPRESSED, 0x356, 44, 44, true),
+        new Spec(TEXTURES_UNCOMPRESSED, 0x332, 44, 44, true),
+        new Spec(TEXTURES_UNCOMPRESSED, 0x34A, 44, 44, true),
+        new Spec(TEXTURES_UNCOMPRESSED, 0x33E, 44, 44, true),
+    };
     // Per Kong: DK, Diddy, Lanky, Tiny, Chunky.
     private static final Spec[] BANANA = {
         new Spec(TEXTURES_UNCOMPRESSED, 0xA8, 44, 44, true),
@@ -93,7 +105,11 @@ final class RomIcons {
     };
 
     static volatile Bitmap melon, orange, film, goldenBanana;
-    static volatile Bitmap medal, blueprint, crown, key, rainbowCoin, fairy;
+    static volatile Bitmap medal, blueprint, crown, key, rainbowCoin, fairy, crosshair;
+    static final Bitmap[] coin = new Bitmap[5];
+    // The game's medal is gold for everyone; this is it recoloured to each Kong's colour.
+    static final Bitmap[] medalByKong = new Bitmap[5];
+    private static final int[] KONG_HUES = { -1, 0xD9383A, 0x3C78D8, 0x9B59D0, 0x4CAF50 };
     // The HUD / pause-screen health melon by quarters left: [0] = 1 quarter ... [3] = full.
     // The game draws the full one faintly behind the current one (code_10D2D0.c).
     static final Bitmap[] healthMelon = new Bitmap[4];
@@ -141,7 +157,17 @@ final class RomIcons {
                 key = load(f, KEY);
                 rainbowCoin = load(f, RAINBOW_COIN);
                 fairy = load(f, FAIRY);
-                int found = count(melon, orange, film, goldenBanana, medal, blueprint, crown, key, rainbowCoin, fairy);
+                crosshair = load(f, CROSSHAIR);
+                int[] medalPixels = pixels(f, MEDAL);
+                int found = count(melon, orange, film, goldenBanana, medal, blueprint, crown, key, rainbowCoin, fairy, crosshair);
+                for (int k = 0; k < 5; k++) {
+                    coin[k] = load(f, COIN[k]);
+                    if (medalPixels != null) {
+                        medalByKong[k] = Bitmap.createBitmap(KONG_HUES[k] < 0 ? medalPixels : recolor(medalPixels, KONG_HUES[k]),
+                            MEDAL.width, MEDAL.height, Bitmap.Config.ARGB_8888);
+                    }
+                    found += count(coin[k]);
+                }
                 for (int q = 0; q < 4; q++) {
                     // Unlike the sprites, these HUD textures are stored the right way up.
                     healthMelon[q] = load(f, new Spec(TEXTURES_HUD, 0x5A + q, 48, 42, false));
@@ -154,7 +180,7 @@ final class RomIcons {
                     face[k] = loadFace(f, FACE_HALVES[k]);
                     found += count(banana[k], weapon[k], instrument[k], face[k]);
                 }
-                Log.i(TAG, "Bottom screen: " + found + " of 34 icons loaded from the ROM");
+                Log.i(TAG, "Bottom screen: " + found + " of 40 icons loaded from the ROM");
             } catch (IOException | RuntimeException e) {
                 Log.w(TAG, "Bottom screen: couldn't read icons from the ROM", e);
             }
@@ -281,10 +307,37 @@ final class RomIcons {
         }
     }
 
-    /** RGBA5551 (or RGBA8888) to ARGB. Rejects data that's too short or has no visible pixels. */
+    /**
+     * Gold to another colour: keeps each pixel's brightness, takes the hue and saturation of
+     * {@code rgb}, for the coloured (non-grey) pixels.
+     */
+    private static int[] recolor(int[] argb, int rgb) {
+        int[] out = argb.clone();
+        float tr = ((rgb >> 16) & 0xFF) / 255f, tg = ((rgb >> 8) & 0xFF) / 255f, tb = (rgb & 0xFF) / 255f;
+        float tl = 0.3f * tr + 0.59f * tg + 0.11f * tb;
+        for (int i = 0; i < out.length; i++) {
+            int p = out[i];
+            if ((p >>> 24) == 0) {
+                continue;
+            }
+            int r = (p >> 16) & 0xFF, g = (p >> 8) & 0xFF, b = p & 0xFF;
+            int max = Math.max(r, Math.max(g, b)), min = Math.min(r, Math.min(g, b));
+            if (max - min < 40) {
+                continue; // greys and whites stay as they are
+            }
+            float l = (0.3f * r + 0.59f * g + 0.11f * b) / 255f;
+            float scale = l / Math.max(tl, 0.01f);
+            int nr = Math.min(255, Math.round(tr * scale * 255)), ng = Math.min(255, Math.round(tg * scale * 255)), nb = Math.min(255, Math.round(tb * scale * 255));
+            out[i] = (p & 0xFF000000) | nr << 16 | ng << 8 | nb;
+        }
+        return out;
+    }
+
+    /** RGBA5551, RGBA8888 or IA8 to ARGB. Rejects data that's too short or has no visible pixels. */
     private static int[] decode(byte[] data, Spec spec) {
         int w = spec.width, h = spec.height;
-        if (data.length < w * h * (spec.rgba32 ? 4 : 2)) {
+        int bpp = spec.format == RGBA32 ? 4 : spec.format == IA8 ? 1 : 2;
+        if (data.length < w * h * bpp) {
             return null;
         }
         int[] argb = new int[w * h];
@@ -292,7 +345,17 @@ final class RomIcons {
         for (int y = 0; y < h; y++) {
             int row = spec.flipped ? h - 1 - y : y;
             for (int x = 0; x < w; x++) {
-                if (spec.rgba32) {
+                if (spec.format == IA8) {
+                    int v = data[row * w + x] & 0xFF;
+                    int a = (v & 0xF) * 17, in = (v >> 4) * 17;
+                    if (a < 16) {
+                        continue;
+                    }
+                    argb[y * w + x] = a << 24 | in << 16 | in << 8 | in;
+                    opaque++;
+                    continue;
+                }
+                if (spec.format == RGBA32) {
                     int i = (row * w + x) * 4;
                     int a = data[i + 3] & 0xFF;
                     if (a < 16) {
@@ -313,7 +376,7 @@ final class RomIcons {
             }
         }
         // A real icon has a solid middle (a face half may be fully opaque).
-        if (opaque < w * h / 8) {
+        if (opaque < w * h / (spec.format == IA8 ? 60 : 8)) {
             return null;
         }
         return argb;

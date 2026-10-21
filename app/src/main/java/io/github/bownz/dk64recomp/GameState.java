@@ -18,7 +18,7 @@ final class GameState {
         "Crystal Caves", "Creepy Castle", "DK Isles", "Hideout Helm",
     };
 
-    private static final int COUNT = 8 + KONG_COUNT * 6 + 2 + KONG_COUNT * LEVELS * 2;
+    private static final int COUNT = 8 + KONG_COUNT * 6 + 2 + KONG_COUNT * LEVELS * 2 + 1;
 
     // ---- Permanent flags (DK64 Randomizer location lists; US release) ----------------
     // Shared collectibles, per level slot.
@@ -113,6 +113,8 @@ final class GameState {
 
     /** The level being played (kept through bonus rooms and menus); -1 until known. */
     int level = -1;
+    /** The Kong is holding their gun out (after Z + C-Left, until it's put away). */
+    boolean gunOut;
     final int[][] goldenByLevel = new int[KONG_COUNT][LEVELS];
     final int[][] colouredByLevel = new int[KONG_COUNT][LEVELS];
 
@@ -177,6 +179,7 @@ final class GameState {
         if (newLevel >= 0 && newLevel < LEVELS) {
             level = newLevel;
         }
+        gunOut = raw[COUNT - 1] != 0;
         for (int k = 0; k < KONG_COUNT; k++) {
             for (int l = 0; l < LEVELS; l++) {
                 int base = 8 + KONG_COUNT * 6 + 2 + (k * LEVELS + l) * 2;
