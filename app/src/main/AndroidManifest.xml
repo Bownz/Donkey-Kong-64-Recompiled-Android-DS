@@ -92,6 +92,20 @@
             android:excludeFromRecents="true"
             android:theme="@android:style/Theme.DeviceDefault.Dialog.NoActionBar" />
 
+        <!-- Also in the app drawer, for launchers without long-press shortcuts (e.g. the AYN
+             Thor's). -->
+        <activity-alias
+            android:name=".GpuDriverLauncher"
+            android:targetActivity=".GpuDriverActivity"
+            android:exported="true"
+            android:label="@string/launcher_gpu_driver"
+            android:icon="@mipmap/ic_launcher">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
         <!-- Let the app use the full display on tall/notched screens. -->
         <meta-data android:name="android.max_aspect" android:value="2.4" />
     </application>

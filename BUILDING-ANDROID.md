@@ -311,7 +311,7 @@ Requires `ninja` on `PATH`.
 
 ### Custom graphics driver (Turnip)
 
-Long-press the app icon and choose **Graphics driver**. **Install .zip…** takes a driver
+Open **DK64 Graphics Driver** from the app drawer (or long-press the app icon and choose **Graphics driver**). **Install .zip…** takes a driver
 package in the AdrenoTools format (a .zip with `meta.json` and the driver `.so`, e.g. Mesa
 Turnip builds made for Adreno), and **Use** picks it, or the system driver. The game
 restarts to apply it. Loading goes through [libadrenotools](https://github.com/bylaws/libadrenotools)
