@@ -235,6 +235,20 @@ final class DkIcons {
         c.drawLine(cx + r * 0.85f, cy - r * 0.15f, cx + r * 0.95f, cy - r * 0.35f, stroke(Color.rgb(90, 60, 20), r * 0.14f));
     }
 
+    /** A five-pointed star (generic collectible). */
+    static void star(Canvas c, float cx, float cy, float r) {
+        PATH.reset();
+        for (int i = 0; i < 10; i++) {
+            double a = Math.PI / 2 + i * Math.PI / 5;
+            float rr = i % 2 == 0 ? r : r * 0.45f;
+            float px = cx + (float) Math.cos(a) * rr, py = cy - (float) Math.sin(a) * rr;
+            if (i == 0) PATH.moveTo(px, py); else PATH.lineTo(px, py);
+        }
+        PATH.close();
+        c.drawPath(PATH, fill(Color.rgb(255, 214, 40)));
+        c.drawPath(PATH, stroke(Color.rgb(120, 80, 10), r * 0.1f));
+    }
+
     /** A gold coin. */
     static void coin(Canvas c, float cx, float cy, float r) {
         c.drawCircle(cx, cy, r, fill(Color.rgb(196, 140, 30)));

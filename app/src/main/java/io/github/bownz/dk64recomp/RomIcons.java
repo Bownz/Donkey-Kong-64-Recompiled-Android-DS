@@ -38,13 +38,19 @@ final class RomIcons {
     private static final class Spec {
         final int table, file, width, height;
         final boolean flipped;
+        final boolean rgba32;   // RGBA8888 instead of RGBA5551
 
         Spec(int table, int file, int width, int height, boolean flipped) {
+            this(table, file, width, height, flipped, false);
+        }
+
+        Spec(int table, int file, int width, int height, boolean flipped, boolean rgba32) {
             this.table = table;
             this.file = file;
             this.width = width;
             this.height = height;
             this.flipped = flipped;
+            this.rgba32 = rgba32;
         }
     }
 
@@ -52,6 +58,12 @@ final class RomIcons {
     private static final Spec ORANGE = new Spec(TEXTURES_UNCOMPRESSED, 0x136, 32, 32, true);
     private static final Spec FILM = new Spec(TEXTURES_UNCOMPRESSED, 439, 48, 42, true);
     private static final Spec GOLDEN_BANANA = new Spec(TEXTURES_GEOMETRY, 5468, 44, 44, true);
+    private static final Spec MEDAL = new Spec(TEXTURES_GEOMETRY, 0x156C, 44, 44, true);
+    private static final Spec BLUEPRINT = new Spec(TEXTURES_GEOMETRY, 0x15FC, 48, 42, true);
+    private static final Spec CROWN = new Spec(TEXTURES_GEOMETRY, 5893, 44, 44, true);
+    private static final Spec KEY = new Spec(TEXTURES_GEOMETRY, 0x16F5, 44, 44, true);
+    private static final Spec RAINBOW_COIN = new Spec(TEXTURES_GEOMETRY, 5963, 48, 44, true);
+    private static final Spec FAIRY = new Spec(TEXTURES_GEOMETRY, 5869, 32, 32, true, true);
     // Per Kong: DK, Diddy, Lanky, Tiny, Chunky.
     private static final Spec[] BANANA = {
         new Spec(TEXTURES_UNCOMPRESSED, 0xA8, 44, 44, true),
@@ -81,6 +93,7 @@ final class RomIcons {
     };
 
     static volatile Bitmap melon, orange, film, goldenBanana;
+    static volatile Bitmap medal, blueprint, crown, key, rainbowCoin, fairy;
     // The HUD / pause-screen health melon by quarters left: [0] = 1 quarter ... [3] = full.
     // The game draws the full one faintly behind the current one (code_10D2D0.c).
     static final Bitmap[] healthMelon = new Bitmap[4];
@@ -122,9 +135,16 @@ final class RomIcons {
                 orange = load(f, ORANGE);
                 film = load(f, FILM);
                 goldenBanana = load(f, GOLDEN_BANANA);
-                int found = count(melon, orange, film, goldenBanana);
+                medal = load(f, MEDAL);
+                blueprint = load(f, BLUEPRINT);
+                crown = load(f, CROWN);
+                key = load(f, KEY);
+                rainbowCoin = load(f, RAINBOW_COIN);
+                fairy = load(f, FAIRY);
+                int found = count(melon, orange, film, goldenBanana, medal, blueprint, crown, key, rainbowCoin, fairy);
                 for (int q = 0; q < 4; q++) {
-                    healthMelon[q] = load(f, new Spec(TEXTURES_HUD, 0x5A + q, 48, 42, true));
+                    // Unlike the sprites, these HUD textures are stored the right way up.
+                    healthMelon[q] = load(f, new Spec(TEXTURES_HUD, 0x5A + q, 48, 42, false));
                     found += count(healthMelon[q]);
                 }
                 for (int k = 0; k < 5; k++) {
@@ -134,7 +154,7 @@ final class RomIcons {
                     face[k] = loadFace(f, FACE_HALVES[k]);
                     found += count(banana[k], weapon[k], instrument[k], face[k]);
                 }
-                Log.i(TAG, "Bottom screen: " + found + " of 28 icons loaded from the ROM");
+                Log.i(TAG, "Bottom screen: " + found + " of 34 icons loaded from the ROM");
             } catch (IOException | RuntimeException e) {
                 Log.w(TAG, "Bottom screen: couldn't read icons from the ROM", e);
             }
@@ -261,10 +281,10 @@ final class RomIcons {
         }
     }
 
-    /** RGBA5551 to ARGB. Rejects data that's too short or has no visible pixels. */
+    /** RGBA5551 (or RGBA8888) to ARGB. Rejects data that's too short or has no visible pixels. */
     private static int[] decode(byte[] data, Spec spec) {
         int w = spec.width, h = spec.height;
-        if (data.length < w * h * 2) {
+        if (data.length < w * h * (spec.rgba32 ? 4 : 2)) {
             return null;
         }
         int[] argb = new int[w * h];
@@ -272,6 +292,16 @@ final class RomIcons {
         for (int y = 0; y < h; y++) {
             int row = spec.flipped ? h - 1 - y : y;
             for (int x = 0; x < w; x++) {
+                if (spec.rgba32) {
+                    int i = (row * w + x) * 4;
+                    int a = data[i + 3] & 0xFF;
+                    if (a < 16) {
+                        continue;
+                    }
+                    argb[y * w + x] = a << 24 | (data[i] & 0xFF) << 16 | (data[i + 1] & 0xFF) << 8 | (data[i + 2] & 0xFF);
+                    opaque++;
+                    continue;
+                }
                 int i = (row * w + x) * 2;
                 int p = ((data[i] & 0xFF) << 8) | (data[i + 1] & 0xFF);
                 if ((p & 1) == 0) {

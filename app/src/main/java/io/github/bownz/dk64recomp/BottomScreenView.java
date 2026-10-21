@@ -47,6 +47,7 @@ public final class BottomScreenView extends View {
     private static final int BANANA = Color.rgb(255, 214, 40);
     private static final int OUTLINE = Color.rgb(58, 30, 6);
     private static final int CREAM = Color.rgb(255, 244, 214);
+    private static final int COMPLETE = Color.rgb(140, 230, 110);
 
     // Input timing. DK64 reads input once per game frame (~33 ms at 30 fps), so each step
     // lasts a few frames: hold Z, press C while Z is still held, then let go.
@@ -54,7 +55,6 @@ public final class BottomScreenView extends View {
     private static final long C_HOLD_MS = 150;
     private static final long Z_TAIL_MS = 60;
     private static final long POLL_MS = 250;
-    private static final long FRAME_MS = 33;
 
     private enum Move { WEAPON, ORANGE, INSTRUMENT, CAMERA, FIRST_PERSON }
 
@@ -64,11 +64,15 @@ public final class BottomScreenView extends View {
     private final GameState state = new GameState();
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint text = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final long startNanos = System.nanoTime();
 
     // Layout, in pixels (computed in onSizeChanged).
     private final RectF[] actionRects = { new RectF(), new RectF(), new RectF(), new RectF() };
-    private final RectF[] tabRects = new RectF[GameState.KONG_COUNT];
+    /** Tabs: the five Kongs, then shared (non-Kong) collectibles. */
+    private static final int SHARED_TAB = GameState.KONG_COUNT;
+    private static final int TAB_COUNT = GameState.KONG_COUNT + 1;
+    private final RectF[] tabRects = new RectF[TAB_COUNT];
+    private final RectF locationRect = new RectF();
+    private boolean showTotals;      // location bar: this level, or the whole game
     private final RectF panelRect = new RectF();
     private final RectF tmp = new RectF();
     private final RectF barrelRect = new RectF();
@@ -95,20 +99,6 @@ public final class BottomScreenView extends View {
         }
     };
 
-    // Keeps the health melons bobbing, like the game's HUD and pause screen.
-    private final Runnable animate = new Runnable() {
-        @Override
-        public void run() {
-            if (!active) {
-                return;
-            }
-            if (state.inGame() && RomIcons.healthMelon[3] != null) {
-                invalidate((int) (healthX - melonR * 2), 0, (int) (healthX + melonR * 9), (int) (healthY + melonR * 2.5f));
-            }
-            handler.postDelayed(this, FRAME_MS);
-        }
-    };
-
     public BottomScreenView(Context context) {
         super(context);
         for (int i = 0; i < tabRects.length; i++) {
@@ -132,7 +122,6 @@ public final class BottomScreenView extends View {
         if (active) {
             TouchInput.acquire();
             handler.post(poll);
-            handler.post(animate);
         } else {
             cancel();
             handler.removeCallbacksAndMessages(null);
@@ -152,7 +141,6 @@ public final class BottomScreenView extends View {
         }
         if (active) {
             handler.post(poll);
-            handler.post(animate);
         }
     }
 
@@ -200,8 +188,9 @@ public final class BottomScreenView extends View {
         }, Z_LEAD_MS + C_HOLD_MS + Z_TAIL_MS);
     }
 
+    /** The tab being shown: a Kong (0-4) or SHARED_TAB. */
     private int displayedKong() {
-        if (selectedKong >= 0 && !isLocked(selectedKong)) {
+        if (selectedKong == SHARED_TAB || (selectedKong >= 0 && !isLocked(selectedKong))) {
             return selectedKong;
         }
         return state.inGame() ? state.currentKong : GameState.DK;
@@ -213,7 +202,7 @@ public final class BottomScreenView extends View {
 
     /** Kongs not freed yet in the running game (unknown before a game starts: all shown). */
     private boolean isLocked(int k) {
-        return state.inGame() && !state.isFreed(k);
+        return k < GameState.KONG_COUNT && state.inGame() && !state.isFreed(k);
     }
 
     /**
@@ -286,12 +275,14 @@ public final class BottomScreenView extends View {
         float tabsTop = m + 2 * fpR + m;
         float tabH = unit * 0.13f;
         float tabGap = m * 0.5f;
-        float tabW = (right - left - tabGap * (GameState.KONG_COUNT - 1)) / GameState.KONG_COUNT;
-        for (int i = 0; i < GameState.KONG_COUNT; i++) {
+        float tabW = (right - left - tabGap * (TAB_COUNT - 1)) / TAB_COUNT;
+        for (int i = 0; i < TAB_COUNT; i++) {
             float l = left + i * (tabW + tabGap);
             tabRects[i].set(l, tabsTop, l + tabW, tabsTop + tabH);
         }
-        panelRect.set(left, tabsTop + tabH + m * 0.6f, right, h - m);
+        float barH = unit * 0.1f;
+        locationRect.set(left, h - m - barH, right, h - m);
+        panelRect.set(left, tabsTop + tabH + m * 0.6f, right, locationRect.top - m * 0.5f);
     }
 
     // ------------------------------------------------------------------------------
@@ -305,6 +296,7 @@ public final class BottomScreenView extends View {
         drawHealth(canvas);
         drawTabs(canvas);
         drawKongPanel(canvas);
+        drawLocationBar(canvas);
         drawActions(canvas);
     }
 
@@ -496,60 +488,35 @@ public final class BottomScreenView extends View {
         if (!state.inGame()) {
             String hint = "Start a game to see health";
             float hintX = healthX - melonR;
-            text.setTextSize(fitText(hint, tabRects[GameState.KONG_COUNT - 1].right - hintX, melonR * 0.55f));
+            text.setTextSize(fitText(hint, tabRects[TAB_COUNT - 1].right - hintX, melonR * 0.55f));
             outlined(c, hint, hintX, healthY + melonR * 0.2f, CREAM);
             return;
         }
-        float seconds = (System.nanoTime() - startNanos) / 1e9f;
         float x = healthX;
         int remaining = state.health;
         for (int i = 0; i < state.melons; i++) {
-            int quarters = Math.max(0, Math.min(4, remaining));
-            drawMelon(c, i, x, healthY, melonR, quarters, seconds);
+            drawMelon(c, x, healthY, melonR, Math.max(0, Math.min(4, remaining)));
             remaining -= 4;
             x += melonR * 2.4f;
         }
     }
 
     /**
-     * One health melon. With the ROM's HUD melons this mirrors the game: the full melon drawn
-     * faintly, the current quarters on top, both gently squashing and bobbing
-     * (code_10D2D0.c: angle = i * 0x400 + frame * 200, scale 3 +/- 0.3, bob 0..30, sway 10).
+     * One health melon, as the game's HUD and pause screen show it (code_10D2D0.c): the full
+     * melon drawn faintly, the remaining quarters on top. Falls back to our own drawing.
      */
-    private void drawMelon(Canvas c, int index, float cx, float cy, float r, int quarters, float seconds) {
+    private void drawMelon(Canvas c, float cx, float cy, float r, int quarters) {
         Bitmap full = RomIcons.healthMelon[3];
         if (full == null) {
-            if (!RomIcons.draw(c, RomIcons.melon, cx, cy, r)) {
-                DkIcons.melon(c, cx, cy, r, quarters);
-                return;
-            }
-            if (quarters < 4) {
-                float hh = r * 42f / 48f;
-                tmp.set(cx - r, cy - hh, cx + r, cy + hh);
-                paint.setColor(Color.argb(190, 16, 14, 12));
-                c.drawArc(tmp, -90 + quarters * 90, (4 - quarters) * 90, true, paint);
-            }
+            DkIcons.melon(c, cx, cy, r, quarters);
             return;
         }
-        double turn = 2 * Math.PI / 4096.0;
-        double a = index * 0x400 + seconds * 30 * 200;
-        float sx = (float) (1 + 0.1 * Math.sin(a * turn));
-        float sy = (float) (1 + 0.1 * Math.sin((a + 0x800) * turn));
-        // The game's 48-pixel melon is drawn at scale 3 (144 units); offsets are relative.
-        float unitPx = 2 * r / 144f;
-        float dx = (float) (Math.sin((a / 2 + 0x200) * turn) * 10) * unitPx;
-        float dy = (float) ((Math.sin(a * turn) * 0.5 + 0.5) * 30 - 15) * unitPx * 0.6f;
-
-        int saved = c.save();
-        c.translate(cx + dx, cy + dy);
-        c.scale(sx, sy);
-        int faint = c.saveLayerAlpha(-r * 1.2f, -r * 1.2f, r * 1.2f, r * 1.2f, 80);
-        RomIcons.draw(c, full, 0, 0, r);
+        int faint = c.saveLayerAlpha(cx - r * 1.2f, cy - r * 1.2f, cx + r * 1.2f, cy + r * 1.2f, 80);
+        RomIcons.draw(c, full, cx, cy, r);
         c.restoreToCount(faint);
         if (quarters > 0) {
-            RomIcons.draw(c, RomIcons.healthMelon[Math.min(quarters, 4) - 1], 0, 0, r);
+            RomIcons.draw(c, RomIcons.healthMelon[quarters - 1], cx, cy, r);
         }
-        c.restoreToCount(saved);
     }
 
     private void drawTabs(Canvas c) {
@@ -569,6 +536,14 @@ public final class BottomScreenView extends View {
                 continue; // Greyed out, no face or name, until the Kong is freed.
             }
             float faceR = Math.min(r.height(), r.width()) * 0.36f;
+            if (i == SHARED_TAB) {
+                // Shared collectibles: a banana fairy (or a golden banana) on the barrel.
+                Bitmap icon = RomIcons.fairy != null ? RomIcons.fairy : RomIcons.goldenBanana;
+                if (!RomIcons.draw(c, icon, r.centerX(), r.centerY(), faceR)) {
+                    DkIcons.banana(c, r.centerX(), r.centerY(), faceR * 0.8f);
+                }
+                continue;
+            }
             Bitmap face = RomIcons.of(RomIcons.face, i);
             if (face != null) {
                 tmp.set(r.centerX() - faceR, r.centerY() - faceR, r.centerX() + faceR, r.centerY() + faceR);
@@ -594,43 +569,132 @@ public final class BottomScreenView extends View {
         }
     }
 
+    /** One line of the collectibles panel. total < 0: just a count (no "of"). */
+    private static final class Row {
+        final String label;
+        final Bitmap icon;
+        final int fallback;   // drawn icon if the ROM one is missing: 0 banana, 1 coin, 2 star
+        final int have, total;
+
+        Row(String label, Bitmap icon, int fallback, int have, int total) {
+            this.label = label;
+            this.icon = icon;
+            this.fallback = fallback;
+            this.have = have;
+            this.total = total;
+        }
+    }
+
+    /** The level the location bar is on, or -1 for the whole game. */
+    private int shownLevel() {
+        return showTotals || state.level < 0 ? -1 : state.level;
+    }
+
+    private java.util.List<Row> rowsFor(int tab, int level) {
+        java.util.List<Row> rows = new java.util.ArrayList<>();
+        boolean all = level < 0;
+        if (tab == SHARED_TAB) {
+            int[][][] lists = { GameState.FAIRY_FLAGS, GameState.CROWN_FLAGS, GameState.KEY_FLAGS, GameState.RAINBOW_COIN_FLAGS };
+            String[] labels = { "Banana Fairies", "Battle Crowns", "Boss Keys", "Rainbow Coins" };
+            Bitmap[] icons = { RomIcons.fairy, RomIcons.crown, RomIcons.key, RomIcons.rainbowCoin };
+            for (int i = 0; i < lists.length; i++) {
+                int have = 0, total = 0;
+                for (int l = 0; l < GameState.LEVELS; l++) {
+                    if (all || l == level) {
+                        have += state.countFlags(lists[i][l]);
+                        total += lists[i][l].length;
+                    }
+                }
+                rows.add(new Row(labels[i], icons[i], 2, have, total));
+            }
+            if (all) {
+                int golden = 0;
+                for (GameState.Kong k : state.kongs) {
+                    golden += k.goldenBananas;
+                }
+                rows.add(0, new Row("Golden Bananas", RomIcons.goldenBanana, 0, golden, 201));
+            }
+            return rows;
+        }
+
+        GameState.Kong kong = state.kongs[tab];
+        int golden = 0, goldenTotal = 0, coloured = 0, colouredTotal = 0;
+        int prints = 0, printsTotal = 0, medals = 0, medalsTotal = 0;
+        for (int l = 0; l < GameState.LEVELS; l++) {
+            if (!all && l != level) {
+                continue;
+            }
+            golden += state.goldenByLevel[tab][l];
+            coloured += state.colouredByLevel[tab][l];
+            goldenTotal += l <= GameState.ISLES ? 5 : 0;        // 5 per Kong per level and Isles
+            colouredTotal += l < GameState.ISLES ? 100 : 0;     // 100 per Kong per level
+            int bp = GameState.blueprintFlag(tab, l), md = GameState.medalFlag(tab, l);
+            if (bp >= 0) {
+                printsTotal++;
+                prints += state.flag(bp) ? 1 : 0;
+            }
+            if (md >= 0) {
+                medalsTotal++;
+                medals += state.flag(md) ? 1 : 0;
+            }
+        }
+        if (all) {
+            // Includes the odd one out (Rareware) where the per-level split doesn't.
+            golden = kong.goldenBananas;
+            coloured = kong.colouredBananas;
+        }
+        rows.add(new Row("Golden Bananas", RomIcons.goldenBanana, 0, golden, goldenTotal));
+        rows.add(new Row("Bananas", RomIcons.of(RomIcons.banana, tab), 0, coloured, colouredTotal));
+        rows.add(new Row(printsTotal == 1 ? "Blueprint" : "Blueprints", RomIcons.blueprint, 2, prints, printsTotal));
+        rows.add(new Row(medalsTotal == 1 ? "Banana Medal" : "Banana Medals", RomIcons.medal, 2, medals, medalsTotal));
+        rows.add(new Row("Coins", null, 1, kong.coins, -1));
+        return rows;
+    }
+
     private void drawKongPanel(Canvas c) {
         RectF p = panelRect;
         woodPanel(c, p, unit * 0.03f, false);
 
-        int k = displayedKong();
-        GameState.Kong kong = state.kongs[k];
+        int tab = displayedKong();
         boolean known = state.inGame();
-        float pad = p.width() * 0.06f;
-        float rowH = Math.min(p.height() / 5f, unit * 0.14f);
-        float x = p.left + pad;
-        float y = p.top + rowH * 0.95f;
+        java.util.List<Row> rows = rowsFor(tab, shownLevel());
+        rows.removeIf(r -> r.total == 0);   // nothing of that kind here (e.g. bananas in Helm)
 
+        float pad = p.width() * 0.06f;
+        float rowH = Math.min((p.height() - pad * 0.5f) / (rows.size() + 1.75f), unit * 0.13f);
+        float x = p.left + pad;
+        float y = p.top + pad * 0.4f + rowH * 0.85f;
+
+        String title = tab == SHARED_TAB ? "Shared Items" : KONG_NAMES[tab];
         text.setTextAlign(Paint.Align.LEFT);
-        text.setTextSize(fitText(KONG_NAMES[k], p.width() - 2 * pad, rowH * 0.6f));
-        outlined(c, KONG_NAMES[k], x, y, KONG_COLORS[k]);
-        y += rowH * 1.15f;
+        text.setTextSize(fitText(title, p.width() - 2 * pad, rowH * 0.62f));
+        outlined(c, title, x, y, tab == SHARED_TAB ? BANANA : KONG_COLORS[tab]);
+        y += rowH * 1.2f;
 
         // One text size for every row, set by the longest label.
         float labelX = x + rowH * 0.8f;
         text.setTextSize(rowH * 0.46f);
-        float valueW = text.measureText("0000");
-        rowText = fitText("Golden Bananas", p.right - pad - labelX - valueW - rowH * 0.3f, rowH * 0.46f);
-        statRow(c, x, y, p.right - pad, rowH, "Golden Bananas", known ? String.valueOf(kong.goldenBananas) : "–", RomIcons.goldenBanana, 0);
-        y += rowH;
-        statRow(c, x, y, p.right - pad, rowH, "Bananas", known ? String.valueOf(kong.colouredBananas) : "–", RomIcons.of(RomIcons.banana, k), 1);
-        y += rowH;
-        statRow(c, x, y, p.right - pad, rowH, "Coins", known ? String.valueOf(kong.coins) : "–", null, 2);
+        float valueW = text.measureText("000/000");
+        rowText = rowH * 0.46f;
+        for (Row r : rows) {
+            rowText = Math.min(rowText, fitText(r.label, p.right - pad - labelX - valueW - rowH * 0.3f, rowH * 0.46f));
+        }
+        for (Row r : rows) {
+            String value = !known ? "–" : r.total < 0 ? String.valueOf(r.have) : r.have + "/" + r.total;
+            boolean complete = known && r.total > 0 && r.have >= r.total;
+            statRow(c, x, y, p.right - pad, rowH, r.label, value, r.icon, r.fallback, complete);
+            y += rowH;
+        }
     }
 
-    /** fallback: 0 golden banana, 1 banana, 2 coin (drawn when the ROM icon is missing). */
-    private void statRow(Canvas c, float x, float y, float right, float rowH, String label, String value, Bitmap icon, int fallback) {
+    private void statRow(Canvas c, float x, float y, float right, float rowH, String label, String value,
+                         Bitmap icon, int fallback, boolean complete) {
         float iconX = x + rowH * 0.3f, iconY = y - rowH * 0.18f, iconR = rowH * 0.34f;
         if (!RomIcons.draw(c, icon, iconX, iconY, iconR)) {
             switch (fallback) {
-                case 0:
-                case 1: DkIcons.banana(c, iconX, iconY, iconR * 0.8f); break;
-                default: DkIcons.coin(c, iconX, iconY, iconR * 0.7f); break;
+                case 0: DkIcons.banana(c, iconX, iconY, iconR * 0.8f); break;
+                case 1: DkIcons.coin(c, iconX, iconY, iconR * 0.7f); break;
+                default: DkIcons.star(c, iconX, iconY, iconR * 0.8f); break;
             }
         }
         float labelX = x + rowH * 0.8f;
@@ -638,7 +702,42 @@ public final class BottomScreenView extends View {
         text.setTextAlign(Paint.Align.LEFT);
         outlined(c, label, labelX, y, CREAM);
         text.setTextAlign(Paint.Align.RIGHT);
-        outlined(c, value, right, y, BANANA);
+        outlined(c, value, right, y, complete ? COMPLETE : BANANA);
+    }
+
+    /** Wooden sign under the panel: the level shown, with arrows to switch to all levels. */
+    private void drawLocationBar(Canvas c) {
+        RectF r = locationRect;
+        woodPanel(c, r, r.height() * 0.3f, false);
+        int level = shownLevel();
+        String title = level < 0 ? "All Levels" : GameState.LEVEL_NAMES[level];
+        boolean canSwitch = state.level >= 0;
+        float arrowR = r.height() * 0.26f;
+        if (canSwitch) {
+            arrow(c, r.left + r.height() * 0.55f, r.centerY(), arrowR, -1);
+            arrow(c, r.right - r.height() * 0.55f, r.centerY(), arrowR, 1);
+        }
+        text.setTextAlign(Paint.Align.CENTER);
+        text.setTextSize(fitText(title, r.width() - r.height() * 2.4f, r.height() * 0.5f));
+        outlined(c, title, r.centerX(), r.centerY() + text.getTextSize() * 0.36f, BANANA);
+    }
+
+    /** A chunky outlined triangle pointing left (dir -1) or right (dir 1). */
+    private void arrow(Canvas c, float cx, float cy, float r, int dir) {
+        path.reset();
+        path.moveTo(cx + dir * r, cy);
+        path.lineTo(cx - dir * r * 0.7f, cy - r);
+        path.lineTo(cx - dir * r * 0.7f, cy + r);
+        path.close();
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(BANANA);
+        c.drawPath(path, paint);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeJoin(Paint.Join.ROUND);
+        paint.setStrokeWidth(r * 0.25f);
+        paint.setColor(OUTLINE);
+        c.drawPath(path, paint);
+        paint.setStyle(Paint.Style.FILL);
     }
 
     private void drawActions(Canvas c) {
@@ -738,6 +837,14 @@ public final class BottomScreenView extends View {
                 }
                 return true;
             }
+        }
+        if (locationRect.contains(x, y)) {
+            if (state.level >= 0) {
+                showTotals = !showTotals;
+                performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+                invalidate();
+            }
+            return true;
         }
         for (int i = 0; i < tabRects.length; i++) {
             if (tabRects[i].contains(x, y)) {
