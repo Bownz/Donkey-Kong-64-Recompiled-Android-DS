@@ -45,11 +45,12 @@ def ensureSdl2 = {
     }
 }
 
-// Patches for git submodules (RT64 and RecompFrontend). Applied once; re-running is a no-op.
+// Patches for git submodules (RT64, its plume renderer, RecompFrontend). Applied once; re-running is a no-op.
 // --ignore-whitespace tolerates CRLF checkouts (Git for Windows' default).
 def ensurePatches = {
     [
         ['lib/rt64', 'android/patches/rt64-android.patch'],
+        ['lib/rt64/src/contrib/plume', 'android/patches/plume-android.patch'],
         ['lib/RecompFrontend', 'android/patches/recompfrontend-android.patch'],
     ].each { submodule, patch ->
         def dir = new File(repoRoot, submodule)

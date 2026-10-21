@@ -192,6 +192,22 @@ index 08f83e5..104cf49 100755
  #   elif defined(__linux__)
          XWindowAttributes attributes;
          XGetWindowAttributes(windowHandle.display, windowHandle.window, &attributes);
+diff --git a/src/hle/rt64_present_queue.cpp b/src/hle/rt64_present_queue.cpp
+index 7de5b69..e5ba9d5 100644
+--- a/src/hle/rt64_present_queue.cpp
++++ b/src/hle/rt64_present_queue.cpp
+@@ -257,8 +257,9 @@ namespace RT64 {
+             }
+         }
+ 
+-        // Create the framebuffers if necessary.
+-        if (swapChainFramebuffers.empty()) {
++        // Create the framebuffers if necessary. Not while the swap chain is invalid: its images
++        // may be gone (e.g. a failed resize after Android replaced the window's surface).
++        if (swapChainFramebuffers.empty() && swapChainValid) {
+             uint32_t textureCount = ext.swapChain->getTextureCount();
+             swapChainFramebuffers.resize(textureCount);
+             for (uint32_t i = 0; i < textureCount; i++) {
 diff --git a/src/render/rt64_shader_library.cpp b/src/render/rt64_shader_library.cpp
 index d1c5273..0f14d91 100644
 --- a/src/render/rt64_shader_library.cpp

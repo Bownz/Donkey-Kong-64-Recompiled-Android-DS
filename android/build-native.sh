@@ -75,6 +75,7 @@ apply_patch() {
     fi
 }
 apply_patch lib/rt64 android/patches/rt64-android.patch
+apply_patch lib/rt64/src/contrib/plume android/patches/plume-android.patch
 apply_patch lib/RecompFrontend android/patches/recompfrontend-android.patch
 
 # 4. Configure and build with the NDK. The top-level CMakeLists.txt routes the NDK

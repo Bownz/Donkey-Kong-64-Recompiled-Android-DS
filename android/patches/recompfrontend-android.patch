@@ -1,20 +1,45 @@
 diff --git a/recompui/src/renderer/rt64_render_context.cpp b/recompui/src/renderer/rt64_render_context.cpp
-index a7954c7..445b787 100644
+index a7954c7..8eda29f 100644
 --- a/recompui/src/renderer/rt64_render_context.cpp
 +++ b/recompui/src/renderer/rt64_render_context.cpp
-@@ -3,6 +3,11 @@
+@@ -3,6 +3,36 @@
  #include <variant>
  #include <algorithm>
  
 +#if defined(__ANDROID__)
 +#include <SDL.h>
 +#include <SDL_syswm.h>
++#include <android/native_window.h>
++
++namespace plume {
++    // Defined in plume_vulkan.cpp (Android patch): lets swap chains follow surface changes.
++    extern ANativeWindow *(*AndroidWindowProvider)();
++}
++
++namespace {
++    SDL_Window *android_game_window = nullptr;
++
++    // The ANativeWindow currently backing the game window. SDL replaces it when Android
++    // recreates the surface (e.g. after the ROM file picker), and clears it while the app
++    // has no surface.
++    ANativeWindow *android_current_native_window() {
++        if (android_game_window == nullptr) {
++            return nullptr;
++        }
++        SDL_SysWMinfo wm_info;
++        SDL_VERSION(&wm_info.version);
++        if (!SDL_GetWindowWMInfo(android_game_window, &wm_info)) {
++            return nullptr;
++        }
++        return wm_info.info.android.window;
++    }
++}
 +#endif
 +
  #include "hle/rt64_application.h"
  #include "rt64_render_hooks.h"
  #include "overloaded.h"
-@@ -225,7 +230,15 @@ renderer::RT64Context::RT64Context(uint8_t* rdram, ultramodern::renderer::Window
+@@ -225,7 +255,18 @@ renderer::RT64Context::RT64Context(uint8_t* rdram, ultramodern::renderer::Window
      RT64::Application::Core appCore{};
  #if defined(_WIN32)
      appCore.window = window_handle.window;
@@ -26,6 +51,9 @@ index a7954c7..445b787 100644
 +        SDL_VERSION(&wm_info.version);
 +        SDL_GetWindowWMInfo(window_handle, &wm_info);
 +        appCore.window = wm_info.info.android.window;
++
++        android_game_window = window_handle;
++        plume::AndroidWindowProvider = android_current_native_window;
 +    }
 +#elif defined(__linux__)
      appCore.window = window_handle;
