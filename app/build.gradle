@@ -164,7 +164,9 @@ android {
         main {
             // SDLActivity and friends, from the SDL2 release downloaded above.
             java.srcDir("${sdlDir}/android-project/app/src/main/java")
-            assets.srcDir(layout.buildDirectory.dir('generated/dk64-assets'))
+            // A resolved File, not a Provider: AGP 9 rejects Providers in sourceSets. The
+            // stageGameAssets task (wired to preBuild below) fills this folder.
+            assets.srcDir(layout.buildDirectory.dir('generated/dk64-assets').get().asFile)
         }
     }
 
