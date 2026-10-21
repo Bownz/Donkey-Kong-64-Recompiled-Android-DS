@@ -26,6 +26,12 @@ endif()
 # ---------------------------------------------------------------------------
 # SDL2
 # ---------------------------------------------------------------------------
+# SDL compiles the NDK's cpufeatures sources via ${ANDROID_NDK}. The NDK's toolchain file
+# sets that; CMake's built-in Android support only sets CMAKE_ANDROID_NDK.
+if (NOT ANDROID_NDK AND CMAKE_ANDROID_NDK)
+    set(ANDROID_NDK "${CMAKE_ANDROID_NDK}")
+endif()
+
 set(SDL_SHARED ON  CACHE BOOL "" FORCE)
 set(SDL_STATIC OFF CACHE BOOL "" FORCE)
 set(SDL_TEST   OFF CACHE BOOL "" FORCE)
@@ -39,6 +45,16 @@ endif()
 # include path (desktop builds get them from the system or vcpkg).
 set(SDL2_INCLUDE_DIRS "${DK64_ANDROID_SDL2_DIR}/include")
 include_directories(${SDL2_INCLUDE_DIRS})
+
+# RT64 calls find_package(SDL2 REQUIRED) on every non-Windows platform. Answer it with
+# the in-tree build above. (An explicit <Pkg>_DIR bypasses the NDK's find-root rules.)
+set(SDL2_DIR "${CMAKE_SOURCE_DIR}/android/cmake/sdl2" CACHE PATH "SDL2 config shim for Android" FORCE)
+
+# ---------------------------------------------------------------------------
+# Every static library (RT64, librecomp, RmlUi, the recompiled code, ...) is linked
+# into libmain.so, so all of it must be position-independent.
+# ---------------------------------------------------------------------------
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # Keeps RT64 away from its X11 code paths. On Android, RT64/plume still build the
 # Vulkan surface from the window's ANativeWindow (see android/patches).

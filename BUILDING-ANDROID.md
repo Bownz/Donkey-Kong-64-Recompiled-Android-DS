@@ -63,6 +63,30 @@ Desktop builds are unaffected: everything Android-specific is behind `if (ANDROI
 5. **Install and run**: `adb install -r app/build/outputs/apk/release/app-release.apk`.
    Logs: `adb logcat -s DK64Recomp`.
 
+## Native libraries only (no Gradle)
+
+To cross-compile just the `.so` files with the NDK (e.g. in CI, or to package yourself):
+
+```bash
+ANDROID_NDK_HOME=/path/to/android-ndk-r27c android/build-native.sh
+```
+
+It does the same preparation as Gradle (SDL2 download, submodule patches, host
+`file_to_c`), configures with the NDK toolchain chained through vcpkg, builds the
+`DK64Recompiled` target and leaves stripped `libmain.so`, `libSDL2.so` and
+`libc++_shared.so` in `build/android-libs/arm64-v8a/`. Requires `ninja` on `PATH`.
+
+### What the CMake changes do on Android
+
+- `DK64Recompiled` becomes a shared library named `libmain.so` (what `SDLActivity` loads)
+  instead of an executable; SDL2 is built in-tree as `libSDL2.so`.
+- All static libraries are built position-independent, since they link into `libmain.so`.
+- Tools that run during the build (`dxc` for shaders, `file_to_c`) are chosen for the
+  **build machine**, not the target.
+- `find_package(SDL2)` in RT64 is answered by `android/cmake/sdl2/SDL2Config.cmake`.
+- X11, `-static-libstdc++` and the other desktop-Linux link settings are not used
+  (Android's `CMAKE_SYSTEM_NAME` is `Android`, not `Linux`).
+
 ## On the device
 
 - Pick the ROM from the launcher as usual. Android's file picker opens; the chosen file
