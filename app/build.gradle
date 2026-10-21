@@ -19,7 +19,8 @@ def sdlDir = new File(repoRoot, "android/third_party/SDL2-${sdlVersion}")
 
 def runCommand = { List<String> command, File workingDir ->
     try {
-        def process = new ProcessBuilder(command).directory(workingDir).redirectErrorStream(true).start()
+        // toString(): arguments may be Groovy GStrings, which ProcessBuilder can't take.
+        def process = new ProcessBuilder(command.collect { it.toString() }).directory(workingDir).redirectErrorStream(true).start()
         def output = process.inputStream.text
         [process.waitFor(), output]
     } catch (IOException e) {
