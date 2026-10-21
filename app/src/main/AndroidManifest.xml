@@ -106,6 +106,13 @@
             </intent-filter>
         </activity-alias>
 
+        <!-- Shares log reports (Diagnostics) with the app the player picks. -->
+        <provider
+            android:name=".LogProvider"
+            android:authorities="${applicationId}.logs"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+
         <!-- Let the app use the full display on tall/notched screens. -->
         <meta-data android:name="android.max_aspect" android:value="2.4" />
     </application>

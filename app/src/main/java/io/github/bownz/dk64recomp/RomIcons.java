@@ -68,13 +68,14 @@ final class RomIcons {
     private static final Spec FAIRY = new Spec(TEXTURES_GEOMETRY, 5869, 32, 32, true, RGBA32);
     // The first-person / gun crosshair from the HUD.
     private static final Spec CROSSHAIR = new Spec(TEXTURES_HUD, 0x38, 64, 64, false, IA8);
-    // Banana Coins, face-on frame of each Kong's spinning coin: DK, Diddy, Lanky, Tiny, Chunky.
+    // Banana Coins: the face-on frame of each Kong's spinning coin (48x42 sprites; the 44x44
+    // 12-frame sprites next to them are banana bunches): DK, Diddy, Lanky, Tiny, Chunky.
     private static final Spec[] COIN = {
-        new Spec(TEXTURES_UNCOMPRESSED, 0x112, 44, 44, true),
-        new Spec(TEXTURES_UNCOMPRESSED, 0x356, 44, 44, true),
-        new Spec(TEXTURES_UNCOMPRESSED, 0x332, 44, 44, true),
-        new Spec(TEXTURES_UNCOMPRESSED, 0x34A, 44, 44, true),
-        new Spec(TEXTURES_UNCOMPRESSED, 0x33E, 44, 44, true),
+        new Spec(TEXTURES_UNCOMPRESSED, 0xE4, 48, 42, true),
+        new Spec(TEXTURES_UNCOMPRESSED, 0x104, 48, 42, true),
+        new Spec(TEXTURES_UNCOMPRESSED, 0xFC, 48, 42, true),
+        new Spec(TEXTURES_UNCOMPRESSED, 0xDC, 48, 42, true),
+        new Spec(TEXTURES_UNCOMPRESSED, 0x10C, 48, 42, true),
     };
     // Per Kong: DK, Diddy, Lanky, Tiny, Chunky.
     private static final Spec[] BANANA = {

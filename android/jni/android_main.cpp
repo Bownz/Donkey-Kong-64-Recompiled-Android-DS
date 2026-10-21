@@ -9,6 +9,7 @@
 #include <SDL_system.h>
 #include <android/log.h>
 #include <jni.h>
+#include <sys/stat.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -34,10 +35,23 @@ namespace {
         dup2(pipe_fds[1], STDOUT_FILENO);
         dup2(pipe_fds[1], STDERR_FILENO);
 
-        std::thread([] {
+        // Also keep this session's output in <internal>/logs/session.txt, so testers can share
+        // it from the app (Diagnostics.java rotates the previous one before the game starts).
+        FILE* session_log = nullptr;
+        if (const char* internal = SDL_AndroidGetInternalStoragePath()) {
+            std::string dir = std::string{internal} + "/logs";
+            mkdir(dir.c_str(), 0700);
+            session_log = fopen((dir + "/session.txt").c_str(), "a");
+        }
+
+        std::thread([session_log] {
             char buffer[1024];
             ssize_t size;
             while ((size = read(pipe_fds[0], buffer, sizeof(buffer) - 1)) > 0) {
+                if (session_log != nullptr) {
+                    fwrite(buffer, 1, size_t(size), session_log);
+                    fflush(session_log);
+                }
                 if (buffer[size - 1] == '\n') {
                     size--;
                 }

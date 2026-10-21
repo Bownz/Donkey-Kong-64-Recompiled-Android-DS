@@ -177,4 +177,12 @@ namespace dk64::android {
     std::string active_gpu_driver() {
         return active_driver;
     }
+
+    void share_log() {
+        call_activity("shareLog", "()Ljava/lang/String;", nullptr);
+    }
+
+    std::string app_version() {
+        return call_activity("getAppVersion", "()Ljava/lang/String;", nullptr);
+    }
 }

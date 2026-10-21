@@ -1,0 +1,62 @@
+name: Android bug report
+description: Something wrong in the Android version (graphics, crashes, controls, bottom screen...)
+labels: [android, bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing! Please **don't attach or link ROMs**.
+        The quickest way to get a log: open **DK64 Tools** from your app drawer and choose **Share log**
+        (or in the game: Settings → Technical → Share Log). Attach that file below.
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      description: Shown in DK64 Tools, at the bottom of the logo screen, or in Settings → Technical → Share Log.
+      placeholder: 0.2.0-beta (76e2c32)
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device and Android version
+      placeholder: AYN Thor, Android 13
+    validations:
+      required: true
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU and driver
+      description: Graphics driver shown in Settings → Graphics → GPU Driver (system, or which custom driver).
+      placeholder: Adreno 740, system driver
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of problem?
+      options:
+        - Graphics (missing, wrong or flickering visuals)
+        - Crash or freeze
+        - Sound
+        - Controls / touch / bottom screen
+        - Saves / storage
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and where?
+      description: Level/area, which Kong, what you were doing. Photos or screenshots help a lot.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Can you make it happen again? How?
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: Drag the shared log file here.

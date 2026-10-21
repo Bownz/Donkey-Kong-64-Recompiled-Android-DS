@@ -321,7 +321,18 @@ public final class BottomScreenView extends View {
             tmp.set((w - lw) / 2, (h - lh) / 2, (w + lw) / 2, (h + lh) / 2);
             c.drawBitmap(logo, null, tmp, bitmapPaint);
         }
+        // Build version, small, for bug reports.
+        if (version == null) {
+            version = getContext() != null ? Diagnostics.version(getContext()) : "";
+        }
+        if (!version.isEmpty()) {
+            text.setTextAlign(Paint.Align.CENTER);
+            text.setTextSize(unit * 0.035f);
+            outlined(c, "v" + version, w / 2f, h - unit * 0.04f, CREAM);
+        }
     }
+
+    private String version;
 
     /** The app's logo, from the APK's assets (the same one the launcher shows). */
     private Bitmap logo() {

@@ -266,7 +266,8 @@ static void add_gpu_driver_option(recomp::config::Config &config) {
         gpu_driver_option,
         "GPU Driver",
         "The Vulkan driver used for rendering: the device's own, or a custom one (e.g. Turnip). "
-        "Takes effect the next time the game starts. In use now: " + dk64::android::active_gpu_driver() + ".",
+        "Takes effect the next time the game starts. In use now: " + dk64::android::active_gpu_driver() + ". "
+        "App version: " + dk64::android::app_version() + ".",
         options,
         selected_index
     );
@@ -340,6 +341,38 @@ int dk64::get_draw_distance() {
 }
 
 static void add_technical_options(recomp::config::Config &config) {
+#if defined(__ANDROID__)
+    // Android: share a log report for bug reports (Diagnostics.java), and show the version.
+    static const std::string share_log_option = "android_share_log";
+    static std::vector<recomp::config::ConfigOptionEnumOption> share_options = {
+        {0u, "idle", "-"},
+        {1u, "share", "Share now"},
+    };
+    config.add_enum_option(
+        share_log_option,
+        "Share Log",
+        "Choose Share now and apply to send a log report (for bug reports) through any app: "
+        "Files, Drive, Discord, email... App version: " + dk64::android::app_version() + ".",
+        share_options,
+        0u
+    );
+    config.add_option_change_callback(share_log_option,
+        [&config](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
+            const uint32_t value = std::get<uint32_t>(cur);
+            if (context == recomp::config::OptionChangeContext::Load) {
+                if (value != 0) {
+                    config.set_option_value(share_log_option, 0u);
+                    config.apply_option_value(share_log_option);
+                    config.modified_options.clear();
+                }
+                return;
+            }
+            if (context == recomp::config::OptionChangeContext::Permanent && value == 1) {
+                dk64::android::share_log();
+            }
+        });
+#endif
+
     using EnumOptionVector = const std::vector<recomp::config::ConfigOptionEnumOption>;
     // Multiplayer
     static EnumOptionVector multiplayer_options = {

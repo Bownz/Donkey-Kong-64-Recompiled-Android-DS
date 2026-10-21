@@ -24,10 +24,39 @@ public final class GpuDriverActivity extends Activity {
 
     private boolean changed;
 
+    /** Opens straight to the driver list (from the in-game settings). */
+    static final String EXTRA_DRIVERS = "drivers";
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        showChooser();
+        // (Static shortcuts pass extras as strings.)
+        if (getIntent().getBooleanExtra(EXTRA_DRIVERS, false) || "true".equals(getIntent().getStringExtra(EXTRA_DRIVERS))) {
+            showChooser();
+        } else {
+            showTools();
+        }
+    }
+
+    /** "DK64 Tools": graphics driver, share log, version. */
+    private void showTools() {
+        GpuDrivers.Driver current = GpuDrivers.selected(this);
+        String[] items = {
+            "Graphics driver: " + (current == null ? "System driver" : current.label()),
+            "Share log",
+        };
+        new AlertDialog.Builder(this)
+            .setTitle("DK64 Tools · " + Diagnostics.version(this))
+            .setItems(items, (dialog, which) -> {
+                if (which == 0) {
+                    showChooser();
+                } else {
+                    Diagnostics.share(this, null);
+                    finish();
+                }
+            })
+            .setOnCancelListener(dialog -> finish())
+            .show();
     }
 
     private void showChooser() {

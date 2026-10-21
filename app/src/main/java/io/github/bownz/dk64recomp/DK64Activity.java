@@ -87,10 +87,12 @@ public class DK64Activity extends SDLActivity
         // and later lifecycle callbacks.
         extractAssetsIfNeeded();
         storage = new StorageAccess(this);
+        Diagnostics.rotateLogs(this);
 
         super.onCreate(savedInstanceState);
 
         configureWindow();
+        offerCrashReport();
 
         inputManager = (InputManager) getSystemService(Context.INPUT_SERVICE);
         displayManager = (DisplayManager) getSystemService(Context.DISPLAY_SERVICE);
@@ -260,8 +262,35 @@ public class DK64Activity extends SDLActivity
 
     /** From the in-game Graphics settings: install or remove driver packages. */
     public String openGpuDriverManager() {
-        runOnUiThread(() -> startActivity(new Intent(this, GpuDriverActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)));
+        runOnUiThread(() -> startActivity(new Intent(this, GpuDriverActivity.class)
+            .putExtra(GpuDriverActivity.EXTRA_DRIVERS, true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)));
         return null;
+    }
+
+    /** If the game crashed or froze last time, offer to share the log. */
+    private void offerCrashReport() {
+        final String crash = Diagnostics.takeUnreportedCrash(this);
+        if (crash == null) {
+            return;
+        }
+        new android.app.AlertDialog.Builder(this)
+            .setTitle("DK64 closed unexpectedly")
+            .setMessage("Last time the game had a " + crash + ".\n\nShare the log so it can be fixed? "
+                + "It contains the game's technical output and your device model, nothing personal.")
+            .setPositiveButton("Share log", (dialog, which) -> Diagnostics.share(this, crash))
+            .setNegativeButton("Not now", null)
+            .show();
+    }
+
+    /** From the in-game settings (Technical > Share Log). */
+    public String shareLog() {
+        runOnUiThread(() -> Diagnostics.share(this, null));
+        return null;
+    }
+
+    /** For the in-game settings: e.g. "0.2.0-beta (76e2c32)". */
+    public String getAppVersion() {
+        return Diagnostics.version(this);
     }
 
     public String getDataDirectory() {

@@ -19,4 +19,8 @@ namespace dk64::android {
     void open_gpu_driver_manager();
     // A description of the driver the renderer is using right now.
     std::string active_gpu_driver();
+    // Opens the share sheet with a log report (Diagnostics.java).
+    void share_log();
+    // The app's version, e.g. "0.2.0-beta (76e2c32)".
+    std::string app_version();
 }

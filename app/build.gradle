@@ -125,6 +125,21 @@ def ensureSdlPatch = {
     logger.lifecycle("Applied android/patches/sdl2-android.patch")
 }
 
+// App version for testers' reports: the release number plus the commit it was built from.
+def appVersion = '0.2.0-beta'
+def gitCommit = {
+    def sha = System.getenv('GITHUB_SHA')
+    if (sha) {
+        return sha.take(7)
+    }
+    try {
+        def (code, output) = runCommand(['git', 'rev-parse', '--short=7', 'HEAD'], repoRoot)
+        return code == 0 ? output.trim() : 'local'
+    } catch (Exception ignored) {
+        return 'local'
+    }
+}()
+
 ensureSdl2()
 ensureSdlPatch()
 ensurePatches()
@@ -153,7 +168,9 @@ android {
         minSdk 28
         targetSdk 36
         versionCode 1
-        versionName '0.1.0-android'
+        // Shown in the app (DK64 Tools, settings, bottom screen) and in log reports, so bug
+        // reports name the exact build.
+        versionName "${appVersion} (${gitCommit})"
 
         ndk {
             // RT64, sse2neon and the recompiled code are only set up for 64-bit ARM.

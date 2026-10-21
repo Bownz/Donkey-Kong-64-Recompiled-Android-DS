@@ -311,12 +311,23 @@ Requires `ninja` on `PATH`.
 
 ### Custom graphics driver (Turnip)
 
-Open **DK64 Graphics Driver** from the app drawer (or long-press the app icon and choose **Graphics driver**). **Install .zip…** takes a driver
+In the game, **Settings → Graphics → GPU Driver**; or open **DK64 Tools** from the app drawer and choose **Graphics driver**. **Install .zip…** takes a driver
 package in the AdrenoTools format (a .zip with `meta.json` and the driver `.so`, e.g. Mesa
 Turnip builds made for Adreno), and **Use** picks it, or the system driver. The game
 restarts to apply it. Loading goes through [libadrenotools](https://github.com/bylaws/libadrenotools)
 (downloaded by Gradle). If the game doesn't start with a custom driver, the next launch
 goes back to the system driver automatically.
+
+### Logs and bug reports
+
+- **Share a log:** **DK64 Tools** (app drawer) → **Share log**, or in the game **Settings →
+  Technical → Share Log**. The report has the app version, device, GPU driver choice, the
+  current and previous session's game output and the app's logcat.
+- **After a crash or freeze** (Android 11+), the next start offers to share the log.
+- **Version:** shown in DK64 Tools, at the bottom of the logo screen and in the Share Log
+  setting, e.g. `0.2.0-beta (76e2c32)` (release, then commit).
+- Bug reports: the **Android bug report** issue form (`.github/ISSUE_TEMPLATE/android-bug.yml`;
+  GitHub only offers issue forms from the default branch).
 
 ## Known limitations
 
