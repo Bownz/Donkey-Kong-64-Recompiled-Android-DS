@@ -1,3 +1,57 @@
+diff --git a/recompinput/src/input_events.cpp b/recompinput/src/input_events.cpp
+index c76a1dc..520f370 100644
+--- a/recompinput/src/input_events.cpp
++++ b/recompinput/src/input_events.cpp
+@@ -72,10 +72,20 @@ bool sdl_event_filter(void* userdata, SDL_Event* event) {
+     break;
+     case SDL_EventType::SDL_CONTROLLERDEVICEADDED:
+     {
+-        SDL_ControllerDeviceEvent* controller_event = &event->cdevice;
+-        SDL_GameController* controller = SDL_GameControllerOpen(controller_event->which);
+-        printf("Controller added: %d\n", controller_event->which);
+-        if (controller != nullptr) {
++        // The event's device index can be stale by the time it's handled: when one device is
++        // removed and two are added together (e.g. a handheld switching controller modes while
++        // a virtual pad attaches), both events can name the same index and one device is never
++        // opened. So open every game controller that isn't open yet instead of trusting it.
++        for (int device_index = 0; device_index < SDL_NumJoysticks(); device_index++) {
++            if (!SDL_IsGameController(device_index) ||
++                SDL_GameControllerFromInstanceID(SDL_JoystickGetDeviceInstanceID(device_index)) != nullptr) {
++                continue;
++            }
++            SDL_GameController* controller = SDL_GameControllerOpen(device_index);
++            printf("Controller added: %d\n", device_index);
++            if (controller == nullptr) {
++                continue;
++            }
+             printf("  Instance ID: %d\n", SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(controller)));
+             printf("  Path: %s\n", SDL_JoystickPath(SDL_GameControllerGetJoystick(controller)));
+             recompinput::add_controller_state(SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(controller)), controller);
+@@ -84,15 +94,15 @@ bool sdl_event_filter(void* userdata, SDL_Event* event) {
+                 SDL_GameControllerSetSensorEnabled(controller, SDL_SensorType::SDL_SENSOR_GYRO, SDL_TRUE);
+                 SDL_GameControllerSetSensorEnabled(controller, SDL_SensorType::SDL_SENSOR_ACCEL, SDL_TRUE);
+             }
+-        }
+-        
+-        ControllerGUID guid = profiles::get_guid_from_sdl_controller(controller);
+-        if (profiles::get_controller_by_guid(guid) < 0) {
+-            if (players::is_single_player_mode()) {
+-                deferred_controller_profiles[guid.hash] = guid;
+-            } else {
+-                int profile_index = get_or_create_controller_profile_index(guid);
+-                profiles::add_controller(guid, profile_index);
++
++            ControllerGUID guid = profiles::get_guid_from_sdl_controller(controller);
++            if (profiles::get_controller_by_guid(guid) < 0) {
++                if (players::is_single_player_mode()) {
++                    deferred_controller_profiles[guid.hash] = guid;
++                } else {
++                    int profile_index = get_or_create_controller_profile_index(guid);
++                    profiles::add_controller(guid, profile_index);
++                }
+             }
+         }
+     }
 diff --git a/recompui/src/renderer/rt64_render_context.cpp b/recompui/src/renderer/rt64_render_context.cpp
 index a7954c7..dec1073 100644
 --- a/recompui/src/renderer/rt64_render_context.cpp

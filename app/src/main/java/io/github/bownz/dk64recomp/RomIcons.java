@@ -74,7 +74,13 @@ final class RomIcons {
         new Spec(TEXTURES_GEOMETRY, 0x15AE, 40, 40, true),     // triangle
     };
 
+    // Kong faces: each is two 32x64 halves, {left, right}, for DK, Diddy, Lanky, Tiny, Chunky.
+    private static final int[][] FACE_HALVES = {
+        { 0x27C, 0x27B }, { 0x279, 0x27A }, { 0x277, 0x278 }, { 0x276, 0x275 }, { 0x273, 0x274 },
+    };
+
     static volatile Bitmap melon, orange, film, goldenBanana;
+    static final Bitmap[] face = new Bitmap[5];
     static final Bitmap[] banana = new Bitmap[5];
     static final Bitmap[] weapon = new Bitmap[5];
     static final Bitmap[] instrument = new Bitmap[5];
@@ -117,9 +123,10 @@ final class RomIcons {
                     banana[k] = load(f, BANANA[k]);
                     weapon[k] = load(f, WEAPON[k]);
                     instrument[k] = load(f, INSTRUMENT[k]);
-                    found += count(banana[k], weapon[k], instrument[k]);
+                    face[k] = loadFace(f, FACE_HALVES[k]);
+                    found += count(banana[k], weapon[k], instrument[k], face[k]);
                 }
-                Log.i(TAG, "Bottom screen: " + found + " of 19 icons loaded from the ROM");
+                Log.i(TAG, "Bottom screen: " + found + " of 24 icons loaded from the ROM");
             } catch (IOException | RuntimeException e) {
                 Log.w(TAG, "Bottom screen: couldn't read icons from the ROM", e);
             }
@@ -200,6 +207,26 @@ final class RomIcons {
     }
 
     private static Bitmap load(RandomAccessFile f, Spec spec) {
+        int[] argb = pixels(f, spec);
+        return argb == null ? null : Bitmap.createBitmap(argb, spec.width, spec.height, Bitmap.Config.ARGB_8888);
+    }
+
+    /** A Kong's face: two 32x64 halves side by side. */
+    private static Bitmap loadFace(RandomAccessFile f, int[] halves) {
+        int[] left = pixels(f, new Spec(TEXTURES_GEOMETRY, halves[0], 32, 64, true));
+        int[] right = pixels(f, new Spec(TEXTURES_GEOMETRY, halves[1], 32, 64, true));
+        if (left == null || right == null) {
+            return null;
+        }
+        int[] whole = new int[64 * 64];
+        for (int y = 0; y < 64; y++) {
+            System.arraycopy(left, y * 32, whole, y * 64, 32);
+            System.arraycopy(right, y * 32, whole, y * 64 + 32, 32);
+        }
+        return Bitmap.createBitmap(whole, 64, 64, Bitmap.Config.ARGB_8888);
+    }
+
+    private static int[] pixels(RandomAccessFile f, Spec spec) {
         try {
             byte[] data = readFile(f, spec.table, spec.file, 0);
             if (data == null) {
@@ -227,7 +254,7 @@ final class RomIcons {
     }
 
     /** RGBA5551 to ARGB. Rejects data that's too short or has no visible pixels. */
-    private static Bitmap decode(byte[] data, Spec spec) {
+    private static int[] decode(byte[] data, Spec spec) {
         int w = spec.width, h = spec.height;
         if (data.length < w * h * 2) {
             return null;
@@ -247,10 +274,10 @@ final class RomIcons {
                 opaque++;
             }
         }
-        // A real icon has a solid middle and some transparent surroundings.
-        if (opaque < w * h / 8 || opaque == w * h) {
+        // A real icon has a solid middle (a face half may be fully opaque).
+        if (opaque < w * h / 8) {
             return null;
         }
-        return Bitmap.createBitmap(argb, w, h, Bitmap.Config.ARGB_8888);
+        return argb;
     }
 }

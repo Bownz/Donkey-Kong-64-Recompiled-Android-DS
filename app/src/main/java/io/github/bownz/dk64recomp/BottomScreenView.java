@@ -58,6 +58,7 @@ public final class BottomScreenView extends View {
     private final RectF[] tabRects = new RectF[GameState.KONG_COUNT];
     private final RectF panelRect = new RectF();
     private final RectF tmp = new RectF();
+    private final android.graphics.Path facePath = new android.graphics.Path();
     private float fpX, fpY, fpR;
     private float healthX, healthY, melonR;
     private float unit;
@@ -170,7 +171,7 @@ public final class BottomScreenView extends View {
     }
 
     private int displayedKong() {
-        if (selectedKong >= 0) {
+        if (selectedKong >= 0 && !isLocked(selectedKong)) {
             return selectedKong;
         }
         return state.inGame() ? state.currentKong : GameState.DK;
@@ -305,6 +306,11 @@ public final class BottomScreenView extends View {
         }
     }
 
+    /** Kongs not freed yet in the running game (unknown before a game starts: all shown). */
+    private boolean isLocked(int k) {
+        return state.inGame() && !state.isFreed(k);
+    }
+
     private void drawTabs(Canvas c) {
         int shown = displayedKong();
         int playing = state.inGame() ? state.currentKong : -1;
@@ -312,12 +318,35 @@ public final class BottomScreenView extends View {
         for (int i = 0; i < tabRects.length; i++) {
             RectF r = tabRects[i];
             float radius = r.height() * 0.3f;
+            if (isLocked(i)) {
+                // Greyed out, no face or name, until the Kong is freed.
+                paint.setColor(Color.rgb(40, 38, 36));
+                c.drawRoundRect(r, radius, radius, paint);
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setStrokeWidth(r.height() * 0.05f);
+                paint.setColor(Color.rgb(80, 76, 70));
+                c.drawRoundRect(r, radius, radius, paint);
+                paint.setStyle(Paint.Style.FILL);
+                continue;
+            }
             paint.setColor(i == shown ? KONG_COLORS[i] : PANEL);
             c.drawRoundRect(r, radius, radius, paint);
             goldRing(c, r, radius, i == shown);
-            text.setTextSize(Math.min(r.height() * 0.38f, r.width() * 0.22f));
-            text.setColor(i == shown ? Color.rgb(20, 16, 10) : KONG_COLORS[i]);
-            c.drawText(KONG_SHORT[i], r.centerX(), r.centerY() + text.getTextSize() * 0.35f, text);
+            float faceR = Math.min(r.height(), r.width()) * 0.4f;
+            android.graphics.Bitmap face = RomIcons.of(RomIcons.face, i);
+            if (face != null) {
+                tmp.set(r.centerX() - faceR, r.centerY() - faceR, r.centerX() + faceR, r.centerY() + faceR);
+                facePath.reset();
+                facePath.addOval(tmp, android.graphics.Path.Direction.CW);
+                int saved = c.save();
+                c.clipPath(facePath);
+                RomIcons.draw(c, face, r.centerX(), r.centerY(), faceR);
+                c.restoreToCount(saved);
+            } else {
+                text.setTextSize(Math.min(r.height() * 0.38f, r.width() * 0.22f));
+                text.setColor(i == shown ? Color.rgb(20, 16, 10) : KONG_COLORS[i]);
+                c.drawText(KONG_SHORT[i], r.centerX(), r.centerY() + text.getTextSize() * 0.35f, text);
+            }
             if (i == playing) {
                 paint.setColor(Color.WHITE);
                 c.drawCircle(r.right - radius * 0.7f, r.top + radius * 0.7f, radius * 0.22f, paint);
@@ -500,6 +529,9 @@ public final class BottomScreenView extends View {
         }
         for (int i = 0; i < tabRects.length; i++) {
             if (tabRects[i].contains(x, y)) {
+                if (isLocked(i)) {
+                    return true;
+                }
                 // Tapping the Kong you're playing (or the one already shown) goes back to
                 // following whoever you play as.
                 boolean current = state.inGame() && i == state.currentKong;

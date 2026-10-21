@@ -10,7 +10,7 @@ final class GameState {
     static final int DK = 0, DIDDY = 1, LANKY = 2, TINY = 3, CHUNKY = 4;
     static final int KONG_COUNT = 5;
 
-    private static final int COUNT = 8 + KONG_COUNT * 6;
+    private static final int COUNT = 8 + KONG_COUNT * 6 + 1;
 
     /** One Kong's progress. */
     static final class Kong {
@@ -30,6 +30,7 @@ final class GameState {
     int oranges;
     int crystals;
     int film;
+    int freedKongs;            // bit k: Kong k has been freed
     final Kong[] kongs = new Kong[KONG_COUNT];
 
     private final int[] raw = new int[COUNT];
@@ -78,7 +79,13 @@ final class GameState {
             kong.goldenBananas = raw[base + 4];
             kong.colouredBananas = raw[base + 5];
         }
+        freedKongs = raw[8 + KONG_COUNT * 6];
         return true;
+    }
+
+    /** Whether Kong k is playable: freed, or the one being played (DK always is). */
+    boolean isFreed(int k) {
+        return k == DK || k == currentKong || (freedKongs & (1 << k)) != 0;
     }
 
     /**
