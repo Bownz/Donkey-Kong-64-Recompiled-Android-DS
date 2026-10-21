@@ -97,6 +97,22 @@ target_include_directories(nfd PUBLIC
 target_link_libraries(nfd PRIVATE SDL2::SDL2 log)
 
 # ---------------------------------------------------------------------------
+# libadrenotools: optional custom Vulkan driver (e.g. Turnip) chosen by the player
+# ---------------------------------------------------------------------------
+if (DEFINED DK64_ANDROID_ADRENOTOOLS_DIR AND EXISTS "${DK64_ANDROID_ADRENOTOOLS_DIR}/CMakeLists.txt")
+    # The library itself is linked statically into libmain.so; its hooks are separate
+    # shared libraries that Gradle packages next to it.
+    set(_dk64_shared_libs ${BUILD_SHARED_LIBS})
+    set(BUILD_SHARED_LIBS OFF)
+    add_subdirectory("${DK64_ANDROID_ADRENOTOOLS_DIR}" "${CMAKE_BINARY_DIR}/adrenotools")
+    set(BUILD_SHARED_LIBS ${_dk64_shared_libs})
+    set(DK64_ANDROID_HAVE_ADRENOTOOLS ON)
+else()
+    message(WARNING "libadrenotools not found (DK64_ANDROID_ADRENOTOOLS_DIR); custom GPU drivers disabled.")
+    set(DK64_ANDROID_HAVE_ADRENOTOOLS OFF)
+endif()
+
+# ---------------------------------------------------------------------------
 # Game target -> libmain.so
 # ---------------------------------------------------------------------------
 function(dk64_configure_android_target target)
@@ -110,7 +126,13 @@ function(dk64_configure_android_target target)
     target_sources(${target} PRIVATE
         "${CMAKE_SOURCE_DIR}/android/jni/android_main.cpp"
         "${CMAKE_SOURCE_DIR}/android/jni/touch_controller.cpp"
-        "${CMAKE_SOURCE_DIR}/android/jni/game_state.cpp")
+        "${CMAKE_SOURCE_DIR}/android/jni/game_state.cpp"
+        "${CMAKE_SOURCE_DIR}/android/jni/gpu_driver.cpp")
+    if (DK64_ANDROID_HAVE_ADRENOTOOLS)
+        target_link_libraries(${target} PRIVATE adrenotools)
+        target_compile_definitions(${target} PRIVATE DK64_HAVE_ADRENOTOOLS=1)
+        add_dependencies(${target} main_hook file_redirect_hook gsl_alloc_hook)
+    endif()
 
     target_link_libraries(${target} PRIVATE SDL2::SDL2 android log)
 

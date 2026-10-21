@@ -76,7 +76,21 @@
             <intent-filter>
                 <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
             </intent-filter>
+
+            <!-- Long-press shortcut on the app icon: "Graphics driver". -->
+            <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
         </activity>
+
+        <!-- Picks the Vulkan driver (system, or a custom one such as Turnip). Its own process,
+             so it can restart the game's process to apply the choice. -->
+        <activity
+            android:name=".GpuDriverActivity"
+            android:exported="true"
+            android:process=":settings"
+            android:label="Graphics driver"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.DeviceDefault.Dialog.NoActionBar" />
 
         <!-- Let the app use the full display on tall/notched screens. -->
         <meta-data android:name="android.max_aspect" android:value="2.4" />

@@ -309,6 +309,15 @@ Requires `ninja` on `PATH`.
       another, tap again to go back.
   - Connecting or disconnecting a controller or display switches this live.
 
+### Custom graphics driver (Turnip)
+
+Long-press the app icon and choose **Graphics driver**. **Install .zip…** takes a driver
+package in the AdrenoTools format (a .zip with `meta.json` and the driver `.so`, e.g. Mesa
+Turnip builds made for Adreno), and **Use** picks it, or the system driver. The game
+restarts to apply it. Loading goes through [libadrenotools](https://github.com/bylaws/libadrenotools)
+(downloaded by Gradle). If the game doesn't start with a custom driver, the next launch
+goes back to the system driver automatically.
+
 ## Known limitations
 
 - **Leaving the app (including the ROM picker) may break rendering.** Android destroys

@@ -217,6 +217,25 @@ public class DK64Activity extends SDLActivity
      * until they answer. That happens before the game creates its window.
      */
     @SuppressWarnings("unused")
+    /**
+     * Called from the native side (android/jni/gpu_driver.cpp) as the renderer starts: the
+     * custom Vulkan driver to load, or null for the system driver. Chosen from the app icon's
+     * "Graphics driver" shortcut (GpuDriverActivity).
+     */
+    public String getGpuDriver() {
+        String driver = GpuDrivers.forRenderer(this);
+        if (GpuDrivers.takeRevertedNotice(this)) {
+            runOnUiThread(() -> android.widget.Toast.makeText(this,
+                "The custom graphics driver didn't start last time, so the system driver is being used.",
+                android.widget.Toast.LENGTH_LONG).show());
+        }
+        if (driver != null) {
+            // Still running after a while: the driver works, keep it.
+            new android.os.Handler(getMainLooper()).postDelayed(() -> GpuDrivers.confirmWorking(this), GpuDrivers.TRIAL_MS);
+        }
+        return driver;
+    }
+
     public String getDataDirectory() {
         String dir = storage.resolveDataDirectory();
         RomIcons.dataDirectory = dir;

@@ -9,4 +9,5 @@
     <string name="storage_app">App storage</string>
     <string name="storage_settings_hint">Turn on \"Allow access to manage all files\" for DK64, then come back.</string>
     <string name="storage_denied">No file access granted. Using app storage instead.</string>
+    <string name="shortcut_gpu_driver">Graphics driver</string>
 </resources>
