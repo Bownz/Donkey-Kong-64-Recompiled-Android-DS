@@ -17,9 +17,16 @@
 #include <android/log.h>
 #include <jni.h>
 
+#include <atomic>
+#include <cstdint>
 #include <mutex>
 
 namespace {
+    // N64 buttons (recompinput bit values) held by the second screen's action buttons. These
+    // go straight into the game's input, so they work whatever the controller mappings are
+    // (e.g. with C unmapped from the physical pad).
+    std::atomic<uint16_t> direct_n64_buttons{0};
+
     constexpr const char* log_tag = "DK64Recomp";
 
     std::mutex state_mutex;
@@ -124,6 +131,16 @@ Java_io_github_bownz_dk64recomp_TouchInput_nativeSetAxis(JNIEnv*, jclass, jint a
     if (sync_locked()) {
         SDL_JoystickSetVirtualAxis(joystick, axis, to_axis_value(axis, value));
     }
+}
+
+// Read by recompinput's get_n64_input (RecompFrontend Android patch) for player 1.
+uint16_t dk64_android_touch_n64_buttons() {
+    return direct_n64_buttons.load(std::memory_order_relaxed);
+}
+
+JNIEXPORT void JNICALL
+Java_io_github_bownz_dk64recomp_TouchInput_nativeSetN64Buttons(JNIEnv*, jclass, jint buttons) {
+    direct_n64_buttons.store(static_cast<uint16_t>(buttons), std::memory_order_relaxed);
 }
 
 } // extern "C"

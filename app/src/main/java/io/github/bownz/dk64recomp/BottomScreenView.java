@@ -129,12 +129,10 @@ public final class BottomScreenView extends View {
         }
         this.active = active;
         if (active) {
-            TouchInput.acquire();
             handler.post(poll);
         } else {
             cancel();
             handler.removeCallbacksAndMessages(null);
-            TouchInput.release();
         }
     }
 
@@ -142,9 +140,7 @@ public final class BottomScreenView extends View {
     public void cancel() {
         handler.removeCallbacksAndMessages(null);
         if (running != null) {
-            TouchInput.setAxis(TouchInput.AXIS_RIGHT_X, 0f);
-            TouchInput.setAxis(TouchInput.AXIS_RIGHT_Y, 0f);
-            TouchInput.setAxis(TouchInput.AXIS_TRIGGER_LEFT, 0f);
+            TouchInput.setN64Buttons(0);
             running = null;
             invalidate();
         }
@@ -162,36 +158,36 @@ public final class BottomScreenView extends View {
             return; // One move at a time; a sequence takes ~0.3 s.
         }
         running = move;
-        TouchInput.ensure();
         performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
         invalidate();
 
-        final int cAxis;
-        final float cValue;
+        // The buttons press N64 Z and C directly (not through the controller mappings).
+        final int c;
         switch (move) {
-            case WEAPON:     cAxis = TouchInput.AXIS_RIGHT_X; cValue = -1f; break; // C-Left
-            case ORANGE:     cAxis = TouchInput.AXIS_RIGHT_X; cValue = 1f;  break; // C-Right
-            case INSTRUMENT: cAxis = TouchInput.AXIS_RIGHT_Y; cValue = -1f; break; // C-Up
-            case CAMERA:     cAxis = TouchInput.AXIS_RIGHT_Y; cValue = 1f;  break; // C-Down
-            default:         cAxis = TouchInput.AXIS_RIGHT_Y; cValue = -1f; break; // C-Up alone
+            case WEAPON:     c = TouchInput.N64_C_LEFT; break;
+            case ORANGE:     c = TouchInput.N64_C_RIGHT; break;
+            case INSTRUMENT: c = TouchInput.N64_C_UP; break;
+            case CAMERA:     c = TouchInput.N64_C_DOWN; break;
+            default:         c = TouchInput.N64_C_UP; break;
         }
 
         if (move == Move.FIRST_PERSON) {
             // C-Up on its own enters first-person view, and pressing it again leaves it.
-            TouchInput.setAxis(cAxis, cValue);
+            TouchInput.setN64Buttons(c);
             handler.postDelayed(() -> {
-                TouchInput.setAxis(cAxis, 0f);
+                TouchInput.setN64Buttons(0);
                 running = null;
                 invalidate();
             }, C_HOLD_MS);
             return;
         }
 
-        TouchInput.setAxis(TouchInput.AXIS_TRIGGER_LEFT, 1f);                              // Z
-        handler.postDelayed(() -> TouchInput.setAxis(cAxis, cValue), Z_LEAD_MS);           // + C
-        handler.postDelayed(() -> TouchInput.setAxis(cAxis, 0f), Z_LEAD_MS + C_HOLD_MS);
+        final int z = TouchInput.N64_Z;
+        TouchInput.setN64Buttons(z);                                                        // Z
+        handler.postDelayed(() -> TouchInput.setN64Buttons(z | c), Z_LEAD_MS);              // + C
+        handler.postDelayed(() -> TouchInput.setN64Buttons(z), Z_LEAD_MS + C_HOLD_MS);
         handler.postDelayed(() -> {
-            TouchInput.setAxis(TouchInput.AXIS_TRIGGER_LEFT, 0f);
+            TouchInput.setN64Buttons(0);
             running = null;
             invalidate();
         }, Z_LEAD_MS + C_HOLD_MS + Z_TAIL_MS);

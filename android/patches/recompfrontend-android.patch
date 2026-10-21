@@ -52,6 +52,35 @@ index c76a1dc..520f370 100644
              }
          }
      }
+diff --git a/recompinput/src/profiles.cpp b/recompinput/src/profiles.cpp
+index c89956e..03002ea 100644
+--- a/recompinput/src/profiles.cpp
++++ b/recompinput/src/profiles.cpp
+@@ -371,6 +371,12 @@ namespace recompinput {
+         return "SERIAL_" + guid.serial + "_VID_" + std::to_string(guid.vendor) + "_PID_" + std::to_string(guid.product) +"_VERSION_" + std::to_string(guid.version) +"_CRC16_" + std::to_string(guid.crc16);
+     }
+ 
++#ifdef __ANDROID__
++    // Defined by the game's Android glue (android/jni/touch_controller.cpp), if present: N64
++    // buttons held by on-screen buttons that act directly on the game, whatever the mappings.
++    extern "C" uint16_t dk64_android_touch_n64_buttons() __attribute__((weak));
++#endif
++
+     bool profiles::get_n64_input(int player_index, uint16_t* buttons_out, float* x_out, float* y_out) {
+         uint16_t cur_buttons = 0;
+         float cur_x = 0.0f;
+@@ -405,6 +411,11 @@ namespace recompinput {
+             check_joystick(profile_index_cont);
+             recompinput::apply_joystick_deadzone(cur_x, cur_y, &cur_x, &cur_y);
+             check_joystick(profile_index_kb);
++#ifdef __ANDROID__
++            if (player_index == 0 && dk64_android_touch_n64_buttons != nullptr) {
++                cur_buttons |= dk64_android_touch_n64_buttons();
++            }
++#endif
+         }
+ 
+         *buttons_out = cur_buttons;
 diff --git a/recompui/src/renderer/rt64_render_context.cpp b/recompui/src/renderer/rt64_render_context.cpp
 index a7954c7..dec1073 100644
 --- a/recompui/src/renderer/rt64_render_context.cpp

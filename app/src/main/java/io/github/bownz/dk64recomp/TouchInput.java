@@ -41,6 +41,20 @@ final class TouchInput {
     /** Sticks take -1..1 (down/right positive), triggers take 0..1. */
     static native void nativeSetAxis(int axis, float value);
 
+    // N64 button bits (recompinput values), for buttons that act on the game directly.
+    static final int N64_Z = 0x2000;
+    static final int N64_C_UP = 0x0008, N64_C_DOWN = 0x0004, N64_C_LEFT = 0x0002, N64_C_RIGHT = 0x0001;
+
+    /**
+     * N64 buttons that go straight into the game's input for player 1, bypassing the
+     * controller mappings, so they work however the physical pad is mapped.
+     */
+    private static native void nativeSetN64Buttons(int buttons);
+
+    static void setN64Buttons(int buttons) {
+        try { nativeSetN64Buttons(buttons); } catch (UnsatisfiedLinkError ignored) { }
+    }
+
     // Several on-screen controls (the overlay controller, the second-screen action pad) share
     // one virtual gamepad. It exists while at least one of them holds it.
     private static int users = 0;
