@@ -4,7 +4,20 @@ if(NOT DEFINED ENV{VCPKG_ROOT})
     set(ENV{VCPKG_ROOT} ${CMAKE_SOURCE_DIR}/lib/vcpkg)
 endif()
 
-include($ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake)
+# Android (configured by the Android Gradle plugin, see app/build.gradle): vcpkg is the
+# toolchain file and chain-loads the NDK toolchain. vcpkg's Android triplets locate the
+# NDK through ANDROID_NDK_HOME, so point it at the NDK Gradle selected.
+if(DEFINED ANDROID_ABI AND NOT DEFINED ENV{ANDROID_NDK_HOME})
+    if(DEFINED CMAKE_ANDROID_NDK)
+        set(ENV{ANDROID_NDK_HOME} "${CMAKE_ANDROID_NDK}")
+    elseif(DEFINED ANDROID_NDK)
+        set(ENV{ANDROID_NDK_HOME} "${ANDROID_NDK}")
+    endif()
+endif()
+
+if(NOT CMAKE_TOOLCHAIN_FILE MATCHES "vcpkg\\.cmake$")
+    include($ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake)
+endif()
 
 if (APPLE)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum OS X deployment version")
@@ -57,6 +70,11 @@ add_compile_definitions(__PRFCHWINTRIN_H)
 
 if (RECOMP_FLATPAK)
     add_compile_definitions(RECOMP_FLATPAK)
+endif()
+
+if (ANDROID)
+    # SDL2 from source, the nfd replacement and libmain.so setup. Must come before RT64.
+    include(${CMAKE_SOURCE_DIR}/android/cmake/android.cmake)
 endif()
 
 add_subdirectory(${CMAKE_SOURCE_DIR}/lib/rt64 ${CMAKE_BINARY_DIR}/rt64)
@@ -148,8 +166,13 @@ add_custom_command(OUTPUT
                    DEPENDS ${CMAKE_SOURCE_DIR}/patches/patches.elf
 )
 
-# Main executable
-add_executable(DK64Recompiled)
+# Main executable (on Android: libmain.so, loaded by SDLActivity)
+if (ANDROID)
+    add_library(DK64Recompiled SHARED)
+    dk64_configure_android_target(DK64Recompiled)
+else()
+    add_executable(DK64Recompiled)
+endif()
 
 set (SOURCES
     ${CMAKE_SOURCE_DIR}/src/main/launcher_animation.cpp

@@ -1,0 +1,216 @@
+plugins {
+    id 'com.android.application'
+}
+
+// ---------------------------------------------------------------------------------
+// Inputs the native build needs that don't live in this repository's sources.
+// They are prepared while Gradle configures the project, because Android Studio runs
+// the CMake configure step during project sync (before any task executes).
+// ---------------------------------------------------------------------------------
+
+def repoRoot = rootProject.projectDir
+
+// Keep in step with SDL2_VERSION in .github/workflows/validate.yml. The Java glue in
+// SDLActivity must come from exactly the same SDL release as libSDL2.so.
+def sdlVersion = '2.30.3'
+def sdlDir = new File(repoRoot, "android/third_party/SDL2-${sdlVersion}")
+
+def isWindowsHost = System.getProperty('os.name').toLowerCase().contains('windows')
+def hostToolsDir = new File(repoRoot, 'build/android-host-tools')
+def hostFileToC = new File(hostToolsDir, isWindowsHost ? 'file_to_c.exe' : 'file_to_c')
+
+def vcpkgRoot = System.getenv('VCPKG_ROOT') ?: new File(repoRoot, 'lib/vcpkg').absolutePath
+
+def runCommand = { List<String> command, File workingDir ->
+    def process = new ProcessBuilder(command).directory(workingDir).redirectErrorStream(true).start()
+    def output = process.inputStream.text
+    [process.waitFor(), output]
+}
+
+def ensureSdl2 = {
+    if (new File(sdlDir, 'CMakeLists.txt').isFile()) {
+        return
+    }
+    def url = "https://github.com/libsdl-org/SDL/releases/download/release-${sdlVersion}/SDL2-${sdlVersion}.tar.gz"
+    def archive = new File(hostToolsDir, "SDL2-${sdlVersion}.tar.gz")
+    archive.parentFile.mkdirs()
+    logger.lifecycle("Downloading SDL2 ${sdlVersion} from ${url}")
+    new URL(url).withInputStream { input -> archive.withOutputStream { it << input } }
+    copy {
+        from tarTree(resources.gzip(archive))
+        into sdlDir.parentFile
+    }
+    if (!new File(sdlDir, 'CMakeLists.txt').isFile()) {
+        throw new GradleException("SDL2 archive did not unpack to ${sdlDir}")
+    }
+}
+
+// Patches for git submodules (RT64 and RecompFrontend). Applied once; re-running is a no-op.
+def ensurePatches = {
+    [
+        ['lib/rt64', 'android/patches/rt64-android.patch'],
+        ['lib/RecompFrontend', 'android/patches/recompfrontend-android.patch'],
+    ].each { submodule, patch ->
+        def dir = new File(repoRoot, submodule)
+        def patchFile = new File(repoRoot, patch).absolutePath
+        if (!new File(dir, 'CMakeLists.txt').isFile()) {
+            throw new GradleException("${submodule} is empty. Run: git submodule update --init --recursive")
+        }
+        def (alreadyApplied, ignored) = runCommand(['git', 'apply', '--reverse', '--check', patchFile], dir)
+        if (alreadyApplied == 0) {
+            return
+        }
+        def (code, output) = runCommand(['git', 'apply', '--whitespace=nowarn', patchFile], dir)
+        if (code != 0) {
+            throw new GradleException("Could not apply ${patch} to ${submodule} (submodule updated?):\n${output}")
+        }
+        logger.lifecycle("Applied ${patch}")
+    }
+}
+
+// file_to_c turns binary files into C arrays during the build, so it must run on this
+// machine, not on the phone. Build it once with the host's compiler.
+def ensureHostFileToC = {
+    if (hostFileToC.isFile()) {
+        return
+    }
+    def buildDir = new File(hostToolsDir, 'file_to_c-build')
+    def source = new File(repoRoot, 'lib/rt64/src/tools/file_to_c').absolutePath
+    def (configureCode, configureOut) = runCommand(
+        ['cmake', '-S', source, '-B', buildDir.absolutePath, '-DCMAKE_BUILD_TYPE=Release'], repoRoot)
+    if (configureCode != 0) {
+        throw new GradleException("Configuring host file_to_c failed (is CMake on PATH?):\n${configureOut}")
+    }
+    def (buildCode, buildOut) = runCommand(
+        ['cmake', '--build', buildDir.absolutePath, '--config', 'Release'], repoRoot)
+    if (buildCode != 0) {
+        throw new GradleException("Building host file_to_c failed:\n${buildOut}")
+    }
+    def built = fileTree(buildDir).matching { include "**/${hostFileToC.name}" }.files.find { it.isFile() }
+    if (built == null) {
+        throw new GradleException("Host file_to_c was built but not found under ${buildDir}")
+    }
+    copy { from built; into hostToolsDir }
+    hostFileToC.setExecutable(true)
+}
+
+ensureSdl2()
+ensurePatches()
+ensureHostFileToC()
+
+// ---------------------------------------------------------------------------------
+// Android application
+// ---------------------------------------------------------------------------------
+
+android {
+    namespace 'io.github.bownz.dk64recomp'
+    compileSdk 35
+    ndkVersion '27.2.12479018' // NDK r27c
+
+    defaultConfig {
+        applicationId 'io.github.bownz.dk64recomp'
+        minSdk 26
+        targetSdk 35
+        versionCode 1
+        versionName '0.1.0-android'
+
+        ndk {
+            // RT64, sse2neon and the recompiled code are only set up for 64-bit ARM.
+            abiFilters 'arm64-v8a'
+        }
+
+        externalNativeBuild {
+            cmake {
+                targets 'DK64Recompiled'
+                arguments(
+                    // vcpkg builds curl/freetype for Android and chain-loads the NDK toolchain.
+                    "-DCMAKE_TOOLCHAIN_FILE=${vcpkgRoot}/scripts/buildsystems/vcpkg.cmake",
+                    "-DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=${project.android.ndkDirectory}/build/cmake/android.toolchain.cmake",
+                    '-DVCPKG_TARGET_TRIPLET=arm64-android',
+                    '-DANDROID_STL=c++_shared',
+                    "-DDK64_ANDROID_SDL2_DIR=${sdlDir.absolutePath}",
+                    "-DRT64_HOST_FILE_TO_C=${hostFileToC.absolutePath}"
+                )
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            externalNativeBuild {
+                cmake {
+                    // Unoptimised recompiled code is far too slow to play; keep symbols, but optimise.
+                    cFlags '-O2'
+                    cppFlags '-O2'
+                }
+            }
+            jniDebuggable true
+        }
+        release {
+            minifyEnabled false
+            // Signed with the debug key so `assembleRelease` produces an installable APK.
+            // Replace with your own signing config before distributing anything.
+            signingConfig signingConfigs.debug
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            // The existing desktop CMake project, unchanged in layout.
+            path file('../CMakeLists.txt')
+            version '3.22.1'
+        }
+    }
+
+    sourceSets {
+        main {
+            // SDLActivity and friends, from the SDL2 release downloaded above.
+            java.srcDirs += "${sdlDir}/android-project/app/src/main/java"
+            assets.srcDirs += layout.buildDirectory.dir('generated/dk64-assets')
+        }
+    }
+
+    packaging {
+        jniLibs {
+            // libmain.so holds the entire recompiled game and is very large. Legacy packaging
+            // keeps it compressed in the APK and extracts it on install.
+            useLegacyPackaging true
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+// ---------------------------------------------------------------------------------
+// Tasks
+// ---------------------------------------------------------------------------------
+
+// The desktop build runs from the repo root and reads these relative to the working
+// directory. Package them under assets/game/; DK64Activity extracts them on first run.
+def stageGameAssets = tasks.register('stageGameAssets', Sync) {
+    into layout.buildDirectory.dir('generated/dk64-assets/game')
+    from(new File(repoRoot, 'assets')) { into 'assets' }
+    from(new File(repoRoot, 'icons')) { into 'icons' }
+    from(new File(repoRoot, 'recompcontrollerdb.txt'))
+}
+
+// The recompiled C code is generated on the host (N64Recomp + RSPRecomp), exactly as
+// for desktop builds. Fail early with instructions instead of a wall of link errors.
+def checkRecompiledSources = tasks.register('checkRecompiledSources') {
+    doLast {
+        def funcs = new File(repoRoot, 'RecompiledFuncs')
+        def rsp = new File(repoRoot, 'rsp/n_aspMain.cpp')
+        if (!funcs.isDirectory() || funcs.list().length == 0 || !rsp.isFile()) {
+            throw new GradleException(
+                'Recompiled sources are missing. Generate them on this machine first ' +
+                '(BUILDING.md steps 3-4): ./N64Recomp us.toml && ./RSPRecomp n_aspMain.toml')
+        }
+    }
+}
+
+tasks.named('preBuild') {
+    dependsOn stageGameAssets, checkRecompiledSources
+}

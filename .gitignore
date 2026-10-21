@@ -72,3 +72,12 @@ gamecontrollerdb.txt
 # Just linux things
 build.log
 DK64Recompiled
+# Android (Gradle) build
+.gradle/
+local.properties
+app/build/
+app/.cxx/
+android/third_party/
+*.apk
+*.aab
+.idea/

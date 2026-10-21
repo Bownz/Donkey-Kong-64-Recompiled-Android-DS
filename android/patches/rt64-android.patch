@@ -1,0 +1,98 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 79dfc38..ff188ea 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -35,7 +35,7 @@ function(preprocess INFILE OUTFILE OPTIONS)
+     endif()
+ endfunction()
+ 
+-if (WIN32)
++if (CMAKE_HOST_WIN32)
+     set (DXC "${PROJECT_SOURCE_DIR}/src/contrib/dxc/bin/x64/dxc.exe")
+     add_compile_definitions(
+         NOMINMAX
+@@ -45,8 +45,8 @@ if (WIN32)
+     # Dependencies that must be next to the DLL.
+     configure_file("${PROJECT_SOURCE_DIR}/src/contrib/dxc/bin/x64/dxcompiler.dll" "dxcompiler.dll" COPYONLY)
+     configure_file("${PROJECT_SOURCE_DIR}/src/contrib/dxc/bin/x64/dxil.dll" "dxil.dll" COPYONLY)
+-elseif (APPLE)
+-    if (CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
++elseif (CMAKE_HOST_APPLE)
++    if (CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "x86_64")
+         # find zlib and include in dyld path
+         find_library(ZLIB_LIBRARY NAMES z)
+         get_filename_component(ZLIB_PATH ${ZLIB_LIBRARY} DIRECTORY)
+@@ -58,7 +58,7 @@ elseif (APPLE)
+         set (SPIRVCROSS "DYLD_LIBRARY_PATH=${PROJECT_SOURCE_DIR}/src/contrib/spirv-cross/lib/arm64:$ENV{DYLD_LIBRARY_PATH}" "${PROJECT_SOURCE_DIR}/src/contrib/spirv-cross/bin/arm64/spirv-cross")
+     endif()
+ else()
+-    if (CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
++    if (CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "x86_64")
+         set (DXC "LD_LIBRARY_PATH=${PROJECT_SOURCE_DIR}/src/contrib/dxc/lib/x64" "${PROJECT_SOURCE_DIR}/src/contrib/dxc/bin/x64/dxc-linux")
+     else()
+         set (DXC "LD_LIBRARY_PATH=${PROJECT_SOURCE_DIR}/src/contrib/dxc/lib/arm64" "${PROJECT_SOURCE_DIR}/src/contrib/dxc/bin/arm64/dxc-linux")
+@@ -69,9 +69,22 @@ set(ZSTD_LEGACY_SUPPORT OFF)
+ set(ZSTD_BUILD_STATIC ON)
+ set(ZSTD_BUILD_SHARED OFF)
+ 
+-add_subdirectory(src/tools/file_to_c)
++if (CMAKE_CROSSCOMPILING AND DEFINED RT64_HOST_FILE_TO_C)
++    # Cross-compiling (e.g. Android): file_to_c must run on the build host, so use a prebuilt host binary.
++    add_executable(file_to_c IMPORTED GLOBAL)
++    set_target_properties(file_to_c PROPERTIES IMPORTED_LOCATION "${RT64_HOST_FILE_TO_C}")
++else()
++    add_subdirectory(src/tools/file_to_c)
++endif()
+ add_subdirectory(src/contrib/re-spirv)
+-add_subdirectory(src/contrib/nativefiledialog-extended)
++if (ANDROID)
++    # Android has no native file dialog backend; the parent project must provide an `nfd` target.
++    if (NOT TARGET nfd)
++        message(FATAL_ERROR "Android build requires the parent project to define an nfd target.")
++    endif()
++else()
++    add_subdirectory(src/contrib/nativefiledialog-extended)
++endif()
+ add_subdirectory(src/contrib/zstd/build/cmake)
+ 
+ if (CMAKE_SYSTEM_NAME MATCHES "Linux" AND RT64_SDL_WINDOW_VULKAN)
+@@ -446,8 +459,10 @@ target_link_libraries(rt64 libzstd_static)
+ target_link_libraries(rt64 plume)
+ 
+ # Add tools.
+-add_subdirectory(src/tools/texture_hasher)
+-add_subdirectory(src/tools/texture_packer)
++if (NOT ANDROID)
++    add_subdirectory(src/tools/texture_hasher)
++    add_subdirectory(src/tools/texture_packer)
++endif()
+ 
+ # Add any Apple-specific source files and libraries
+ if (APPLE)
+diff --git a/src/hle/rt64_application_window.cpp b/src/hle/rt64_application_window.cpp
+index 08f83e5..1e8a34d 100755
+--- a/src/hle/rt64_application_window.cpp
++++ b/src/hle/rt64_application_window.cpp
+@@ -103,8 +103,6 @@ namespace RT64 {
+         bounds.top = rect.top;
+         bounds.width = rect.right - rect.left;
+         bounds.height = rect.bottom - rect.top;
+-#   elif defined(__ANDROID__)
+-        static_assert(false && "Android unimplemented");
+ #   elif defined(__linux__) || defined(__APPLE__)
+         if (SDL_VideoInit(nullptr) != 0) {
+             printf("Failed to init SDL2 video: %s\n", SDL_GetError());
+@@ -145,10 +143,11 @@ namespace RT64 {
+         SDL_GetWindowWMInfo(sdlWindow, &wmInfo);
+ #   if defined(_WIN32)
+         windowHandle = wmInfo.info.win.window;
++#   elif defined(__ANDROID__)
++        // plume::RenderWindow is an ANativeWindow* on Android.
++        windowHandle = wmInfo.info.android.window;
+ #   elif defined(RT64_SDL_WINDOW_VULKAN)
+         windowHandle = sdlWindow;
+-#   elif defined(__ANDROID__)
+-        static_assert(false && "Android unimplemented");
+ #   elif defined(__linux__)
+         windowHandle.display = wmInfo.info.x11.display;
+         windowHandle.window = wmInfo.info.x11.window;

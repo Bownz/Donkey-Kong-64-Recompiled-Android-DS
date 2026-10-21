@@ -1,0 +1,33 @@
+diff --git a/recompui/src/renderer/rt64_render_context.cpp b/recompui/src/renderer/rt64_render_context.cpp
+index a7954c7..445b787 100644
+--- a/recompui/src/renderer/rt64_render_context.cpp
++++ b/recompui/src/renderer/rt64_render_context.cpp
+@@ -3,6 +3,11 @@
+ #include <variant>
+ #include <algorithm>
+ 
++#if defined(__ANDROID__)
++#include <SDL.h>
++#include <SDL_syswm.h>
++#endif
++
+ #include "hle/rt64_application.h"
+ #include "rt64_render_hooks.h"
+ #include "overloaded.h"
+@@ -225,7 +230,15 @@ renderer::RT64Context::RT64Context(uint8_t* rdram, ultramodern::renderer::Window
+     RT64::Application::Core appCore{};
+ #if defined(_WIN32)
+     appCore.window = window_handle.window;
+-#elif defined(__linux__) || defined(__ANDROID__)
++#elif defined(__ANDROID__)
++    // ultramodern hands us an SDL_Window*, but RT64/plume want the ANativeWindow* behind it.
++    {
++        SDL_SysWMinfo wm_info;
++        SDL_VERSION(&wm_info.version);
++        SDL_GetWindowWMInfo(window_handle, &wm_info);
++        appCore.window = wm_info.info.android.window;
++    }
++#elif defined(__linux__)
+     appCore.window = window_handle;
+ #elif defined(__APPLE__)
+     appCore.window.window = window_handle.window;
