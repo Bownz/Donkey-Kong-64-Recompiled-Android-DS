@@ -384,10 +384,10 @@ public final class BottomScreenView extends View {
     }
 
     /**
-     * Buttons only grey out once a move has been unavailable for this long, so quick moves
-     * (rolls, skids, turning round) don't flash them; climbing or swinging still does.
+     * How long a move must be unavailable before its button greys out (0: right away, so
+     * buttons also grey out during jumps and rolls).
      */
-    private static final long GREY_DELAY_MS = 900;
+    private static final long GREY_DELAY_MS = 0;
     private long zMovesSeenAt;
     private long firstPersonSeenAt;
 
