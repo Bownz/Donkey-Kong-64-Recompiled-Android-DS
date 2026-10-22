@@ -379,7 +379,7 @@ public final class BottomScreenView extends View {
         switch (move) {
             case FIRST_PERSON: return fp || state.firstPerson || state.gunOut;
             case WEAPON: return z || state.gunOut;
-            default: return z;
+            default: return z && !state.gunOut;   // with the gun out, only the gun and first person
         }
     }
 
