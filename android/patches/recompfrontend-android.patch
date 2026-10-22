@@ -1,8 +1,114 @@
 diff --git a/recompinput/src/input_events.cpp b/recompinput/src/input_events.cpp
-index c76a1dc..520f370 100644
+index c76a1dc..07fe5dd 100644
 --- a/recompinput/src/input_events.cpp
 +++ b/recompinput/src/input_events.cpp
-@@ -72,10 +72,20 @@ bool sdl_event_filter(void* userdata, SDL_Event* event) {
+@@ -38,8 +38,105 @@ void purge_deferred_controller_profiles() {
+     deferred_controller_profiles.clear();
+ }
+ 
++#ifdef __ANDROID__
++// Android handhelds (e.g. the AYN Thor) have their motion sensors in the device, not in the
++// built-in controller, so SDL reports no controller gyro. The device's own gyro and
++// accelerometer are used instead, as one more "controller" for single player, whenever no
++// controller is sending gyro data of its own.
++extern "C" int dk64_android_display_rotation() __attribute__((weak));
++
++namespace {
++    constexpr SDL_JoystickID device_motion_id = -1000;
++    SDL_Sensor* device_gyro = nullptr;
++    SDL_Sensor* device_accel = nullptr;
++    SDL_SensorID device_gyro_id = -1;
++    SDL_SensorID device_accel_id = -1;
++    uint64_t device_prev_gyro_us = 0;
++    uint64_t device_rotation_checked_us = 0;
++    int device_rotation = 0;            // Surface.ROTATION_0..270 of the game's screen
++    uint32_t controller_gyro_ticks = 0; // SDL_GetTicks() of the last controller gyro event
++    bool controller_gyro_seen = false;
++
++    // Device axes (natural orientation) -> SDL controller axes as the screen is held:
++    // screen-relative first, then +X right, +Y out of the screen, +Z down the screen.
++    void device_to_controller(const float* in, float* out) {
++        float sx, sy;
++        switch (device_rotation) {
++            case 1:  sx = -in[1]; sy = in[0]; break;
++            case 2:  sx = -in[0]; sy = -in[1]; break;
++            case 3:  sx = in[1];  sy = -in[0]; break;
++            default: sx = in[0];  sy = in[1]; break;
++        }
++        out[0] = sx;
++        out[1] = in[2];
++        out[2] = -sy;
++    }
++
++    void handle_device_sensor(const SDL_SensorEvent& e) {
++        if (e.which != device_gyro_id && e.which != device_accel_id) {
++            return;
++        }
++        if (controller_gyro_seen && SDL_GetTicks() - controller_gyro_ticks < 1000) {
++            return; // a controller with its own gyro is in use
++        }
++        if (dk64_android_display_rotation != nullptr && (device_rotation_checked_us == 0 || e.timestamp_us - device_rotation_checked_us > 2000000)) {
++            device_rotation = dk64_android_display_rotation() & 3;
++            device_rotation_checked_us = e.timestamp_us;
++        }
++        float v[3];
++        device_to_controller(e.data, v);
++        recompinput::ControllerState& state = recompinput::get_controller_state(device_motion_id);
++        if (e.which == device_accel_id) {
++            state.latest_accelerometer[0] = v[0] / SDL_STANDARD_GRAVITY;
++            state.latest_accelerometer[1] = v[1] / SDL_STANDARD_GRAVITY;
++            state.latest_accelerometer[2] = v[2] / SDL_STANDARD_GRAVITY;
++            return;
++        }
++        constexpr float rad_to_deg = 180.0f / M_PI;
++        float dt = device_prev_gyro_us == 0 ? 0.0f : (e.timestamp_us - device_prev_gyro_us) * 1e-6f;
++        device_prev_gyro_us = e.timestamp_us;
++        if (dt <= 0.0f || dt > 0.1f) {
++            return;
++        }
++        state.motion.ProcessMotion(v[0] * rad_to_deg, v[1] * rad_to_deg, v[2] * rad_to_deg,
++            state.latest_accelerometer[0], state.latest_accelerometer[1], state.latest_accelerometer[2], dt);
++        float rot_x = 0.0f;
++        float rot_y = 0.0f;
++        state.motion.GetPlayerSpaceGyro(rot_x, rot_y);
++        recompinput::add_rotation_deltas(device_motion_id, rot_x, rot_y);
++    }
++}
++
++// Called once after SDL_Init (src/main/main.cpp).
++extern "C" void recompinput_android_open_device_motion() {
++    if (SDL_InitSubSystem(SDL_INIT_SENSOR) != 0) {
++        printf("Device motion: no sensor support (%s)\n", SDL_GetError());
++        return;
++    }
++    for (int i = 0; i < SDL_NumSensors(); i++) {
++        SDL_SensorType type = SDL_SensorGetDeviceType(i);
++        if (type == SDL_SENSOR_GYRO && device_gyro == nullptr) {
++            device_gyro = SDL_SensorOpen(i);
++            device_gyro_id = device_gyro ? SDL_SensorGetInstanceID(device_gyro) : -1;
++        }
++        else if (type == SDL_SENSOR_ACCEL && device_accel == nullptr) {
++            device_accel = SDL_SensorOpen(i);
++            device_accel_id = device_accel ? SDL_SensorGetInstanceID(device_accel) : -1;
++        }
++    }
++    printf("Device motion: gyro %s, accelerometer %s\n",
++        device_gyro ? SDL_SensorGetName(device_gyro) : "none",
++        device_accel ? SDL_SensorGetName(device_accel) : "none");
++}
++#endif
++
+ bool sdl_event_filter(void* userdata, SDL_Event* event) {
+     switch (event->type) {
++#ifdef __ANDROID__
++    case SDL_EventType::SDL_SENSORUPDATE:
++        handle_device_sensor(event->sensor);
++        break;
++#endif
+     case SDL_EventType::SDL_KEYDOWN:
+     {
+         SDL_KeyboardEvent* keyevent = &event->key;
+@@ -72,10 +169,20 @@ bool sdl_event_filter(void* userdata, SDL_Event* event) {
      break;
      case SDL_EventType::SDL_CONTROLLERDEVICEADDED:
      {
@@ -27,7 +133,7 @@ index c76a1dc..520f370 100644
              printf("  Instance ID: %d\n", SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(controller)));
              printf("  Path: %s\n", SDL_JoystickPath(SDL_GameControllerGetJoystick(controller)));
              recompinput::add_controller_state(SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(controller)), controller);
-@@ -84,15 +94,15 @@ bool sdl_event_filter(void* userdata, SDL_Event* event) {
+@@ -84,15 +191,15 @@ bool sdl_event_filter(void* userdata, SDL_Event* event) {
                  SDL_GameControllerSetSensorEnabled(controller, SDL_SensorType::SDL_SENSOR_GYRO, SDL_TRUE);
                  SDL_GameControllerSetSensorEnabled(controller, SDL_SensorType::SDL_SENSOR_ACCEL, SDL_TRUE);
              }
@@ -52,6 +158,17 @@ index c76a1dc..520f370 100644
              }
          }
      }
+@@ -199,6 +306,10 @@ bool sdl_event_filter(void* userdata, SDL_Event* event) {
+             state.latest_accelerometer[2] = z;
+         }
+         else if (event->csensor.sensor == SDL_SensorType::SDL_SENSOR_GYRO) {
++#ifdef __ANDROID__
++            controller_gyro_seen = true;
++            controller_gyro_ticks = SDL_GetTicks();
++#endif
+             // constexpr float gyro_threshold = 0.05f;
+             // Convert rotational velocity to degrees per second.
+             constexpr float rad_to_deg = 180.0f / M_PI;
 diff --git a/recompinput/src/profiles.cpp b/recompinput/src/profiles.cpp
 index c89956e..03002ea 100644
 --- a/recompinput/src/profiles.cpp

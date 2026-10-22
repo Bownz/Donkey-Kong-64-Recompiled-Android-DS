@@ -293,6 +293,16 @@ public class DK64Activity extends SDLActivity
         return Diagnostics.version(this);
     }
 
+    /** Rotation (Surface.ROTATION_*) of the game's screen, for the device gyro. */
+    @SuppressWarnings({"unused", "deprecation"})
+    public String getDisplayRotation() {
+        try {
+            return Integer.toString(getWindowManager().getDefaultDisplay().getRotation());
+        } catch (Exception e) {
+            return "0";
+        }
+    }
+
     public String getDataDirectory() {
         String dir = storage.resolveDataDirectory();
         RomIcons.dataDirectory = dir;

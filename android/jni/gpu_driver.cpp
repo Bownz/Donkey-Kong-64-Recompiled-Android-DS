@@ -186,3 +186,10 @@ namespace dk64::android {
         return call_activity("getAppVersion", "()Ljava/lang/String;", nullptr);
     }
 }
+
+// Surface rotation (0-3) of the game's screen, for mapping the device's motion sensors
+// (RecompFrontend Android patch: device gyro).
+extern "C" int dk64_android_display_rotation() {
+    std::string value = call_activity("getDisplayRotation", "()Ljava/lang/String;", nullptr);
+    return value.empty() ? 0 : (value[0] - '0') & 3;
+}
