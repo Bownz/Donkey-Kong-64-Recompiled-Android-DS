@@ -79,6 +79,37 @@ def ensureAdrenotools = {
     }
 }
 
+// Tag Anywhere (Killklli/DK64TagAnywhereRecomp, CC0): bundled with the app, disabled until the
+// player enables it in the Mods menu. Used by the bottom screen's "Touch Kong Swap" setting.
+def tagAnywhereVersion = '1.0.3'
+def tagAnywhereSha256 = 'c39fcfab473514a64860378f8f23d438fa382abc0e15af92975c88da458ed630'
+def tagAnywhereNrm = new File(repoRoot, "build/android-downloads/tag-anywhere-${tagAnywhereVersion}/dk64_tag_anywhere.nrm")
+def ensureTagAnywhere = {
+    if (tagAnywhereNrm.isFile()) {
+        return
+    }
+    def archive = new File(repoRoot, "build/android-downloads/dk64_tag_anywhere-${tagAnywhereVersion}.zip")
+    archive.parentFile.mkdirs()
+    def url = "https://github.com/Killklli/DK64TagAnywhereRecomp/releases/download/v${tagAnywhereVersion}/dk64_tag_anywhere.zip"
+    logger.lifecycle("Downloading Tag Anywhere from ${url}")
+    URI.create(url).toURL().withInputStream { input -> archive.withOutputStream { it << input } }
+    def digest = java.security.MessageDigest.getInstance('SHA-256').digest(archive.bytes).encodeHex().toString()
+    if (digest != tagAnywhereSha256) {
+        archive.delete()
+        throw new GradleException("Tag Anywhere download has the wrong checksum (${digest})")
+    }
+    copy {
+        from zipTree(archive)
+        include '**/dk64_tag_anywhere.nrm'
+        eachFile { it.path = it.name }
+        includeEmptyDirs = false
+        into tagAnywhereNrm.parentFile
+    }
+    if (!tagAnywhereNrm.isFile()) {
+        throw new GradleException("The Tag Anywhere release has no dk64_tag_anywhere.nrm")
+    }
+}
+
 // Patches for git submodules (RT64, its plume renderer, RecompFrontend). Applied once; re-running is a no-op.
 // --ignore-whitespace tolerates CRLF checkouts (Git for Windows' default).
 def ensurePatches = {
@@ -144,6 +175,7 @@ ensureSdl2()
 ensureSdlPatch()
 ensurePatches()
 ensureAdrenotools()
+ensureTagAnywhere()
 
 def signingValue = { String name -> System.getenv(name) ?: findProperty(name) }
 def releaseKeystore = signingValue('DK64_KEYSTORE_FILE')
@@ -271,6 +303,7 @@ def stageGameAssets = tasks.register('stageGameAssets', Sync) {
     from(new File(repoRoot, 'assets')) { into 'assets' }
     from(new File(repoRoot, 'icons')) { into 'icons' }
     from(new File(repoRoot, 'recompcontrollerdb.txt'))
+    from(tagAnywhereNrm) { into 'bundled-mods' }
 }
 
 // The recompiled C code is generated on the host (N64Recomp + RSPRecomp), exactly as

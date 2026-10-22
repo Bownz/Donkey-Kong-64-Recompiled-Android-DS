@@ -296,6 +296,7 @@ public class DK64Activity extends SDLActivity
     public String getDataDirectory() {
         String dir = storage.resolveDataDirectory();
         RomIcons.dataDirectory = dir;
+        BundledMods.install(this, dir);
         return dir;
     }
 

@@ -145,7 +145,30 @@ static void add_general_options(recomp::config::Config &config) {
         lightning_flash_options,
         dk64::LightningFlashMode::Reduced
     );
-    
+#if defined(__ANDROID__)
+    // Android: tapping a Kong on the bottom screen swaps to them, using the bundled
+    // Tag Anywhere mod (Killklli/DK64TagAnywhereRecomp). Off by default; it also needs the mod
+    // to be enabled in the Mods menu.
+    static const std::string touch_kong_swap_option = "android_touch_kong_swap";
+    static EnumOptionVector touch_kong_swap_options = {
+        {0u, "Off", "Off"},
+        {1u, "On", "On"},
+    };
+    config.add_enum_option(
+        touch_kong_swap_option,
+        "Touch Kong Swap",
+        "Tap a Kong on the bottom screen to swap to them, anywhere you could tag in a tag barrel. "
+        "Needs the <recomp-color primary>Tag Anywhere</recomp-color> mod, which comes with the game but is off by default: "
+        "enable it in the Mods menu and restart the game.<br />"
+        "When this is off, tapping a Kong only shows their collectibles.",
+        touch_kong_swap_options,
+        0u
+    );
+    config.add_option_change_callback(touch_kong_swap_option,
+        [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext) {
+            dk64::android::set_touch_kong_swap(std::get<uint32_t>(cur) == 1u);
+        });
+#endif
 }
 
 template <typename T = uint32_t>

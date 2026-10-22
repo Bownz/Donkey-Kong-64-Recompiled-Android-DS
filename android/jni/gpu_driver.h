@@ -23,4 +23,6 @@ namespace dk64::android {
     void share_log();
     // The app's version, e.g. "0.2.0-beta (76e2c32)".
     std::string app_version();
+    // The "Touch Kong Swap" setting (android/jni/game_state.cpp reports it to the bottom screen).
+    void set_touch_kong_swap(bool enabled);
 }

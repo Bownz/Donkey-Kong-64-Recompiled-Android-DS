@@ -8,10 +8,16 @@
 #include <jni.h>
 
 #include <atomic>
+#include <string>
+
+#include "librecomp/mods.hpp"
+#include "gpu_driver.h"
 #include <cstdint>
 
 namespace {
     std::atomic<uint8_t*> g_rdram{nullptr};
+    std::atomic<bool> g_touch_kong_swap{false};
+    constexpr const char* kTagAnywhereModId = "dk64_tag_anywhere";
 
     // N64 virtual addresses (KSEG0) for the US 1.0 release.
     constexpr uint32_t kCurrentCharacterIndex = 0x8074E77C; // u8[]: 0 DK, 1 Diddy, 2 Lanky, 3 Tiny, 4 Chunky
@@ -27,6 +33,8 @@ namespace {
     constexpr uint32_t kLevelIndexByMap = 0x807445E0;       // u8[map] (getLevelIndex)
     constexpr int kLevelSlots = 9;                          // 0-6 levels, 7 Isles, 8 Helm
     constexpr uint32_t kPlayerPointer = 0x807FBB4C; // Actor* gPlayerPointer
+    constexpr uint32_t kGlobalProperties = 0x807FBB60;      // u32 global_properties_bitfield (2: paused / tag barrel)
+    constexpr uint32_t kCutsceneActive = 0x807444EC;        // u8 is_cutscene_active
     constexpr uint32_t kPlayerGunOut = 0x20C;               // u8 in the player actor: gun held
     // Reported as bits: "Kong freed" for DK, Diddy, Lanky, Tiny, Chunky, then orange
     // throwing (training barrel) and the fairy camera (with Shockwave).
@@ -198,4 +206,35 @@ Java_io_github_bownz_dk64recomp_GameState_nativeReadFlags(JNIEnv* env, jclass, j
     env->ReleaseIntArrayElements(ids, flags, JNI_ABORT);
     env->ReleaseIntArrayElements(out, result, 0);
     return JNI_TRUE;
+}
+
+void dk64::android::set_touch_kong_swap(bool enabled) {
+    g_touch_kong_swap.store(enabled);
+}
+
+// Touch Kong swap (bottom screen + the Tag Anywhere mod), as bits:
+//   1: the "Touch Kong Swap" setting is on
+//   2: the Tag Anywhere mod is enabled
+//   4: the game is in normal play (a player exists, not paused or in a cutscene), so a
+//      D-pad press goes to the mod rather than a menu.
+extern "C" JNIEXPORT jint JNICALL
+Java_io_github_bownz_dk64recomp_GameState_nativeKongSwap(JNIEnv*, jclass) {
+    jint bits = 0;
+    if (g_touch_kong_swap.load()) {
+        bits |= 1;
+    }
+    if (recomp::mods::is_mod_enabled(kTagAnywhereModId)) {
+        bits |= 2;
+    }
+    const uint8_t* rdram = g_rdram.load();
+    if (rdram != nullptr) {
+        const uint32_t player = read_u32(rdram, kPlayerPointer);
+        const bool has_player = player >= 0x80000000u && player < 0x80800000u;
+        const bool paused = (read_u32(rdram, kGlobalProperties) & 2) != 0;
+        const bool cutscene = read_u8(rdram, kCutsceneActive) != 0;
+        if (has_player && !paused && !cutscene) {
+            bits |= 4;
+        }
+    }
+    return bits;
 }

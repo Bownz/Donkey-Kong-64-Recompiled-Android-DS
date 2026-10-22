@@ -110,6 +110,20 @@ final class GameState {
 
     private static native boolean nativeRead(int[] out);
     private static native boolean nativeReadFlags(int[] ids, int[] out);
+    private static native int nativeKongSwap();
+
+    static final int SWAP_SETTING = 1;   // "Touch Kong Swap" is on
+    static final int SWAP_MOD = 2;       // the Tag Anywhere mod is enabled
+    static final int SWAP_PLAYING = 4;   // normal play: not paused, no cutscene
+
+    /** SWAP_* bits (0 if the game isn't running). */
+    static int kongSwap() {
+        try {
+            return nativeKongSwap();
+        } catch (UnsatisfiedLinkError e) {
+            return 0;
+        }
+    }
 
     /** The level being played (kept through bonus rooms and menus); -1 until known. */
     int level = -1;

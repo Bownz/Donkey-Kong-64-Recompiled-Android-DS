@@ -144,6 +144,9 @@ public final class BottomScreenView extends View {
             running = null;
             invalidate();
         }
+        if (swapTarget >= 0) {
+            swapEnd();
+        }
         if (active) {
             handler.post(poll);
         }
@@ -192,6 +195,138 @@ public final class BottomScreenView extends View {
             invalidate();
         }, Z_LEAD_MS + C_HOLD_MS + Z_TAIL_MS);
     }
+
+    // ------------------------------------------------------------------------------
+    // Touch Kong Swap (with the Tag Anywhere mod)
+    // ------------------------------------------------------------------------------
+    //
+    // Tag Anywhere swaps to the next / previous freed Kong on D-pad Right / Left. To reach the
+    // tapped Kong, the D-pad is pressed (directly, like the action buttons) in the shorter
+    // direction and held until the Kong changes, released, and repeated until it's the
+    // tapped one. The mod ignores the D-pad while tagging isn't allowed (in the air, holding
+    // something, ...); if the Kong doesn't change in time the swap gives up.
+
+    private static final long SWAP_TICK_MS = 20;
+    private static final long SWAP_STEP_TIMEOUT_MS = 700;
+    private static final long SWAP_RELEASE_MS = 90;
+
+    private int swapTarget = -1;
+    private int swapButton;
+    private int swapFrom;
+    private long swapStepStart;
+    private long swapReleasedAt;
+    private boolean swapPressed;
+    private boolean swapHintShown;
+    private int swapSteps;
+
+    /**
+     * Swaps to Kong {@code k} if Touch Kong Swap is on. Returns false to fall back to just
+     * showing that Kong's tab.
+     */
+    private boolean trySwap(int k, boolean current) {
+        int bits = GameState.kongSwap();
+        if ((bits & GameState.SWAP_SETTING) == 0) {
+            return false;
+        }
+        if ((bits & GameState.SWAP_MOD) == 0) {
+            if (!swapHintShown) {
+                swapHintShown = true;
+                android.widget.Toast.makeText(getContext(),
+                    "Touch Kong Swap needs the Tag Anywhere mod: enable it in Mods, then restart the game.",
+                    android.widget.Toast.LENGTH_LONG).show();
+            }
+            return false;
+        }
+        selectedKong = -1;   // follow the Kong being played
+        if (current || swapTarget >= 0 || running != null) {
+            invalidate();
+            return true;
+        }
+        if ((bits & GameState.SWAP_PLAYING) == 0) {
+            return true;     // paused or in a cutscene: the D-pad would go to a menu
+        }
+        // Count steps each way through the freed Kongs (the mod skips locked ones).
+        int right = 0, left = 0;
+        for (int i = 1, kong = state.currentKong; i <= GameState.KONG_COUNT; i++) {
+            kong = (kong + 1) % GameState.KONG_COUNT;
+            if (!isLocked(kong)) {
+                right++;
+            }
+            if (kong == k) {
+                break;
+            }
+        }
+        for (int i = 1, kong = state.currentKong; i <= GameState.KONG_COUNT; i++) {
+            kong = (kong + GameState.KONG_COUNT - 1) % GameState.KONG_COUNT;
+            if (!isLocked(kong)) {
+                left++;
+            }
+            if (kong == k) {
+                break;
+            }
+        }
+        swapButton = right <= left ? TouchInput.N64_DPAD_RIGHT : TouchInput.N64_DPAD_LEFT;
+        swapTarget = k;
+        swapSteps = 0;
+        performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+        swapPress();
+        handler.postDelayed(swapTick, SWAP_TICK_MS);
+        invalidate();
+        return true;
+    }
+
+    private void swapPress() {
+        if (++swapSteps > GameState.KONG_COUNT) {
+            swapEnd();   // went all the way round without reaching it
+            return;
+        }
+        swapFrom = state.currentKong;
+        swapStepStart = android.os.SystemClock.uptimeMillis();
+        swapPressed = true;
+        TouchInput.setN64Buttons(swapButton);
+    }
+
+    private void swapEnd() {
+        TouchInput.setN64Buttons(0);
+        swapPressed = false;
+        swapTarget = -1;
+        invalidate();
+    }
+
+    private final Runnable swapTick = new Runnable() {
+        @Override
+        public void run() {
+            if (swapTarget < 0) {
+                return;
+            }
+            long now = android.os.SystemClock.uptimeMillis();
+            if (state.refresh()) {
+                invalidate();
+            }
+            if (!state.inGame() || (GameState.kongSwap() & GameState.SWAP_PLAYING) == 0 && !swapPressed) {
+                swapEnd();
+                return;
+            }
+            if (swapPressed) {
+                if (state.currentKong != swapFrom) {
+                    // This step worked; let go so the mod sees the next press.
+                    TouchInput.setN64Buttons(0);
+                    swapPressed = false;
+                    swapReleasedAt = now;
+                    if (state.currentKong == swapTarget) {
+                        swapEnd();
+                        return;
+                    }
+                } else if (now - swapStepStart > SWAP_STEP_TIMEOUT_MS) {
+                    swapEnd();   // can't tag here right now
+                    return;
+                }
+            } else if (now - swapReleasedAt >= SWAP_RELEASE_MS) {
+                swapPress();
+            }
+            handler.postDelayed(this, SWAP_TICK_MS);
+        }
+    };
 
     /** The tab being shown: a Kong (0-4) or SHARED_TAB. */
     private int displayedKong() {
@@ -986,9 +1121,12 @@ public final class BottomScreenView extends View {
                 if (isLocked(i)) {
                     return true;
                 }
+                boolean current = state.inGame() && i == state.currentKong;
+                if (i < GameState.KONG_COUNT && trySwap(i, current)) {
+                    return true;
+                }
                 // Tapping the Kong you're playing (or the one already shown) goes back to
                 // following whoever you play as.
-                boolean current = state.inGame() && i == state.currentKong;
                 selectedKong = (current || i == selectedKong) ? -1 : i;
                 performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
                 invalidate();
