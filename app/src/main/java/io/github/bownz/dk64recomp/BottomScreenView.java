@@ -95,7 +95,9 @@ public final class BottomScreenView extends View {
         @Override
         public void run() {
             int levelBefore = state.level;
-            if (state.refresh()) {
+            boolean changed = state.refresh();
+            noteAvailability();
+            if (changed || greyPending()) {
                 if (state.level != levelBefore && state.level >= 0) {
                     showTotals = false;   // entering a new place shows that place first
                 }
@@ -371,10 +373,38 @@ public final class BottomScreenView extends View {
         if (running == move) {
             return true;
         }
+        long now = android.os.SystemClock.uptimeMillis();
+        boolean z = state.canZMoves || now - zMovesSeenAt < GREY_DELAY_MS;
+        boolean fp = state.canFirstPerson || now - firstPersonSeenAt < GREY_DELAY_MS;
         switch (move) {
-            case FIRST_PERSON: return state.canFirstPerson || state.firstPerson;
-            case WEAPON: return state.canZMoves || state.gunOut;
-            default: return state.canZMoves;
+            case FIRST_PERSON: return fp || state.firstPerson || state.gunOut;
+            case WEAPON: return z || state.gunOut;
+            default: return z;
+        }
+    }
+
+    /**
+     * Buttons only grey out once a move has been unavailable for this long, so quick moves
+     * (rolls, skids, turning round) don't flash them; climbing or swinging still does.
+     */
+    private static final long GREY_DELAY_MS = 900;
+    private long zMovesSeenAt;
+    private long firstPersonSeenAt;
+
+    /** A button is waiting to grey out: redraw so it happens without a state change. */
+    private boolean greyPending() {
+        long now = android.os.SystemClock.uptimeMillis();
+        return (!state.canZMoves && now - zMovesSeenAt < GREY_DELAY_MS + POLL_MS * 2)
+            || (!state.canFirstPerson && now - firstPersonSeenAt < GREY_DELAY_MS + POLL_MS * 2);
+    }
+
+    private void noteAvailability() {
+        long now = android.os.SystemClock.uptimeMillis();
+        if (state.canZMoves) {
+            zMovesSeenAt = now;
+        }
+        if (state.canFirstPerson) {
+            firstPersonSeenAt = now;
         }
     }
 
