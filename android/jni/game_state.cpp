@@ -36,6 +36,8 @@ namespace {
     constexpr uint32_t kGlobalProperties = 0x807FBB60;      // u32 global_properties_bitfield (2: paused / tag barrel)
     constexpr uint32_t kCutsceneActive = 0x807444EC;        // u8 is_cutscene_active
     constexpr uint32_t kPlayerGunOut = 0x20C;               // u8 in the player actor: gun held
+    constexpr uint32_t kPlayerControlState = 0x154;         // u8 in the player actor
+    // Control states 2-5: first-person view (looking, and aiming in first person).
     // Reported as bits: "Kong freed" for DK, Diddy, Lanky, Tiny, Chunky, then orange
     // throwing (training barrel) and the fairy camera (with Shockwave).
     constexpr int16_t kProgressFlags[7] = { 0x181, 0x006, 0x046, 0x042, 0x075, 0x184, 0x179 };
@@ -175,8 +177,18 @@ Java_io_github_bownz_dk64recomp_GameState_nativeRead(JNIEnv* env, jclass, jintAr
 
     {
         const uint32_t player = read_u32(rdram, kPlayerPointer);
-        values[kCount - 1] = (player >= 0x80000000u && player < 0x80800000u - 0x300)
-            ? (read_u8(rdram, player + kPlayerGunOut) != 0 ? 1 : 0) : 0;
+        // Bits: 1 gun held, 2 first-person view.
+        jint bits = 0;
+        if (player >= 0x80000000u && player < 0x80800000u - 0x300) {
+            if (read_u8(rdram, player + kPlayerGunOut) != 0) {
+                bits |= 1;
+            }
+            const uint8_t control_state = read_u8(rdram, player + kPlayerControlState);
+            if (control_state >= 2 && control_state <= 5) {
+                bits |= 2;
+            }
+        }
+        values[kCount - 1] = bits;
     }
 
     env->SetIntArrayRegion(out, 0, kCount, values);

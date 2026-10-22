@@ -129,6 +129,8 @@ final class GameState {
     int level = -1;
     /** The Kong is holding their gun out (after Z + C-Left, until it's put away). */
     boolean gunOut;
+    /** In first-person view (C-Up), until it's left. */
+    boolean firstPerson;
     final int[][] goldenByLevel = new int[KONG_COUNT][LEVELS];
     final int[][] colouredByLevel = new int[KONG_COUNT][LEVELS];
 
@@ -193,7 +195,8 @@ final class GameState {
         if (newLevel >= 0 && newLevel < LEVELS) {
             level = newLevel;
         }
-        gunOut = raw[COUNT - 1] != 0;
+        gunOut = (raw[COUNT - 1] & 1) != 0;
+        firstPerson = (raw[COUNT - 1] & 2) != 0;
         for (int k = 0; k < KONG_COUNT; k++) {
             for (int l = 0; l < LEVELS; l++) {
                 int base = 8 + KONG_COUNT * 6 + 2 + (k * LEVELS + l) * 2;

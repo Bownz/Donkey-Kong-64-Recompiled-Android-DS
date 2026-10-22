@@ -647,7 +647,7 @@ public final class BottomScreenView extends View {
      * crosshair, and a small wooden tag naming it.
      */
     private void drawFirstPersonButton(Canvas c) {
-        boolean pressed = running == Move.FIRST_PERSON;
+        boolean pressed = running == Move.FIRST_PERSON || state.firstPerson;
         float r = fpR * 0.92f;
         float cy = fpY - fpR * 0.08f;
         paint.setStyle(Paint.Style.FILL);
