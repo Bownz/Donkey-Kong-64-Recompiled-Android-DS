@@ -5,6 +5,7 @@
 // addresses (US 1.0) and patches/patches_ui.c for the PlayerProgress / CharacterProgress
 // structures.
 
+#include <android/log.h>
 #include <jni.h>
 
 #include <atomic>
@@ -38,6 +39,21 @@ namespace {
     constexpr uint32_t kPlayerGunOut = 0x20C;               // u8 in the player actor: gun held
     constexpr uint32_t kPlayerControlState = 0x154;         // u8 in the player actor
     // Control states 2-5: first-person view (looking, and aiming in first person).
+    constexpr uint32_t kGameMode = 0x80755318;              // u8 game_mode (6: adventure, i.e. a file is loaded)
+    constexpr uint8_t kGameModeAdventure = 6;
+
+    // Per-control-state input handlers (code_E4090.c: D_global_asm_80751004[control_state]):
+    // 17 function pointers per state, called for each button. A button that does nothing in
+    // a state points at a shared do-nothing function.
+    constexpr uint32_t kInputHandlers = 0x80751004;
+    constexpr uint32_t kInputHandlerSize = 0x44;
+    constexpr int kControlStates = 107;                     // up to action_initiation_function_list
+    constexpr uint32_t kHandlerZ = 0x10;
+    constexpr uint32_t kHandlerCUp = 0x30;
+    constexpr uint8_t kStateIdle = 0x0C;
+    constexpr uint8_t kStateWalking = 0x0D;
+    constexpr uint8_t kStateCrouching = 0x3C;
+
     // Reported as bits: "Kong freed" for DK, Diddy, Lanky, Tiny, Chunky, then orange
     // throwing (training barrel) and the fairy camera (with Shockwave).
     constexpr int16_t kProgressFlags[7] = { 0x181, 0x006, 0x046, 0x042, 0x075, 0x184, 0x179 };
@@ -126,6 +142,68 @@ extern "C" void dk64_android_set_rdram(uint8_t* rdram) {
 //   then [39] level index of the current map (0-6 levels, 7 Isles, 8 Helm; -1 elsewhere)
 //   then [40 + (k * 9 + level) * 2] golden bananas, coloured bananas for Kong k in that level
 //   then [130] 1 while the Kong is holding their gun out
+namespace {
+    uint32_t handler(const uint8_t* rdram, uint8_t state, uint32_t button) {
+        return read_u32(rdram, kInputHandlers + state * kInputHandlerSize + button);
+    }
+
+    // The do-nothing handler: the most common C-Up handler across all control states.
+    uint32_t noop_handler(const uint8_t* rdram) {
+        static uint32_t cached = 0;
+        if (cached != 0) {
+            return cached;
+        }
+        uint32_t best = 0;
+        int best_count = 0;
+        for (int i = 0; i < kControlStates; i++) {
+            const uint32_t h = handler(rdram, static_cast<uint8_t>(i), kHandlerCUp);
+            int count = 0;
+            for (int j = 0; j < kControlStates; j++) {
+                count += handler(rdram, static_cast<uint8_t>(j), kHandlerCUp) == h ? 1 : 0;
+            }
+            if (count > best_count) {
+                best = h;
+                best_count = count;
+            }
+        }
+        if (best >= 0x80000000u && best_count >= kControlStates / 4) {
+            cached = best;
+        }
+        return best;
+    }
+
+    // Bits 4 (Z + C moves) and 8 (C-Up) for this control state. Z + C works where Z crouches,
+    // as standing still or walking does (the moves are the crouching state's C buttons).
+    jint move_availability(const uint8_t* rdram, uint8_t state) {
+        if (state >= kControlStates) {
+            return 0;
+        }
+        const uint32_t noop = noop_handler(rdram);
+        const uint32_t z = handler(rdram, state, kHandlerZ);
+        const uint32_t z_idle = handler(rdram, kStateIdle, kHandlerZ);
+        const uint32_t z_walk = handler(rdram, kStateWalking, kHandlerZ);
+        jint bits = 0;
+        if (z_idle == noop) {
+            bits |= 4; // the table isn't what's expected: don't hide anything
+        }
+        else if (state == kStateCrouching || z == z_idle || z == z_walk) {
+            bits |= 4;
+        }
+        if (handler(rdram, state, kHandlerCUp) != noop) {
+            bits |= 8;
+        }
+
+        // Log each control state once, to check these rules on devices.
+        static std::atomic<uint64_t> seen[2]{};
+        const uint64_t bit = 1ull << (state & 63);
+        if ((seen[state >> 6].fetch_or(bit) & bit) == 0) {
+            __android_log_print(ANDROID_LOG_INFO, "DK64Recomp", "Control state 0x%02X: Z %08X, C-Up %08X (idle Z %08X, nothing %08X) -> Z+C %s, C-Up %s",
+                state, z, handler(rdram, state, kHandlerCUp), z_idle, noop, (bits & 4) ? "yes" : "no", (bits & 8) ? "yes" : "no");
+        }
+        return bits;
+    }
+}
+
 extern "C" JNIEXPORT jboolean JNICALL
 Java_io_github_bownz_dk64recomp_GameState_nativeRead(JNIEnv* env, jclass, jintArray out) {
     const uint8_t* rdram = g_rdram.load();
@@ -177,8 +255,12 @@ Java_io_github_bownz_dk64recomp_GameState_nativeRead(JNIEnv* env, jclass, jintAr
 
     {
         const uint32_t player = read_u32(rdram, kPlayerPointer);
-        // Bits: 1 gun held, 2 first-person view.
+        // Bits: 1 gun held, 2 first-person view, 4 Z + C moves possible now, 8 C-Up (first
+        // person) possible now, 16 a save file is being played.
         jint bits = 0;
+        if (read_u8(rdram, kGameMode) == kGameModeAdventure) {
+            bits |= 16;
+        }
         if (player >= 0x80000000u && player < 0x80800000u - 0x300) {
             if (read_u8(rdram, player + kPlayerGunOut) != 0) {
                 bits |= 1;
@@ -187,6 +269,7 @@ Java_io_github_bownz_dk64recomp_GameState_nativeRead(JNIEnv* env, jclass, jintAr
             if (control_state >= 2 && control_state <= 5) {
                 bits |= 2;
             }
+            bits |= move_availability(rdram, control_state);
         }
         values[kCount - 1] = bits;
     }

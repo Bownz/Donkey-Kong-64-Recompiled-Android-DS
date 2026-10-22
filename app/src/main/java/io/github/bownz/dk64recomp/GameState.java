@@ -131,6 +131,12 @@ final class GameState {
     boolean gunOut;
     /** In first-person view (C-Up), until it's left. */
     boolean firstPerson;
+    /** Z + C moves (weapon, oranges, instrument, camera) work in the current state. */
+    boolean canZMoves;
+    /** C-Up enters (or leaves) first-person view in the current state. */
+    boolean canFirstPerson;
+    /** A save file is being played (not the title screen or file select). */
+    boolean fileLoaded;
     final int[][] goldenByLevel = new int[KONG_COUNT][LEVELS];
     final int[][] colouredByLevel = new int[KONG_COUNT][LEVELS];
 
@@ -197,6 +203,9 @@ final class GameState {
         }
         gunOut = (raw[COUNT - 1] & 1) != 0;
         firstPerson = (raw[COUNT - 1] & 2) != 0;
+        canZMoves = (raw[COUNT - 1] & 4) != 0;
+        canFirstPerson = (raw[COUNT - 1] & 8) != 0;
+        fileLoaded = (raw[COUNT - 1] & 16) != 0;
         for (int k = 0; k < KONG_COUNT; k++) {
             for (int l = 0; l < LEVELS; l++) {
                 int base = 8 + KONG_COUNT * 6 + 2 + (k * LEVELS + l) * 2;
@@ -227,7 +236,7 @@ final class GameState {
      * (title screen, launcher) these locations hold zeros or leftovers.
      */
     boolean inGame() {
-        return currentKong >= 0 && currentKong < KONG_COUNT && melons >= 1 && melons <= 3
+        return fileLoaded && currentKong >= 0 && currentKong < KONG_COUNT && melons >= 1 && melons <= 3
             && health >= 0 && health <= melons * 4;
     }
 }

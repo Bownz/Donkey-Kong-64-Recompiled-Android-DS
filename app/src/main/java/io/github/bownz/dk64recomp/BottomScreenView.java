@@ -363,10 +363,28 @@ public final class BottomScreenView extends View {
         }
     }
 
+    /**
+     * Whether the Kong can do this right now (not climbing, swinging, swimming, in the air...).
+     * A move that's under way, the gun while it's out and leaving first person always work.
+     */
+    private boolean usableNow(Move move) {
+        if (running == move) {
+            return true;
+        }
+        switch (move) {
+            case FIRST_PERSON: return state.canFirstPerson || state.firstPerson;
+            case WEAPON: return state.canZMoves || state.gunOut;
+            default: return state.canZMoves;
+        }
+    }
+
     /** Whether an owned move has something to use; if not its button is greyed out. */
     private boolean available(Move move) {
         if (!state.inGame()) {
             return true;
+        }
+        if (!usableNow(move)) {
+            return false;
         }
         GameState.Kong k = state.kongs[state.currentKong];
         switch (move) {
@@ -648,6 +666,8 @@ public final class BottomScreenView extends View {
      */
     private void drawFirstPersonButton(Canvas c) {
         boolean pressed = running == Move.FIRST_PERSON || state.firstPerson;
+        boolean enabled = !state.inGame() || usableNow(Move.FIRST_PERSON);
+        int saved = c.saveLayerAlpha(fpX - fpR * 1.1f, fpY - fpR * 1.1f, fpX + fpR * 1.1f, fpY + fpR * 1.1f, enabled ? 255 : 90);
         float r = fpR * 0.92f;
         float cy = fpY - fpR * 0.08f;
         paint.setStyle(Paint.Style.FILL);
@@ -675,6 +695,7 @@ public final class BottomScreenView extends View {
         text.setTextAlign(Paint.Align.CENTER);
         text.setTextSize(fitText("1st Person", tmp.width() * 0.84f, tmp.height() * 0.66f));
         outlined(c, "1st Person", tmp.centerX(), tmp.centerY() + text.getTextSize() * 0.36f, CREAM);
+        c.restoreToCount(saved);
     }
 
     private void drawHealth(Canvas c) {
@@ -1097,7 +1118,9 @@ public final class BottomScreenView extends View {
 
         float dx = x - fpX, dy = y - fpY;
         if (dx * dx + dy * dy <= fpR * fpR * 1.3f) {
-            perform(Move.FIRST_PERSON);
+            if (usableNow(Move.FIRST_PERSON)) {
+                perform(Move.FIRST_PERSON);
+            }
             return true;
         }
         for (int i = 0; i < 4; i++) {
