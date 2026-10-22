@@ -49,7 +49,7 @@
 #include "librecomp/game.hpp"
 #include "librecomp/mods.hpp"
 #if defined(__ANDROID__)
-extern "C" void recompinput_android_open_device_motion();
+extern "C" void dk64_android_start_device_motion();
 #endif
 #include "librecomp/helpers.hpp"
 
@@ -154,8 +154,8 @@ ultramodern::gfx_callbacks_t::gfx_data_t create_gfx() {
     fprintf(stdout, "SDL Video Driver: %s\n", SDL_GetCurrentVideoDriver());
 
 #if defined(__ANDROID__)
-    // Gyro aiming with the device's own motion sensors (RecompFrontend Android patch).
-    recompinput_android_open_device_motion();
+    // Gyro aiming with the device's own motion sensors (android/jni/device_motion.cpp).
+    dk64_android_start_device_motion();
 #endif
 
     return {};

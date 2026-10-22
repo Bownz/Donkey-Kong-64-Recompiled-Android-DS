@@ -127,7 +127,8 @@ function(dk64_configure_android_target target)
         "${CMAKE_SOURCE_DIR}/android/jni/android_main.cpp"
         "${CMAKE_SOURCE_DIR}/android/jni/touch_controller.cpp"
         "${CMAKE_SOURCE_DIR}/android/jni/game_state.cpp"
-        "${CMAKE_SOURCE_DIR}/android/jni/gpu_driver.cpp")
+        "${CMAKE_SOURCE_DIR}/android/jni/gpu_driver.cpp"
+        "${CMAKE_SOURCE_DIR}/android/jni/device_motion.cpp")
     if (DK64_ANDROID_HAVE_ADRENOTOOLS)
         target_link_libraries(${target} PRIVATE adrenotools)
         target_compile_definitions(${target} PRIVATE DK64_HAVE_ADRENOTOOLS=1)
