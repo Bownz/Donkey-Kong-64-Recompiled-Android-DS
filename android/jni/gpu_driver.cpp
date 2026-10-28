@@ -12,6 +12,7 @@
 #include <dlfcn.h>
 #include <jni.h>
 
+#include <atomic>
 #include <string>
 #include <vector>
 
@@ -186,6 +187,12 @@ namespace dk64::android {
         return call_activity("getAppVersion", "()Ljava/lang/String;", nullptr);
     }
 
+    std::atomic<int> render_resolution{0};
+
+    void set_render_resolution(int multiplier) {
+        render_resolution.store(multiplier);
+    }
+
     void set_bottom_screen(bool enabled) {
         const std::string value = enabled ? "1" : "0";
         call_activity("setBottomScreen", "(Ljava/lang/String;)Ljava/lang/String;", &value);
@@ -217,4 +224,9 @@ extern "C" void dk64_android_game_closing() {
 // Called once after SDL_Init (src/main/main.cpp).
 extern "C" void dk64_android_watch_quit() {
     SDL_AddEventWatch(on_sdl_event, nullptr);
+}
+
+// RecompFrontend's renderer asks this when it sets RT64's resolution (Android patch).
+extern "C" int dk64_android_resolution_multiplier() {
+    return dk64::android::render_resolution.load();
 }

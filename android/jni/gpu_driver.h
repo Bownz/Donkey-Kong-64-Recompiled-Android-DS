@@ -29,4 +29,6 @@ namespace dk64::android {
     void set_show_fps(bool enabled);
     // The "Bottom Screen" setting (DK64Activity shows or hides the second-screen view).
     void set_bottom_screen(bool enabled);
+    // Graphics > Render Resolution: 0 follow the screen, else a multiple of 240 lines.
+    void set_render_resolution(int multiplier);
 }

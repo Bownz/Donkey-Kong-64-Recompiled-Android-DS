@@ -137,7 +137,7 @@ index 4fdf81f..89cd03c 100644
  
              config.add_enum_option(
 diff --git a/recompui/src/renderer/rt64_render_context.cpp b/recompui/src/renderer/rt64_render_context.cpp
-index a7954c7..dec1073 100644
+index a7954c7..c462b3d 100644
 --- a/recompui/src/renderer/rt64_render_context.cpp
 +++ b/recompui/src/renderer/rt64_render_context.cpp
 @@ -3,6 +3,40 @@
@@ -181,7 +181,33 @@ index a7954c7..dec1073 100644
  #include "hle/rt64_application.h"
  #include "rt64_render_hooks.h"
  #include "overloaded.h"
-@@ -225,7 +259,22 @@ renderer::RT64Context::RT64Context(uint8_t* rdram, ultramodern::renderer::Window
+@@ -138,12 +172,25 @@ RT64::EnhancementConfiguration::Presentation::Mode to_rt64(ultramodern::renderer
+     }
+ }
+ 
++#ifdef __ANDROID__
++// The game's Android glue (Graphics > Render Resolution): 0 to follow the screen, else the
++// multiple of the N64's 240 lines to render at (e.g. 3 = 720p). Lower is much lighter on
++// mobile GPUs, above all with MSAA on.
++extern "C" int dk64_android_resolution_multiplier() __attribute__((weak));
++#endif
++
+ void set_application_user_config(RT64::Application* application, const ultramodern::renderer::GraphicsConfig& config) {
+     switch (config.res_option) {
+         default:
+         case ultramodern::renderer::Resolution::Auto:
+             application->userConfig.resolution = RT64::UserConfiguration::Resolution::WindowIntegerScale;
+             application->userConfig.downsampleMultiplier = 1;
++#ifdef __ANDROID__
++            if (dk64_android_resolution_multiplier != nullptr && dk64_android_resolution_multiplier() > 0) {
++                application->userConfig.resolution = RT64::UserConfiguration::Resolution::Manual;
++                application->userConfig.resolutionMultiplier = dk64_android_resolution_multiplier();
++            }
++#endif
+             break;
+         case ultramodern::renderer::Resolution::Original:
+             application->userConfig.resolution = RT64::UserConfiguration::Resolution::Manual;
+@@ -225,7 +272,22 @@ renderer::RT64Context::RT64Context(uint8_t* rdram, ultramodern::renderer::Window
      RT64::Application::Core appCore{};
  #if defined(_WIN32)
      appCore.window = window_handle.window;
