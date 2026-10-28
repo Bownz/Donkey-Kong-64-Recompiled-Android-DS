@@ -150,6 +150,8 @@ final class GameState {
     boolean fileLoaded;
     /** Swimming (on the surface or underwater). */
     boolean swimming;
+    /** The pause menu is open. */
+    boolean paused;
     /** The player's control state (DK64's own numbering). */
     int controlState;
     /** The game's input-handler set for the player (0x0C standing, 0x0D walking, 0x3C crouching; 0xFF unknown). */
@@ -225,6 +227,7 @@ final class GameState {
         canFirstPerson = (raw[COUNT - 1] & 8) != 0;
         fileLoaded = (raw[COUNT - 1] & 16) != 0;
         swimming = (raw[COUNT - 1] & 32) != 0;
+        paused = (raw[COUNT - 1] & 64) != 0;
         controlState = (raw[COUNT - 1] >> 8) & 0xFF;
         inputSet = (raw[COUNT - 1] >> 16) & 0xFF;
         for (int k = 0; k < KONG_COUNT; k++) {

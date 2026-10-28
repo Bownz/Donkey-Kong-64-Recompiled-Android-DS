@@ -366,7 +366,7 @@ public final class BottomScreenView extends View {
     }
 
     private void toggleOrangstand() {
-        if (orangstandBusy || running != null) {
+        if (orangstandBusy || running != null || state.paused) {
             return;
         }
         performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
@@ -416,7 +416,7 @@ public final class BottomScreenView extends View {
     /** A round badge like the first-person one: Lanky's face, upside down. */
     private void drawOrangstandButton(Canvas c) {
         boolean pressed = orangstand || orangstandBusy;
-        boolean enabled = orangstand || (!state.swimming && !state.gunOut);
+        boolean enabled = !state.paused && (orangstand || (!state.swimming && !state.gunOut));
         float r = osR * 0.92f;
         float cy = osY - osR * 0.08f;
         int saved = c.saveLayerAlpha(osX - osR * 1.1f, osY - osR * 1.1f, osX + osR * 1.1f, osY + osR * 1.1f, enabled ? 255 : 90);
@@ -506,6 +506,9 @@ public final class BottomScreenView extends View {
     private boolean greyed(Move move) {
         if (!state.inGame() || running == move) {
             return false;
+        }
+        if (state.paused) {
+            return true;   // nothing works while the pause menu is open
         }
         GameState.Kong k = state.kongs[state.currentKong];
         switch (move) {
@@ -600,6 +603,21 @@ public final class BottomScreenView extends View {
         drawKongPanel(canvas);
         drawLocationBar(canvas);
         drawActions(canvas);
+        if (state.paused) {
+            drawPausedTag(canvas);
+        }
+    }
+
+    /** A wooden "Paused" tag across the (dimmed) action buttons. */
+    private void drawPausedTag(Canvas c) {
+        RectF first = actionRects[0], last = actionRects[actionRects.length - 1];
+        float cy = (first.top + last.bottom) / 2f;
+        float h = unit * 0.11f;
+        tmp.set(first.left - unit * 0.01f, cy - h / 2f, first.right + unit * 0.01f, cy + h / 2f);
+        tagPlate(c, tmp);
+        text.setTextAlign(Paint.Align.CENTER);
+        text.setTextSize(fitText("Paused", tmp.width() * 0.8f, tmp.height() * 0.62f));
+        outlined(c, "Paused", tmp.centerX(), tmp.centerY() + text.getTextSize() * 0.36f, CREAM);
     }
 
     /**

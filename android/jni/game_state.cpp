@@ -252,11 +252,14 @@ Java_io_github_bownz_dk64recomp_GameState_nativeRead(JNIEnv* env, jclass, jintAr
     {
         const uint32_t player = read_u32(rdram, kPlayerPointer);
         // Bits: 1 gun held, 2 first-person view, 4 Z + C moves possible now, 8 C-Up (first
-        // person) possible now, 16 a save file is being played, 32 swimming; bits 8-15: the
+        // person) possible now, 16 a save file is being played, 32 swimming, 64 paused; bits 8-15: the
         // player's control state; bits 16-23: the input-handler set (0xFF: not known).
         jint bits = 0;
         if (read_u8(rdram, kGameMode) == kGameModeAdventure) {
             bits |= 16;
+        }
+        if (read_u32(rdram, kGlobalProperties) & 2) {
+            bits |= 64; // paused (code_450.c sets this once the pause menu opens)
         }
         if (player >= 0x80000000u && player < 0x80800000u - 0x300) {
             if (read_u8(rdram, player + kPlayerGunOut) != 0) {
