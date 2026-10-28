@@ -809,9 +809,14 @@ public final class BottomScreenView extends View {
     private static final String[] PAUSE_COLUMNS = { "Golden Bananas", "Bananas", "Blueprints", "Banana Medals", "Coins" };
 
     private void stepPauseLevel(int dir) {
-        // -1 (all levels), then 0..LEVELS-1, wrapping round.
+        // -1 (all levels), then 0..LEVELS-1, wrapping round; levels not reached yet are skipped.
         int n = GameState.LEVELS + 1;
-        pauseLevel = ((pauseLevel + 1 + dir) % n + n) % n - 1;
+        for (int i = 0; i < n; i++) {
+            pauseLevel = ((pauseLevel + 1 + dir) % n + n) % n - 1;
+            if (state.levelReached(pauseLevel)) {
+                break;
+            }
+        }
         performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
         invalidate();
     }
@@ -1301,7 +1306,7 @@ public final class BottomScreenView extends View {
             for (int i = 0; i < lists.length; i++) {
                 int have = 0, total = 0;
                 for (int l = 0; l < GameState.LEVELS; l++) {
-                    if (all || l == level) {
+                    if ((all && state.levelReached(l)) || l == level) {
                         have += state.countFlags(lists[i][l]);
                         total += lists[i][l].length;
                     }
@@ -1324,6 +1329,9 @@ public final class BottomScreenView extends View {
         for (int l = 0; l < GameState.LEVELS; l++) {
             if (!all && l != level) {
                 continue;
+            }
+            if (all && !state.levelReached(l)) {
+                continue;   // places not reached yet don't count towards the totals
             }
             golden += state.goldenByLevel[tab][l];
             coloured += state.colouredByLevel[tab][l];

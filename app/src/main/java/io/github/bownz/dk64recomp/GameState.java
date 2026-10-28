@@ -53,6 +53,17 @@ final class GameState {
         return MEDAL_BASE + (level == HELM ? 7 : level) * 5 + kong;
     }
 
+    /** PERMFLAG_LEVEL_ENTERED_* per level slot (enums.h); Isles (-1) is always open. */
+    static final int[] LEVEL_ENTERED_FLAGS = { 0x1C5, 0x1C6, 0x1C7, 0x1C8, 0x1C9, 0x1CA, 0x1CB, -1, 0x1CC };
+
+    /** Whether the player has been to this level yet (Isles always; -1, all levels, too). */
+    boolean levelReached(int level) {
+        if (level < 0 || level >= LEVELS || LEVEL_ENTERED_FLAGS[level] < 0) {
+            return true;
+        }
+        return level == this.level || flag(LEVEL_ENTERED_FLAGS[level]);
+    }
+
     // Every flag the screen shows, read in one call; index of each in flagIds.
     private static final int[] flagIds;
     private static final java.util.HashMap<Integer, Integer> flagIndex = new java.util.HashMap<>();
@@ -68,6 +79,9 @@ final class GameState {
                     ids.add(f);
                 }
             }
+        }
+        for (int f : LEVEL_ENTERED_FLAGS) {
+            ids.add(f);
         }
         ids.removeIf(f -> f < 0);
         flagIds = new int[ids.size()];
