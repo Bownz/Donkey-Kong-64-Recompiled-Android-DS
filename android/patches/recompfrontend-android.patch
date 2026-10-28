@@ -118,79 +118,8 @@ index c89956e..03002ea 100644
          }
  
          *buttons_out = cur_buttons;
-diff --git a/recompui/src/config/ui_config_tab_graphics.cpp b/recompui/src/config/ui_config_tab_graphics.cpp
-index 4fdf81f..dcc983a 100644
---- a/recompui/src/config/ui_config_tab_graphics.cpp
-+++ b/recompui/src/config/ui_config_tab_graphics.cpp
-@@ -19,11 +19,25 @@ namespace recompui {
-         }
- 
-         using EnumOptionVector = const std::vector<recomp::config::ConfigOptionEnumOption>;
-+#ifdef __ANDROID__
-+        // Android: a 720p choice between Original 2x and Auto. It isn't one of ultramodern's
-+        // Resolution values, so apply_graphics_config sends it as Auto with ds_option set to
-+        // 1000 + 3 (ignored by Auto elsewhere), which
-+        // set_application_user_config (rt64_render_context.cpp) turns into a 3x (720p) render.
-+        static constexpr uint32_t RESOLUTION_720P = 100;
-+        static EnumOptionVector resolution_options = {
-+            {ultramodern::renderer::Resolution::Original, "Original", "240p"},
-+            {ultramodern::renderer::Resolution::Original2x, "Original2x", "480p"},
-+            {RESOLUTION_720P, "720p", "720p"},
-+            {ultramodern::renderer::Resolution::Auto, "Auto", "Screen"},
-+        };
-+#else
-         static EnumOptionVector resolution_options = {
-             {ultramodern::renderer::Resolution::Original, "Original", "Original"},
-             {ultramodern::renderer::Resolution::Original2x, "Original2x", "Original 2x"},
-             {ultramodern::renderer::Resolution::Auto, "Auto", "Auto"},
-         };
-+#endif
- 
-         enum class DownsamplingOption {
-             Off = 0,
-@@ -176,6 +190,12 @@ namespace recompui {
-             new_config.rr_manual_value = get_graphics_number_value<int>(graphics::options::rr_manual_value);
- 
-             new_config.ds_option = get_graphics_enum_value<int>(graphics::options::ds_option);
-+#ifdef __ANDROID__
-+            if (static_cast<uint32_t>(new_config.res_option) == RESOLUTION_720P) {
-+                new_config.res_option = ultramodern::renderer::Resolution::Auto;
-+                new_config.ds_option = 1000 + 3; // see resolution_options
-+            }
-+#endif
- 
-             ultramodern::renderer::set_graphics_config(new_config);
-         }
-@@ -235,7 +255,13 @@ namespace recompui {
-             config.add_enum_option(
-                 graphics::options::res_option,
-                 "Resolution",
-+#ifdef __ANDROID__
-+                "Sets the resolution the game is drawn at. <recomp-color primary>Screen</recomp-color> scales to the display (960p on a 1080p screen). "
-+                "<recomp-color primary>720p</recomp-color> draws about half as many pixels: much faster, above all with anti-aliasing on, and still sharp on a handheld screen. "
-+                "<recomp-color primary>480p</recomp-color> and <recomp-color primary>240p</recomp-color> are 2x and 1x the original game.",
-+#else
-                 "Sets the output resolution of the game. <recomp-color primary>Original</recomp-color> matches the game's original 240p resolution. <recomp-color primary>Original 2x</recomp-color> will render at 480p. <recomp-color primary>Auto</recomp-color> will scale based on the game window's resolution.",
-+#endif
-                 resolution_options,
-                 ultramodern::renderer::Resolution::Auto
-             );
-@@ -330,7 +356,13 @@ namespace recompui {
-                 "<br />"
-                 "<recomp-color primary>Note: This option won't be available if your GPU does not support programmable MSAA sample positions, as it is currently required to avoid rendering glitches.</recomp-color>",
-                 antialiasing_options,
-+#ifdef __ANDROID__
-+                // Off by default on Android: on tile-based mobile GPUs MSAA costs far more
-+                // than on desktop (e.g. ~25% frame rate in heavy scenes on an Adreno 740).
-+                ultramodern::renderer::Antialiasing::None
-+#else
-                 ultramodern::renderer::Antialiasing::MSAA2X
-+#endif
-             );
- 
-             config.add_enum_option(
 diff --git a/recompui/src/renderer/rt64_render_context.cpp b/recompui/src/renderer/rt64_render_context.cpp
-index a7954c7..8dd7549 100644
+index a7954c7..dec1073 100644
 --- a/recompui/src/renderer/rt64_render_context.cpp
 +++ b/recompui/src/renderer/rt64_render_context.cpp
 @@ -3,6 +3,40 @@
@@ -234,29 +163,7 @@ index a7954c7..8dd7549 100644
  #include "hle/rt64_application.h"
  #include "rt64_render_hooks.h"
  #include "overloaded.h"
-@@ -138,12 +172,21 @@ RT64::EnhancementConfiguration::Presentation::Mode to_rt64(ultramodern::renderer
-     }
- }
- 
-+
- void set_application_user_config(RT64::Application* application, const ultramodern::renderer::GraphicsConfig& config) {
-     switch (config.res_option) {
-         default:
-         case ultramodern::renderer::Resolution::Auto:
-             application->userConfig.resolution = RT64::UserConfiguration::Resolution::WindowIntegerScale;
-             application->userConfig.downsampleMultiplier = 1;
-+#ifdef __ANDROID__
-+            // Graphics > Resolution > 720p (ui_config_tab_graphics.cpp): Auto with
-+            // ds_option = 1000 + the multiple of 240 lines to render at.
-+            if (config.ds_option > 1000) {
-+                application->userConfig.resolution = RT64::UserConfiguration::Resolution::Manual;
-+                application->userConfig.resolutionMultiplier = config.ds_option - 1000;
-+            }
-+#endif
-             break;
-         case ultramodern::renderer::Resolution::Original:
-             application->userConfig.resolution = RT64::UserConfiguration::Resolution::Manual;
-@@ -225,7 +268,22 @@ renderer::RT64Context::RT64Context(uint8_t* rdram, ultramodern::renderer::Window
+@@ -225,7 +259,22 @@ renderer::RT64Context::RT64Context(uint8_t* rdram, ultramodern::renderer::Window
      RT64::Application::Core appCore{};
  #if defined(_WIN32)
      appCore.window = window_handle.window;

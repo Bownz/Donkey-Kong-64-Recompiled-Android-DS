@@ -385,6 +385,28 @@ static void add_graphics_options(recomp::config::Config &config) {
 #if defined(__ANDROID__)
     add_gpu_driver_option(config);
 
+    // Android: draw distance that adapts to the frame rate (game_state.cpp).
+    static const std::string auto_draw_option = "android_auto_draw_distance";
+    static EnumOptionVector auto_draw_options = {
+        {0u, "Off", "Off"},
+        {1u, "On", "On"},
+    };
+    config.add_enum_option(
+        auto_draw_option,
+        "Auto Draw Distance",
+        "Lowers the draw distance while the game can't keep its full frame rate (busy areas such as "
+        "Angry Aztec's caves), then brings it back up once it keeps up again. "
+        "<recomp-color primary>Draw Distance</recomp-color> above is the most it will use.",
+        auto_draw_options,
+        1u
+    );
+    config.add_option_change_callback(auto_draw_option,
+        [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
+            if (context != recomp::config::OptionChangeContext::Temporary) {
+                dk64::android::set_auto_draw_distance(std::get<uint32_t>(cur) == 1u);
+            }
+        });
+
     // Android: game frames per second in the corner of the screen.
     static const std::string show_fps_option = "android_show_fps";
     static EnumOptionVector show_fps_options = {
@@ -412,6 +434,9 @@ dk64::CutsceneBordersMode dk64::get_cutscene_borders() {
 }
 
 int dk64::get_draw_distance() {
+#if defined(__ANDROID__)
+    return dk64::android::draw_distance(get_graphics_config_number_value<int>(dk64::configkeys::graphics::draw_distance));
+#endif
     return get_graphics_config_number_value<int>(dk64::configkeys::graphics::draw_distance);
 }
 

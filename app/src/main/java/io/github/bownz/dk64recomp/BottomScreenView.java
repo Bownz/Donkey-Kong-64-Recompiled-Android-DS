@@ -706,6 +706,9 @@ public final class BottomScreenView extends View {
         if (state.paused) {
             return true;   // nothing works while the pause menu is open
         }
+        if (orangstand || orangstandBusy) {
+            return true;   // Lanky is on his hands: none of these work until he's back up
+        }
         GameState.Kong k = state.kongs[state.currentKong];
         switch (move) {
             case FIRST_PERSON: return state.climbing;
