@@ -226,14 +226,21 @@ public final class BottomScreenView extends View {
         }
 
         final int z = TouchInput.N64_Z;
-        TouchInput.setN64Buttons(z);                                                        // Z
-        handler.postDelayed(() -> TouchInput.setN64Buttons(z | c), Z_LEAD_MS);              // + C
-        handler.postDelayed(() -> TouchInput.setN64Buttons(z), Z_LEAD_MS + C_HOLD_MS);
+        // Putting the gun away from first-person aiming: leave first person first (C-Up), then
+        // Z + C-Left as usual, so the view doesn't stay in first person without the gun.
+        final long lead = (move == Move.WEAPON && state.gunOut && state.firstPerson) ? C_HOLD_MS + 250 : 0;
+        if (lead > 0) {
+            TouchInput.setN64Buttons(TouchInput.N64_C_UP);
+            handler.postDelayed(() -> TouchInput.setN64Buttons(0), C_HOLD_MS);
+        }
+        handler.postDelayed(() -> TouchInput.setN64Buttons(z), lead);                       // Z
+        handler.postDelayed(() -> TouchInput.setN64Buttons(z | c), lead + Z_LEAD_MS);       // + C
+        handler.postDelayed(() -> TouchInput.setN64Buttons(z), lead + Z_LEAD_MS + C_HOLD_MS);
         handler.postDelayed(() -> {
             TouchInput.setN64Buttons(0);
             running = null;
             invalidate();
-        }, Z_LEAD_MS + C_HOLD_MS + Z_TAIL_MS);
+        }, lead + Z_LEAD_MS + C_HOLD_MS + Z_TAIL_MS);
     }
 
     // ------------------------------------------------------------------------------
