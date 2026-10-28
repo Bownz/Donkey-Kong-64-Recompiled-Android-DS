@@ -352,13 +352,11 @@ public final class BottomScreenView extends View {
     // keep him there, as the game needs. Tapping again lets go of Z. It also lets go when he
     // ends up back on his feet or in water (Z stays held through the pause menu).
 
-    private static final int SET_STANDING = 0x0C, SET_WALKING = 0x0D, SET_CROUCHING = 0x3C;
     private boolean orangstand;      // Lanky is on his hands (entered with this button)
     private boolean orangstandBusy;
 
     private boolean onFeet() {
-        int set = state.inputSet;
-        return set == SET_STANDING || set == SET_WALKING || set == SET_CROUCHING;
+        return state.onFeet;
     }
 
     private boolean showOrangstand() {

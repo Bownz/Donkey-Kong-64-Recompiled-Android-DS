@@ -160,6 +160,8 @@ final class GameState {
     int controlState;
     /** The game's input-handler set for the player (0x0C standing, 0x0D walking, 0x3C crouching; 0xFF unknown). */
     int inputSet = 0xFF;
+    /** The game ran standing, walking or crouching input this frame. */
+    boolean onFeet;
     final int[][] goldenByLevel = new int[KONG_COUNT][LEVELS];
     final int[][] colouredByLevel = new int[KONG_COUNT][LEVELS];
 
@@ -239,6 +241,7 @@ final class GameState {
         swimming |= controlState == 0x4E || controlState == 0x4F;
         climbing = controlState == 0x57 || controlState == 0x59;
         inputSet = (raw[COUNT - 1] >> 16) & 0xFF;
+        onFeet = (raw[COUNT - 1] & (1 << 24)) != 0;
         for (int k = 0; k < KONG_COUNT; k++) {
             for (int l = 0; l < LEVELS; l++) {
                 int base = 8 + KONG_COUNT * 6 + 2 + (k * LEVELS + l) * 2;

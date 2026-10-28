@@ -18,7 +18,11 @@
 namespace {
     std::atomic<uint8_t*> g_rdram{nullptr};
     std::atomic<bool> g_touch_kong_swap{false};
-    std::atomic<uint32_t> g_input_set{0xFFFFFFFFu};  // patches/android_hooks.c
+    // patches/android_hooks.c reports each input-handler set the game runs; a frame can run
+    // several (e.g. a mode's own set plus shared ones). They're collected per frame.
+    std::atomic<uint64_t> g_sets_building[2]{};
+    std::atomic<uint64_t> g_sets_frame[2]{};
+    std::atomic<uint32_t> g_input_set{0xFFFFFFFFu};  // the first set reported in the last frame
     std::atomic<uint32_t> g_frames{0};
     std::atomic<bool> g_show_fps{false};
     constexpr const char* kTagAnywhereModId = "dk64_tag_anywhere";
@@ -294,9 +298,25 @@ Java_io_github_bownz_dk64recomp_GameState_nativeRead(JNIEnv* env, jclass, jintAr
                 bits |= 2;
             }
             const uint32_t input_set = g_input_set.load();
-            bits |= move_availability(rdram, input_set);
+            const uint64_t sets[2] = { g_sets_frame[0].load(), g_sets_frame[1].load() };
+            if (sets[0] == 0 && sets[1] == 0) {
+                bits |= move_availability(rdram, 0xFFFFFFFFu);
+            }
+            else {
+                for (uint32_t i = 0; i < static_cast<uint32_t>(kControlStates); i++) {
+                    if ((sets[i >> 6] >> (i & 63)) & 1) {
+                        bits |= move_availability(rdram, i);
+                    }
+                }
+            }
             bits |= static_cast<jint>(control_state) << 8;
             bits |= static_cast<jint>(input_set < 0xFF ? input_set : 0xFF) << 16;
+            // Bit 24: on his feet (standing, walking or crouching input this frame).
+            for (uint32_t i : { 0x0Cu, 0x0Du, 0x3Cu }) {
+                if ((sets[i >> 6] >> (i & 63)) & 1) {
+                    bits |= 1 << 24;
+                }
+            }
         }
         values[kCount - 1] = bits;
     }
@@ -362,11 +382,28 @@ Java_io_github_bownz_dk64recomp_GameState_nativeKongSwap(JNIEnv*, jclass) {
 }
 
 extern "C" void dk64_android_report_input_handler(uint32_t index) {
-    g_input_set.store(index, std::memory_order_relaxed);
+    if (index < 128) {
+        g_sets_building[index >> 6].fetch_or(1ull << (index & 63), std::memory_order_relaxed);
+    }
 }
 
 extern "C" void dk64_android_report_frame() {
     g_frames.fetch_add(1, std::memory_order_relaxed);
+    const uint64_t lo = g_sets_building[0].exchange(0, std::memory_order_relaxed);
+    const uint64_t hi = g_sets_building[1].exchange(0, std::memory_order_relaxed);
+    if (lo != 0 || hi != 0) {
+        // Frames where the player isn't processed (pause, loading) keep the last ones.
+        g_sets_frame[0].store(lo, std::memory_order_relaxed);
+        g_sets_frame[1].store(hi, std::memory_order_relaxed);
+        uint32_t first = 0xFFFFFFFFu;
+        for (uint32_t i = 0; i < 128; i++) {
+            if (((i < 64 ? lo : hi) >> (i & 63)) & 1) {
+                first = i;
+                break;
+            }
+        }
+        g_input_set.store(first, std::memory_order_relaxed);
+    }
 }
 
 void dk64::android::set_show_fps(bool enabled) {
