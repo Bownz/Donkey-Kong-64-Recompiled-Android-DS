@@ -411,6 +411,83 @@ public final class BottomScreenView extends View {
     }
 
     // ------------------------------------------------------------------------------
+    // Other Z + B moves (same place): Diddy's Chimpy Charge, Chunky's Primate Punch
+    // ------------------------------------------------------------------------------
+    //
+    // Crouching then B (code_E4090.c): Diddy charges once he has his first Cranky move,
+    // Chunky punches once he has his second.
+
+    private boolean zbBusy;
+
+    /** The current Kong's Z + B move, if bought; null if none (Lanky's is the toggle above). */
+    private String zbMoveName() {
+        if (!state.inGame()) {
+            return null;
+        }
+        int k = state.currentKong;
+        if (k == GameState.DIDDY && state.kongs[k].moves >= 1) {
+            return "Charge";
+        }
+        if (k == GameState.CHUNKY && state.kongs[k].moves >= 2) {
+            return "Punch";
+        }
+        return null;
+    }
+
+    private boolean zbMoveUsable() {
+        return !state.paused && !state.swimming && !state.climbing && !state.gunOut;
+    }
+
+    private void performZbMove() {
+        if (zbBusy || running != null || !zbMoveUsable() || !state.canZMoves) {
+            return;
+        }
+        performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+        zbBusy = true;
+        invalidate();
+        final int z = TouchInput.N64_Z, b = TouchInput.N64_B;
+        TouchInput.setN64Buttons(z);
+        handler.postDelayed(() -> TouchInput.setN64Buttons(z | b), Z_LEAD_MS);
+        handler.postDelayed(() -> TouchInput.setN64Buttons(z), Z_LEAD_MS + C_HOLD_MS);
+        handler.postDelayed(() -> {
+            TouchInput.setN64Buttons(0);
+            zbBusy = false;
+            invalidate();
+        }, Z_LEAD_MS + C_HOLD_MS + Z_TAIL_MS);
+    }
+
+    /** A round orange badge with the Kong's face, named after the move. */
+    private void drawZbMoveButton(Canvas c) {
+        String name = zbMoveName();
+        boolean enabled = zbMoveUsable();
+        float r = osR * 0.92f;
+        float cy = osY - osR * 0.08f;
+        int saved = c.saveLayerAlpha(osX - osR * 1.1f, osY - osR * 1.1f, osX + osR * 1.1f, osY + osR * 1.1f, enabled ? 255 : 90);
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(OUTLINE);
+        c.drawCircle(osX, cy, r, paint);
+        int top = zbBusy ? Color.rgb(250, 200, 90) : Color.rgb(200, 130, 50);
+        int bottom = zbBusy ? Color.rgb(200, 120, 30) : Color.rgb(120, 70, 20);
+        paint.setShader(new LinearGradient(0, cy - r, 0, cy + r, top, bottom, Shader.TileMode.CLAMP));
+        c.drawCircle(osX, cy, r * 0.87f, paint);
+        paint.setShader(null);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(unit * 0.006f);
+        paint.setColor(zbBusy ? BANANA : Color.argb(140, 255, 255, 255));
+        c.drawCircle(osX, cy, r * 0.87f, paint);
+        paint.setStyle(Paint.Style.FILL);
+        if (!RomIcons.draw(c, RomIcons.face[state.currentKong], osX, cy, r * 0.62f)) {
+            DkIcons.eye(c, osX, cy, r * 0.5f);
+        }
+        tmp.set(osX - osR * 0.95f, osY + osR * 0.58f, osX + osR * 0.95f, osY + osR * 0.98f);
+        tagPlate(c, tmp);
+        text.setTextAlign(Paint.Align.CENTER);
+        text.setTextSize(fitText(name, tmp.width() * 0.8f, tmp.height() * 0.66f));
+        outlined(c, name, tmp.centerX(), tmp.centerY() + text.getTextSize() * 0.36f, CREAM);
+        c.restoreToCount(saved);
+    }
+
+    // ------------------------------------------------------------------------------
     // Ending a Kong barrel ability (same place as the Orangstand button)
     // ------------------------------------------------------------------------------
     //
@@ -679,6 +756,8 @@ public final class BottomScreenView extends View {
             drawCancelButton(canvas);
         } else if (showOrangstand()) {
             drawOrangstandButton(canvas);
+        } else if (zbMoveName() != null) {
+            drawZbMoveButton(canvas);
         }
         drawTabs(canvas);
         drawKongPanel(canvas);
@@ -1362,6 +1441,10 @@ public final class BottomScreenView extends View {
         }
         if (showOrangstand() && ox * ox + oy * oy <= osR * osR * 1.3f) {
             toggleOrangstand();
+            return true;
+        }
+        if (zbMoveName() != null && ox * ox + oy * oy <= osR * osR * 1.3f) {
+            performZbMove();
             return true;
         }
         float dx = x - fpX, dy = y - fpY;
