@@ -707,7 +707,9 @@ public final class BottomScreenView extends View {
                 }
                 return state.swimming || state.climbing || (state.ammo <= 0 && state.homingAmmo <= 0);
             case ORANGE: return state.swimming || state.climbing || state.gunOut || state.oranges <= 0;
-            case INSTRUMENT: return state.swimming || state.climbing || state.gunOut || k.instrumentEnergy <= 0;
+            // In first person (or the camera) Z + C-Up would just leave the view.
+            case INSTRUMENT: return state.swimming || state.climbing || state.gunOut || state.firstPerson || state.camera
+                || k.instrumentEnergy <= 0;
             case CAMERA: return !state.camera && (state.swimming || state.climbing || state.gunOut || state.film <= 0);
             default: return false;
         }
