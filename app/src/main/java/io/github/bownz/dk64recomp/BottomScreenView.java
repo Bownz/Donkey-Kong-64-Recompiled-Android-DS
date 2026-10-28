@@ -416,7 +416,7 @@ public final class BottomScreenView extends View {
     /** A round badge like the first-person one: Lanky's face, upside down. */
     private void drawOrangstandButton(Canvas c) {
         boolean pressed = orangstand || orangstandBusy;
-        boolean enabled = !state.paused && (orangstand || (!state.swimming && !state.gunOut));
+        boolean enabled = !state.paused && (orangstand || (!state.swimming && !state.climbing && !state.gunOut));
         float r = osR * 0.92f;
         float cy = osY - osR * 0.08f;
         int saved = c.saveLayerAlpha(osX - osR * 1.1f, osY - osR * 1.1f, osX + osR * 1.1f, osY + osR * 1.1f, enabled ? 255 : 90);
@@ -512,15 +512,15 @@ public final class BottomScreenView extends View {
         }
         GameState.Kong k = state.kongs[state.currentKong];
         switch (move) {
-            case FIRST_PERSON: return false;
+            case FIRST_PERSON: return state.climbing;
             case WEAPON:
                 if (state.gunOut) {
                     return false;
                 }
-                return state.swimming || (state.ammo <= 0 && state.homingAmmo <= 0);
-            case ORANGE: return state.swimming || state.gunOut || state.oranges <= 0;
-            case INSTRUMENT: return state.swimming || state.gunOut || k.instrumentEnergy <= 0;
-            case CAMERA: return state.swimming || state.gunOut || state.film <= 0;
+                return state.swimming || state.climbing || (state.ammo <= 0 && state.homingAmmo <= 0);
+            case ORANGE: return state.swimming || state.climbing || state.gunOut || state.oranges <= 0;
+            case INSTRUMENT: return state.swimming || state.climbing || state.gunOut || k.instrumentEnergy <= 0;
+            case CAMERA: return state.swimming || state.climbing || state.gunOut || state.film <= 0;
             default: return false;
         }
     }

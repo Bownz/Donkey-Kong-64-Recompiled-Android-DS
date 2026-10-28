@@ -150,6 +150,8 @@ final class GameState {
     boolean fileLoaded;
     /** Swimming (on the surface or underwater). */
     boolean swimming;
+    /** Hanging on a vine, or climbing a tree or pole. */
+    boolean climbing;
     /** The pause menu is open. */
     boolean paused;
     /** The player's control state (DK64's own numbering). */
@@ -229,6 +231,10 @@ final class GameState {
         swimming = (raw[COUNT - 1] & 32) != 0;
         paused = (raw[COUNT - 1] & 64) != 0;
         controlState = (raw[COUNT - 1] >> 8) & 0xFF;
+        // Control states (code_EFDC0.c, code_EBBE0.c): 0x4E/0x4F swimming, 0x57 on a vine,
+        // 0x59 climbing a tree or pole.
+        swimming |= controlState == 0x4E || controlState == 0x4F;
+        climbing = controlState == 0x57 || controlState == 0x59;
         inputSet = (raw[COUNT - 1] >> 16) & 0xFF;
         for (int k = 0; k < KONG_COUNT; k++) {
             for (int l = 0; l < LEVELS; l++) {
