@@ -12,6 +12,7 @@ final class GameState {
 
     /** Level slots: 0-6 the seven levels, 7 DK Isles (with the lobbies), 8 Hideout Helm. */
     static final int LEVELS = 9;
+    static final String[] KONG_NAMES = { "DK", "Diddy", "Lanky", "Tiny", "Chunky" };
     static final int ISLES = 7, HELM = 8;
     static final String[] LEVEL_NAMES = {
         "Jungle Japes", "Angry Aztec", "Frantic Factory", "Gloomy Galleon", "Fungi Forest",

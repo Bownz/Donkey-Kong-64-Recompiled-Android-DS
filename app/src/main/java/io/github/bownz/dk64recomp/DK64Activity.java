@@ -373,13 +373,30 @@ public class DK64Activity extends SDLActivity
 
         overlay.setActive(!hasPhysicalGamepad());
 
-        Display second = started ? findSecondDisplay() : null;
+        Display second = started && bottomScreenEnabled() ? findSecondDisplay() : null;
         if (second == null || (presentation != null && presentation.getDisplay().getDisplayId() != second.getDisplayId())) {
             dismissPresentation();
         }
         if (second != null && presentation == null) {
             showPresentation(second);
         }
+    }
+
+    // Settings > Dual Screen > Bottom Screen (src/game/config.cpp). Kept here too so the choice
+    // applies from the start, before the game has loaded its settings.
+    private static final String PREFS_DUAL_SCREEN = "dual_screen";
+
+    private boolean bottomScreenEnabled() {
+        return getSharedPreferences(PREFS_DUAL_SCREEN, MODE_PRIVATE).getBoolean("bottom_screen", true);
+    }
+
+    /** Called from the game's settings (any thread). "1" on, "0" off. */
+    @SuppressWarnings("unused")
+    public String setBottomScreen(String on) {
+        boolean enabled = "1".equals(on);
+        getSharedPreferences(PREFS_DUAL_SCREEN, MODE_PRIVATE).edit().putBoolean("bottom_screen", enabled).apply();
+        runOnUiThread(this::updateTouchControls);
+        return null;
     }
 
     private boolean hasPhysicalGamepad() {

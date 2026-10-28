@@ -69,10 +69,12 @@ public final class BottomScreenView extends View {
     private final RectF[] actionRects = { new RectF(), new RectF(), new RectF(), new RectF() };
     /** Tabs: the five Kongs, then shared (non-Kong) collectibles. */
     private static final int SHARED_TAB = GameState.KONG_COUNT;
-    private static final int TAB_COUNT = GameState.KONG_COUNT + 1;
+    private static final int TAB_COUNT = GameState.KONG_COUNT;   // shared items are on the pause screen
     private final RectF[] tabRects = new RectF[TAB_COUNT];
     private final RectF locationRect = new RectF();
-    private boolean showTotals;      // location bar: this level, or the whole game
+    private final RectF pauseHeadRect = new RectF(), pausePrevRect = new RectF(), pauseNextRect = new RectF(), pauseTableRect = new RectF();
+    private int pauseLevel = -1;     // pause screen: the level shown (-1: all levels)
+    private boolean wasPaused;
     private final RectF panelRect = new RectF();
     private final RectF tmp = new RectF();
     private final Paint bitmapPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
@@ -95,9 +97,12 @@ public final class BottomScreenView extends View {
     private final Runnable poll = new Runnable() {
         @Override
         public void run() {
-            int levelBefore = state.level;
             int crystalsBefore = state.crystals;
             boolean changed = state.refresh();
+            if (state.paused && !wasPaused) {
+                pauseLevel = state.level >= 0 ? state.level : -1;   // open on where you are
+            }
+            wasPaused = state.paused;
             if (state.inGame() && state.crystals < crystalsBefore) {
                 crystalsDrainedAt = android.os.SystemClock.uptimeMillis();
             }
@@ -106,9 +111,6 @@ public final class BottomScreenView extends View {
             changed |= cancelShown != cancelBefore;
             updateOrangstand();
             if (changed) {
-                if (state.level != levelBefore && state.level >= 0) {
-                    showTotals = false;   // entering a new place shows that place first
-                }
                 invalidate();
             }
             RomIcons.ensureLoaded(BottomScreenView.this::postInvalidate);
@@ -733,8 +735,15 @@ public final class BottomScreenView extends View {
             tabRects[i].set(l, tabsTop, l + tabW, tabsTop + tabH);
         }
         float barH = unit * 0.1f;
-        locationRect.set(left, h - m - barH, right, h - m);
-        panelRect.set(left, tabsTop + tabH + m * 0.6f, right, locationRect.top - m * 0.5f);
+        locationRect.setEmpty();
+        panelRect.set(left, tabsTop + tabH + m * 0.6f, right, h - m);
+
+        // Pause screen: header (arrows + level name) and the table under it.
+        float headH = unit * 0.13f;
+        pauseHeadRect.set(m, m, w - m, m + headH);
+        pausePrevRect.set(m, m, m + headH, m + headH);
+        pauseNextRect.set(w - m - headH, m, w - m, m + headH);
+        pauseTableRect.set(m, m + headH + m * 0.6f, w - m, h - m);
     }
 
     // ------------------------------------------------------------------------------
@@ -748,6 +757,10 @@ public final class BottomScreenView extends View {
             drawTitle(canvas, getWidth(), getHeight());
             return;
         }
+        if (state.paused) {
+            drawPauseProgress(canvas);
+            return;
+        }
         drawFirstPersonButton(canvas);
         drawHealth(canvas);
         if (showCancel()) {
@@ -759,26 +772,143 @@ public final class BottomScreenView extends View {
         }
         drawTabs(canvas);
         drawKongPanel(canvas);
-        drawLocationBar(canvas);
         drawActions(canvas);
-        if (state.paused) {
-            drawPausedTag(canvas);
+    }
+
+    // ------------------------------------------------------------------------------
+    // Pause screen: everyone's progress for a level
+    // ------------------------------------------------------------------------------
+
+    private static final String[] PAUSE_COLUMNS = { "Golden Bananas", "Bananas", "Blueprints", "Banana Medals", "Coins" };
+
+    private void stepPauseLevel(int dir) {
+        // -1 (all levels), then 0..LEVELS-1, wrapping round.
+        int n = GameState.LEVELS + 1;
+        pauseLevel = ((pauseLevel + 1 + dir) % n + n) % n - 1;
+        performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+        invalidate();
+    }
+
+    private Row findRow(java.util.List<Row> rows, String label) {
+        for (Row r : rows) {
+            if (r.label.equals(label)) {
+                return r;
+            }
+        }
+        return null;
+    }
+
+    private void drawPauseProgress(Canvas c) {
+        // Header: arrows either side of the level's name.
+        RectF h = pauseHeadRect;
+        tmp.set(pausePrevRect.right + unit * 0.02f, h.top, pauseNextRect.left - unit * 0.02f, h.bottom);
+        woodPanel(c, tmp, tmp.height() * 0.3f, false);
+        String title = pauseLevel < 0 ? "All Levels" : GameState.LEVEL_NAMES[pauseLevel];
+        text.setTextAlign(Paint.Align.CENTER);
+        text.setTextSize(fitText(title, tmp.width() * 0.86f, tmp.height() * 0.5f));
+        outlined(c, title, tmp.centerX(), tmp.centerY() + text.getTextSize() * 0.36f, BANANA);
+        for (int i = 0; i < 2; i++) {
+            RectF a = i == 0 ? pausePrevRect : pauseNextRect;
+            float r = a.height() / 2f;
+            woodPanel(c, a, r, false);
+            arrow(c, a.centerX(), a.centerY(), r * 0.42f, i == 0 ? -1 : 1);
+        }
+
+        // Table on a wooden board.
+        RectF p = pauseTableRect;
+        woodPanel(c, p, unit * 0.03f, false);
+        float frame = unit * 0.03f;
+        RectF board = boardRect;
+        board.set(p.left + frame, p.top + frame, p.right - frame, p.bottom - frame);
+        float br = unit * 0.02f;
+        paint.setStyle(Paint.Style.FILL);
+        paint.setShader(new LinearGradient(0, board.top, 0, board.bottom, Color.rgb(46, 26, 12), Color.rgb(70, 40, 18), Shader.TileMode.CLAMP));
+        c.drawRoundRect(board, br, br, paint);
+        paint.setShader(null);
+
+        float nameW = board.width() * 0.2f;
+        float colW = (board.width() - nameW) / PAUSE_COLUMNS.length;
+        float headRowH = board.height() * 0.13f;
+        float footH = board.height() * 0.15f;
+        float rowH = (board.height() - headRowH - footH) / GameState.KONG_COUNT;
+
+        // Column icons (from DK's rows, so the per-Kong icons show DK's colour).
+        java.util.List<Row> dkRows = rowsFor(GameState.DK, pauseLevel);
+        for (int col = 0; col < PAUSE_COLUMNS.length; col++) {
+            Row r = findRow(dkRows, PAUSE_COLUMNS[col]);
+            if (r == null) {
+                continue;
+            }
+            float x = board.left + nameW + colW * (col + 0.5f), y = board.top + headRowH / 2f;
+            badge(c, x, y, Math.min(headRowH * 0.42f, colW * 0.3f), r);
+        }
+
+        for (int k = 0; k < GameState.KONG_COUNT; k++) {
+            float top = board.top + headRowH + k * rowH;
+            boolean locked = isLocked(k);
+            boolean playing = k == state.currentKong;
+            tmp.set(board.left + unit * 0.01f, top + rowH * 0.08f, board.right - unit * 0.01f, top + rowH * 0.92f);
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(locked ? Color.rgb(40, 34, 30) : Color.rgb(58, 36, 16));
+            c.drawRoundRect(tmp, tmp.height() * 0.25f, tmp.height() * 0.25f, paint);
+            if (playing) {
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setStrokeWidth(unit * 0.006f);
+                paint.setColor(BANANA);
+                c.drawRoundRect(tmp, tmp.height() * 0.25f, tmp.height() * 0.25f, paint);
+                paint.setStyle(Paint.Style.FILL);
+            }
+            // Kong: face and colour.
+            float faceR = Math.min(tmp.height() * 0.4f, nameW * 0.22f);
+            float fx = board.left + nameW * 0.25f, cy = tmp.centerY();
+            paint.setColor(locked ? Color.rgb(70, 64, 60) : KONG_COLORS[k]);
+            c.drawCircle(fx, cy, faceR * 1.1f, paint);
+            if (!locked) {
+                RomIcons.draw(c, RomIcons.face[k], fx, cy, faceR);
+            }
+            String name = GameState.KONG_NAMES[k];
+            text.setTextAlign(Paint.Align.LEFT);
+            text.setTextSize(fitText(name, nameW * 0.52f, tmp.height() * 0.42f));
+            outlined(c, name, fx + faceR * 1.35f, cy + text.getTextSize() * 0.36f, locked ? Color.rgb(140, 130, 120) : CREAM);
+
+            java.util.List<Row> rows = locked ? null : rowsFor(k, pauseLevel);
+            for (int col = 0; col < PAUSE_COLUMNS.length; col++) {
+                Row r = rows == null ? null : findRow(rows, PAUSE_COLUMNS[col]);
+                String value;
+                boolean complete = false;
+                if (r == null || r.total == 0) {
+                    value = "\u2013";
+                } else if (r.total < 0) {
+                    value = String.valueOf(r.have);
+                } else {
+                    value = r.have + "/" + r.total;
+                    complete = r.have >= r.total;
+                }
+                text.setTextAlign(Paint.Align.CENTER);
+                text.setTextSize(fitText(value, colW * 0.86f, tmp.height() * 0.46f));
+                outlined(c, value, board.left + nameW + colW * (col + 0.5f), cy + text.getTextSize() * 0.36f,
+                    locked || r == null || r.total == 0 ? Color.rgb(140, 130, 120) : complete ? COMPLETE : BANANA);
+            }
+        }
+
+        // Items that belong to no Kong: fairies, crowns, keys, rainbow coins.
+        java.util.List<Row> shared = rowsFor(SHARED_TAB, pauseLevel);
+        shared.removeIf(r -> r.total == 0 || r.label.equals("Golden Bananas"));
+        float fy = board.bottom - footH / 2f;
+        float slot = board.width() / Math.max(1, shared.size());
+        for (int i = 0; i < shared.size(); i++) {
+            Row r = shared.get(i);
+            float sx = board.left + slot * i;
+            float bR = Math.min(footH * 0.36f, slot * 0.14f);
+            float bx = sx + slot * 0.12f + bR;
+            String value = r.have + "/" + r.total;
+            tmp.set(bx + bR * 0.4f, fy - bR * 0.6f, sx + slot * 0.92f, fy + bR * 0.6f);
+            tag(c, tmp, value, r.have >= r.total);
+            badge(c, bx, fy, bR, r);
         }
     }
 
-    /** A wooden "Paused" tag across the (dimmed) action buttons. */
-    private void drawPausedTag(Canvas c) {
-        RectF first = actionRects[0], last = actionRects[actionRects.length - 1];
-        float cy = (first.top + last.bottom) / 2f;
-        float h = unit * 0.11f;
-        tmp.set(first.left - unit * 0.01f, cy - h / 2f, first.right + unit * 0.01f, cy + h / 2f);
-        tagPlate(c, tmp);
-        text.setTextAlign(Paint.Align.CENTER);
-        text.setTextSize(fitText("Paused", tmp.width() * 0.8f, tmp.height() * 0.62f));
-        outlined(c, "Paused", tmp.centerX(), tmp.centerY() + text.getTextSize() * 0.36f, CREAM);
-    }
-
-    /**
+        /**
      * Shown until a save is loaded: just the game's name over the jungle. (Our own lettering;
      * the official logo artwork isn't something this app ships.)
      */
@@ -1119,7 +1249,7 @@ public final class BottomScreenView extends View {
 
     /** The level the location bar is on, or -1 for the whole game. */
     private int shownLevel() {
-        return showTotals || state.level < 0 ? -1 : state.level;
+        return state.level < 0 ? -1 : state.level;
     }
 
     private static Row colored(Row r, int color) {
@@ -1303,24 +1433,7 @@ public final class BottomScreenView extends View {
         return Color.rgb(r, g, b);
     }
 
-    /** Wooden sign under the panel: the level shown, with arrows to switch to all levels. */
-    private void drawLocationBar(Canvas c) {
-        RectF r = locationRect;
-        woodPanel(c, r, r.height() * 0.3f, false);
-        int level = shownLevel();
-        String title = level < 0 ? "All Levels" : GameState.LEVEL_NAMES[level];
-        boolean canSwitch = state.level >= 0;
-        float arrowR = r.height() * 0.26f;
-        if (canSwitch) {
-            arrow(c, r.left + r.height() * 0.55f, r.centerY(), arrowR, -1);
-            arrow(c, r.right - r.height() * 0.55f, r.centerY(), arrowR, 1);
-        }
-        text.setTextAlign(Paint.Align.CENTER);
-        text.setTextSize(fitText(title, r.width() - r.height() * 2.4f, r.height() * 0.5f));
-        outlined(c, title, r.centerX(), r.centerY() + text.getTextSize() * 0.36f, BANANA);
-    }
-
-    /** A chunky outlined triangle pointing left (dir -1) or right (dir 1). */
+        /** A chunky outlined triangle pointing left (dir -1) or right (dir 1). */
     private void arrow(Canvas c, float cx, float cy, float r, int dir) {
         path.reset();
         path.moveTo(cx + dir * r, cy);
@@ -1431,6 +1544,14 @@ public final class BottomScreenView extends View {
         }
         int index = event.getActionIndex();
         float x = event.getX(index), y = event.getY(index);
+        if (state.paused) {
+            if (pausePrevRect.contains(x, y)) {
+                stepPauseLevel(-1);
+            } else if (pauseNextRect.contains(x, y)) {
+                stepPauseLevel(1);
+            }
+            return true;
+        }
 
         float ox = x - osX, oy = y - osY;
         if (showCancel() && ox * ox + oy * oy <= osR * osR * 1.3f) {
@@ -1460,14 +1581,7 @@ public final class BottomScreenView extends View {
                 return true;
             }
         }
-        if (locationRect.contains(x, y)) {
-            if (state.level >= 0) {
-                showTotals = !showTotals;
-                performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
-                invalidate();
-            }
-            return true;
-        }
+
         for (int i = 0; i < tabRects.length; i++) {
             if (tabRects[i].contains(x, y)) {
                 if (isLocked(i)) {

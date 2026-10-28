@@ -27,4 +27,6 @@ namespace dk64::android {
     void set_touch_kong_swap(bool enabled);
     // The "Show FPS" setting (the counter is drawn by DK64Activity).
     void set_show_fps(bool enabled);
+    // The "Bottom Screen" setting (DK64Activity shows or hides the second-screen view).
+    void set_bottom_screen(bool enabled);
 }

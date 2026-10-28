@@ -185,6 +185,11 @@ namespace dk64::android {
     std::string app_version() {
         return call_activity("getAppVersion", "()Ljava/lang/String;", nullptr);
     }
+
+    void set_bottom_screen(bool enabled) {
+        const std::string value = enabled ? "1" : "0";
+        call_activity("setBottomScreen", "(Ljava/lang/String;)Ljava/lang/String;", &value);
+    }
 }
 
 // Surface rotation (0-3) of the game's screen, for mapping the device's motion sensors

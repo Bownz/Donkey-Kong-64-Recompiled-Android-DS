@@ -145,30 +145,6 @@ static void add_general_options(recomp::config::Config &config) {
         lightning_flash_options,
         dk64::LightningFlashMode::Reduced
     );
-#if defined(__ANDROID__)
-    // Android: tapping a Kong on the bottom screen swaps to them, using the bundled
-    // Tag Anywhere mod (Killklli/DK64TagAnywhereRecomp). Off by default; it also needs the mod
-    // to be enabled in the Mods menu.
-    static const std::string touch_kong_swap_option = "android_touch_kong_swap";
-    static EnumOptionVector touch_kong_swap_options = {
-        {0u, "Off", "Off"},
-        {1u, "On", "On"},
-    };
-    config.add_enum_option(
-        touch_kong_swap_option,
-        "Touch Kong Swap",
-        "Tap a Kong on the bottom screen to swap to them, anywhere you could tag in a tag barrel. "
-        "Needs the <recomp-color primary>Tag Anywhere</recomp-color> mod, which comes with the game but is off by default: "
-        "enable it in the Mods menu and restart the game.<br />"
-        "When this is off, tapping a Kong only shows their collectibles.",
-        touch_kong_swap_options,
-        0u
-    );
-    config.add_option_change_callback(touch_kong_swap_option,
-        [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext) {
-            dk64::android::set_touch_kong_swap(std::get<uint32_t>(cur) == 1u);
-        });
-#endif
 }
 
 template <typename T = uint32_t>
@@ -326,6 +302,54 @@ static void add_gpu_driver_option(recomp::config::Config &config) {
             if (index < drivers.size()) {
                 dk64::android::select_gpu_driver(drivers[index].id);
             }
+        });
+}
+#endif
+
+#if defined(__ANDROID__)
+// Android: the "Dual Screen" tab (the bottom screen on handhelds with two screens).
+static void add_dual_screen_options(recomp::config::Config &config) {
+    using EnumOptionVector = const std::vector<recomp::config::ConfigOptionEnumOption>;
+    static const std::string bottom_screen_option = "android_bottom_screen";
+    static EnumOptionVector bottom_screen_options = {
+        {0u, "Off", "Off"},
+        {1u, "On", "On"},
+    };
+    config.add_enum_option(
+        bottom_screen_option,
+        "Bottom Screen",
+        "Shows health, collectibles and action buttons on the second screen, on devices that have one. "
+        "Turn it off to leave the second screen free.",
+        bottom_screen_options,
+        1u
+    );
+    config.add_option_change_callback(bottom_screen_option,
+        [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
+            if (context != recomp::config::OptionChangeContext::Temporary) {
+                dk64::android::set_bottom_screen(std::get<uint32_t>(cur) == 1u);
+            }
+        });
+    // Android: tapping a Kong on the bottom screen swaps to them, using the bundled
+    // Tag Anywhere mod (Killklli/DK64TagAnywhereRecomp). Off by default; it also needs the mod
+    // to be enabled in the Mods menu.
+    static const std::string touch_kong_swap_option = "android_touch_kong_swap";
+    static EnumOptionVector touch_kong_swap_options = {
+        {0u, "Off", "Off"},
+        {1u, "On", "On"},
+    };
+    config.add_enum_option(
+        touch_kong_swap_option,
+        "Touch Kong Swap",
+        "Tap a Kong on the bottom screen to swap to them, anywhere you could tag in a tag barrel. "
+        "Needs the <recomp-color primary>Tag Anywhere</recomp-color> mod, which comes with the game but is off by default: "
+        "enable it in the Mods menu and restart the game.<br />"
+        "When this is off, tapping a Kong only shows their collectibles.",
+        touch_kong_swap_options,
+        0u
+    );
+    config.add_option_change_callback(touch_kong_swap_option,
+        [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext) {
+            dk64::android::set_touch_kong_swap(std::get<uint32_t>(cur) == 1u);
         });
 }
 #endif
@@ -523,6 +547,11 @@ void dk64::init_config() {
 
     auto &sound_config = recompui::config::create_sound_tab();
     add_sound_options(sound_config);
+
+#if defined(__ANDROID__)
+    auto &dual_screen_config = recompui::config::create_config_tab("Dual Screen", "dual_screen", false);
+    add_dual_screen_options(dual_screen_config);
+#endif
 
     auto &technical_config = recompui::config::create_config_tab("Technical", "technical", true);
     add_technical_options(technical_config);
