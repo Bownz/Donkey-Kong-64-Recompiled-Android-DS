@@ -130,6 +130,16 @@ final class GameState {
     private static native int nativeFrameCount();
     private static native void nativeSetTagTarget(int kong);
     private static native int nativeArea();
+    private static native int nativeOverlay();
+
+    /** Corner readouts that are on: 1 FPS, 2 area. */
+    static int overlay() {
+        try {
+            return nativeOverlay();
+        } catch (UnsatisfiedLinkError e) {
+            return 0;
+        }
+    }
 
     /** The current place as "map-chunk" (map in hex), for reporting slow spots. */
     static String areaLabel() {

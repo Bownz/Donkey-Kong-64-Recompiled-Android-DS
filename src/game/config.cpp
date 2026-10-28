@@ -451,6 +451,29 @@ static void add_technical_options(recomp::config::Config &config) {
         });
 #endif
 
+#if defined(__ANDROID__)
+    // Android: show the current area (map-chunk) in the corner, for reporting slow spots.
+    static const std::string show_area_option = "android_show_area";
+    static std::vector<recomp::config::ConfigOptionEnumOption> show_area_options = {
+        {0u, "Off", "Off"},
+        {1u, "On", "On"},
+    };
+    config.add_enum_option(
+        show_area_option,
+        "Show Area",
+        "Shows which part of the level you're in (map-chunk, e.g. 26-7) in the top corner. "
+        "Useful for reporting places where the game slows down.",
+        show_area_options,
+        0u
+    );
+    config.add_option_change_callback(show_area_option,
+        [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
+            if (context != recomp::config::OptionChangeContext::Temporary) {
+                dk64::android::set_show_area(std::get<uint32_t>(cur) == 1u);
+            }
+        });
+#endif
+
     using EnumOptionVector = const std::vector<recomp::config::ConfigOptionEnumOption>;
     // Multiplayer
     static EnumOptionVector multiplayer_options = {

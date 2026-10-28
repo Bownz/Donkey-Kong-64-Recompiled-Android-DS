@@ -26,6 +26,7 @@ namespace {
     std::atomic<uint32_t> g_input_set{0xFFFFFFFFu};  // the first set reported in the last frame
     std::atomic<uint32_t> g_frames{0};
     std::atomic<bool> g_show_fps{false};
+    std::atomic<bool> g_show_area{false};
     std::atomic<int32_t> g_tag_target{-1};
     constexpr const char* kTagAnywhereModId = "dk64_tag_anywhere";
 
@@ -511,10 +512,20 @@ void dk64::android::set_show_fps(bool enabled) {
     g_show_fps.store(enabled);
 }
 
-// Game frames so far, or -1 while the "Show FPS" setting is off.
+// Game frames so far, or -1 while both "Show FPS" and "Show Area" are off.
 extern "C" JNIEXPORT jint JNICALL
 Java_io_github_bownz_dk64recomp_GameState_nativeFrameCount(JNIEnv*, jclass) {
-    return g_show_fps.load() ? static_cast<jint>(g_frames.load(std::memory_order_relaxed) & 0x7FFFFFFF) : -1;
+    return (g_show_fps.load() || g_show_area.load()) ? static_cast<jint>(g_frames.load(std::memory_order_relaxed) & 0x7FFFFFFF) : -1;
+}
+
+// Which corner readouts are on: 1 FPS, 2 area.
+extern "C" JNIEXPORT jint JNICALL
+Java_io_github_bownz_dk64recomp_GameState_nativeOverlay(JNIEnv*, jclass) {
+    return (g_show_fps.load() ? 1 : 0) | (g_show_area.load() ? 2 : 0);
+}
+
+void dk64::android::set_show_area(bool enabled) {
+    g_show_area.store(enabled);
 }
 
 // Touch Kong Swap: the Kong the bottom screen is taking the player to (-1: none).
