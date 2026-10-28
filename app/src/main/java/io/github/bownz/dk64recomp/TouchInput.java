@@ -52,8 +52,22 @@ final class TouchInput {
      */
     private static native void nativeSetN64Buttons(int buttons);
 
-    static void setN64Buttons(int buttons) {
-        try { nativeSetN64Buttons(buttons); } catch (UnsatisfiedLinkError ignored) { }
+    private static int pressedN64, heldN64;
+
+    /** Buttons pressed for a moment by an on-screen button (replaces the previous ones). */
+    static synchronized void setN64Buttons(int buttons) {
+        pressedN64 = buttons;
+        pushN64();
+    }
+
+    /** Buttons kept held until changed (e.g. Z for Lanky's Orangstand), on top of the above. */
+    static synchronized void setHeldN64Buttons(int buttons) {
+        heldN64 = buttons;
+        pushN64();
+    }
+
+    private static void pushN64() {
+        try { nativeSetN64Buttons(pressedN64 | heldN64); } catch (UnsatisfiedLinkError ignored) { }
     }
 
     // Several on-screen controls (the overlay controller, the second-screen action pad) share

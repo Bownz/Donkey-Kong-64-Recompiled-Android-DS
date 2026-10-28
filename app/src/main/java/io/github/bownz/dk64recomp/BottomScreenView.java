@@ -157,9 +157,11 @@ public final class BottomScreenView extends View {
         if (swapTarget >= 0) {
             swapEnd();
         }
-        if (orangstandBusy) {
+        if (orangstandBusy || orangstand) {
             TouchInput.setN64Buttons(0);
+            TouchInput.setHeldN64Buttons(0);
             orangstandBusy = false;
+            orangstand = false;
         }
         if (active) {
             handler.post(poll);
@@ -346,9 +348,9 @@ public final class BottomScreenView extends View {
     // Lanky's Orangstand toggle
     // ------------------------------------------------------------------------------
     //
-    // Entering presses Z then B (as on a controller: crouch, then B). The game's own way out
-    // isn't documented, so leaving tries B, then Z, until Lanky is back on his feet (standing,
-    // walking or crouching input). The button stays lit while he's on his hands.
+    // A toggle: Z then B (as on a controller) puts Lanky on his hands, and Z stays held to
+    // keep him there, as the game needs. Tapping again lets go of Z. It also lets go when he
+    // ends up back on his feet or in water (Z stays held through the pause menu).
 
     private static final int SET_STANDING = 0x0C, SET_WALKING = 0x0D, SET_CROUCHING = 0x3C;
     private boolean orangstand;      // Lanky is on his hands (entered with this button)
@@ -366,9 +368,8 @@ public final class BottomScreenView extends View {
 
     /** Called on each poll: notice when Lanky is back on his feet (or isn't Lanky). */
     private void updateOrangstand() {
-        if (orangstand && !orangstandBusy && (!showOrangstand() || onFeet() || state.swimming)) {
-            orangstand = false;
-            invalidate();
+        if (orangstand && !orangstandBusy && (!showOrangstand() || (!state.paused && (onFeet() || state.swimming)))) {
+            stopOrangstand();
         }
     }
 
@@ -377,47 +378,36 @@ public final class BottomScreenView extends View {
             return;
         }
         performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
-        orangstandBusy = true;
-        invalidate();
-        if (!orangstand) {
-            if (!state.canZMoves || state.gunOut) {
-                orangstandBusy = false;
-                invalidate();
-                return;
-            }
-            final int z = TouchInput.N64_Z, b = TouchInput.N64_B;
-            TouchInput.setN64Buttons(z);
-            handler.postDelayed(() -> TouchInput.setN64Buttons(z | b), Z_LEAD_MS);
-            handler.postDelayed(() -> TouchInput.setN64Buttons(z), Z_LEAD_MS + C_HOLD_MS);
-            handler.postDelayed(() -> TouchInput.setN64Buttons(0), Z_LEAD_MS + C_HOLD_MS + Z_TAIL_MS);
-            handler.postDelayed(() -> {
-                state.refresh();
-                orangstand = !onFeet() && !state.swimming;
-                orangstandBusy = false;
-                invalidate();
-            }, Z_LEAD_MS + C_HOLD_MS + Z_TAIL_MS + 350);
+        if (orangstand) {
+            // Letting go of Z puts Lanky back on his feet.
+            stopOrangstand();
             return;
         }
-        // Leaving: B, and if he's still on his hands, Z.
-        TouchInput.setN64Buttons(TouchInput.N64_B);
-        handler.postDelayed(() -> TouchInput.setN64Buttons(0), C_HOLD_MS);
+        if (!state.canZMoves || state.gunOut) {
+            return;
+        }
+        // Z, then B while Z is held; Z then stays held to keep him on his hands.
+        orangstandBusy = true;
+        invalidate();
+        final int z = TouchInput.N64_Z, b = TouchInput.N64_B;
+        TouchInput.setHeldN64Buttons(z);
+        handler.postDelayed(() -> TouchInput.setN64Buttons(b), Z_LEAD_MS);
+        handler.postDelayed(() -> TouchInput.setN64Buttons(0), Z_LEAD_MS + C_HOLD_MS);
         handler.postDelayed(() -> {
             state.refresh();
-            if (onFeet()) {
-                orangstand = false;
-                orangstandBusy = false;
-                invalidate();
-                return;
+            orangstandBusy = false;
+            orangstand = !onFeet() && !state.swimming;
+            if (!orangstand) {
+                TouchInput.setHeldN64Buttons(0);   // it didn't take: don't leave Z held
             }
-            TouchInput.setN64Buttons(TouchInput.N64_Z);
-            handler.postDelayed(() -> TouchInput.setN64Buttons(0), C_HOLD_MS);
-            handler.postDelayed(() -> {
-                state.refresh();
-                orangstand = !onFeet();
-                orangstandBusy = false;
-                invalidate();
-            }, C_HOLD_MS + 350);
-        }, C_HOLD_MS + 350);
+            invalidate();
+        }, Z_LEAD_MS + C_HOLD_MS + 350);
+    }
+
+    private void stopOrangstand() {
+        orangstand = false;
+        TouchInput.setHeldN64Buttons(0);
+        invalidate();
     }
 
     // ------------------------------------------------------------------------------
