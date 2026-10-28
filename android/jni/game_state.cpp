@@ -18,6 +18,9 @@
 namespace {
     std::atomic<uint8_t*> g_rdram{nullptr};
     std::atomic<bool> g_touch_kong_swap{false};
+    std::atomic<uint32_t> g_input_set{0xFFFFFFFFu};  // patches/android_hooks.c
+    std::atomic<uint32_t> g_frames{0};
+    std::atomic<bool> g_show_fps{false};
     constexpr const char* kTagAnywhereModId = "dk64_tag_anywhere";
 
     // N64 virtual addresses (KSEG0) for the US 1.0 release.
@@ -50,9 +53,6 @@ namespace {
     constexpr int kControlStates = 107;                     // up to action_initiation_function_list
     constexpr uint32_t kHandlerZ = 0x10;
     constexpr uint32_t kHandlerCUp = 0x30;
-    constexpr uint8_t kStateIdle = 0x0C;
-    constexpr uint8_t kStateWalking = 0x0D;
-    constexpr uint8_t kStateCrouching = 0x3C;
 
     // Reported as bits: "Kong freed" for DK, Diddy, Lanky, Tiny, Chunky, then orange
     // throwing (training barrel) and the fairy camera (with Shockwave).
@@ -69,11 +69,13 @@ namespace {
     constexpr uint32_t kMelons = 0x2FC;                     // u8
 
     // CharacterProgress layout.
+    constexpr uint32_t kCpMoves = 0x00;                     // u8: special moves bought (Cranky)
     constexpr uint32_t kCpWeapon = 0x02;                    // u8
     constexpr uint32_t kCpInstrument = 0x04;                // u8
     constexpr uint32_t kCpCoins = 0x06;                     // u16
     constexpr uint32_t kCpInstrumentAmmo = 0x08;            // u16
     constexpr uint32_t kCpColouredBananas = 0x0A;           // u16[14]
+    constexpr uint32_t kCpBananasFedToTns = 0x26;           // u16[14]: spent on Troff 'n' Scoff (still collected)
     constexpr uint32_t kCpGoldenBananas = 0x42;             // u16[14]
     constexpr int kLevels = 14;
 
@@ -147,58 +149,52 @@ namespace {
         return read_u32(rdram, kInputHandlers + state * kInputHandlerSize + button);
     }
 
-    // The do-nothing handler: the most common C-Up handler across all control states.
-    uint32_t noop_handler(const uint8_t* rdram) {
-        static uint32_t cached = 0;
-        if (cached != 0) {
-            return cached;
-        }
-        uint32_t best = 0;
-        int best_count = 0;
-        for (int i = 0; i < kControlStates; i++) {
-            const uint32_t h = handler(rdram, static_cast<uint8_t>(i), kHandlerCUp);
-            int count = 0;
-            for (int j = 0; j < kControlStates; j++) {
-                count += handler(rdram, static_cast<uint8_t>(j), kHandlerCUp) == h ? 1 : 0;
-            }
-            if (count > best_count) {
-                best = h;
-                best_count = count;
+    // Input handlers that mark a mode (see move_availability).
+    constexpr uint32_t kZCombos[] = { 0x806E4E88u, 0x806E5044u };          // Z + C-Left / C-Right
+    constexpr uint32_t kFirstPersonEntries[] = { 0x806EA958u, 0x806EAA44u, 0x806EA04Cu };
+    constexpr uint32_t kSwimmingHandlers[] = { 0x806E6B98u, 0x806E65BCu }; // swimming steering
+    constexpr uint32_t kFirstPersonUnderwater = 0x806EA04Cu;
+    constexpr uint8_t kSetCrouching = 0x3C;
+    constexpr uint8_t kSetWalking = 0x0D;
+
+    bool in(uint32_t value, const uint32_t* list, size_t n) {
+        for (size_t i = 0; i < n; i++) {
+            if (list[i] == value) {
+                return true;
             }
         }
-        if (best >= 0x80000000u && best_count >= kControlStates / 4) {
-            cached = best;
-        }
-        return best;
+        return false;
     }
 
-    // Bits 4 (Z + C moves) and 8 (C-Up) for this control state. Z + C works where Z crouches,
-    // as standing still or walking does (the moves are the crouching state's C buttons).
-    jint move_availability(const uint8_t* rdram, uint8_t state) {
-        if (state >= kControlStates) {
-            return 0;
+    // Bits for the input-handler set the player is using (reported each frame by
+    // patches/android_hooks.c): 4 Z + C moves work (standing, walking, crouching), 8 C-Up
+    // enters first person, 32 swimming.
+    jint move_availability(const uint8_t* rdram, uint32_t set) {
+        if (set >= static_cast<uint32_t>(kControlStates)) {
+            return 4 | 8; // not known yet: don't hide anything
         }
-        const uint32_t noop = noop_handler(rdram);
-        const uint32_t z = handler(rdram, state, kHandlerZ);
-        const uint32_t z_idle = handler(rdram, kStateIdle, kHandlerZ);
-        const uint32_t z_walk = handler(rdram, kStateWalking, kHandlerZ);
+        const uint8_t s = static_cast<uint8_t>(set);
+        const uint32_t z = handler(rdram, s, kHandlerZ);
+        const uint32_t c_up = handler(rdram, s, kHandlerCUp);
+        // handlers[1] is the patch's reporting wrapper; the swimming steering is the last one.
+        const uint32_t last = handler(rdram, s, 0x40);
         jint bits = 0;
-        if (z_idle == noop) {
-            bits |= 4; // the table isn't what's expected: don't hide anything
-        }
-        else if (state == kStateCrouching || z == z_idle || z == z_walk) {
+        if (s == kSetCrouching || s == kSetWalking || in(z, kZCombos, 2)) {
             bits |= 4;
         }
-        if (handler(rdram, state, kHandlerCUp) != noop) {
+        if (in(c_up, kFirstPersonEntries, 3)) {
             bits |= 8;
         }
+        if (in(last, kSwimmingHandlers, 2) || c_up == kFirstPersonUnderwater) {
+            bits |= 32;
+        }
 
-        // Log each control state once, to check these rules on devices.
+        // Log each set once, to check these rules on devices.
         static std::atomic<uint64_t> seen[2]{};
-        const uint64_t bit = 1ull << (state & 63);
-        if ((seen[state >> 6].fetch_or(bit) & bit) == 0) {
-            __android_log_print(ANDROID_LOG_INFO, "DK64Recomp", "Control state 0x%02X: Z %08X, C-Up %08X (idle Z %08X, nothing %08X) -> Z+C %s, C-Up %s",
-                state, z, handler(rdram, state, kHandlerCUp), z_idle, noop, (bits & 4) ? "yes" : "no", (bits & 8) ? "yes" : "no");
+        const uint64_t bit = 1ull << (s & 63);
+        if ((seen[s >> 6].fetch_or(bit) & bit) == 0) {
+            __android_log_print(ANDROID_LOG_INFO, "DK64Recomp", "Input set 0x%02X: Z %08X, C-Up %08X, last %08X -> Z+C %s, first person %s, swimming %s",
+                s, z, c_up, last, (bits & 4) ? "yes" : "no", (bits & 8) ? "yes" : "no", (bits & 32) ? "yes" : "no");
         }
         return bits;
     }
@@ -227,10 +223,10 @@ Java_io_github_bownz_dk64recomp_GameState_nativeRead(JNIEnv* env, jclass, jintAr
         jint golden = 0, coloured = 0;
         for (int level = 0; level < kLevels; level++) {
             golden += read_u16(rdram, cp + kCpGoldenBananas + level * 2);
-            coloured += read_u16(rdram, cp + kCpColouredBananas + level * 2);
+            coloured += read_u16(rdram, cp + kCpColouredBananas + level * 2) + read_u16(rdram, cp + kCpBananasFedToTns + level * 2);
         }
         jint* dst = values + 8 + k * 6;
-        dst[0] = read_u8(rdram, cp + kCpWeapon);
+        dst[0] = read_u8(rdram, cp + kCpWeapon) | (read_u8(rdram, cp + kCpMoves) << 8); // weapon | special moves << 8
         dst[1] = read_u8(rdram, cp + kCpInstrument);
         dst[2] = read_u16(rdram, cp + kCpCoins);
         dst[3] = read_u16(rdram, cp + kCpInstrumentAmmo);
@@ -249,14 +245,15 @@ Java_io_github_bownz_dk64recomp_GameState_nativeRead(JNIEnv* env, jclass, jintAr
         for (int level = 0; level < kLevelSlots; level++) {
             jint* dst = values + 40 + (k * kLevelSlots + level) * 2;
             dst[0] = read_u16(rdram, cp + kCpGoldenBananas + level * 2);
-            dst[1] = read_u16(rdram, cp + kCpColouredBananas + level * 2);
+            dst[1] = read_u16(rdram, cp + kCpColouredBananas + level * 2) + read_u16(rdram, cp + kCpBananasFedToTns + level * 2);
         }
     }
 
     {
         const uint32_t player = read_u32(rdram, kPlayerPointer);
         // Bits: 1 gun held, 2 first-person view, 4 Z + C moves possible now, 8 C-Up (first
-        // person) possible now, 16 a save file is being played.
+        // person) possible now, 16 a save file is being played, 32 swimming; bits 8-15: the
+        // player's control state; bits 16-23: the input-handler set (0xFF: not known).
         jint bits = 0;
         if (read_u8(rdram, kGameMode) == kGameModeAdventure) {
             bits |= 16;
@@ -269,7 +266,10 @@ Java_io_github_bownz_dk64recomp_GameState_nativeRead(JNIEnv* env, jclass, jintAr
             if (control_state >= 2 && control_state <= 5) {
                 bits |= 2;
             }
-            bits |= move_availability(rdram, control_state);
+            const uint32_t input_set = g_input_set.load();
+            bits |= move_availability(rdram, input_set);
+            bits |= static_cast<jint>(control_state) << 8;
+            bits |= static_cast<jint>(input_set < 0xFF ? input_set : 0xFF) << 16;
         }
         values[kCount - 1] = bits;
     }
@@ -332,4 +332,22 @@ Java_io_github_bownz_dk64recomp_GameState_nativeKongSwap(JNIEnv*, jclass) {
         }
     }
     return bits;
+}
+
+extern "C" void dk64_android_report_input_handler(uint32_t index) {
+    g_input_set.store(index, std::memory_order_relaxed);
+}
+
+extern "C" void dk64_android_report_frame() {
+    g_frames.fetch_add(1, std::memory_order_relaxed);
+}
+
+void dk64::android::set_show_fps(bool enabled) {
+    g_show_fps.store(enabled);
+}
+
+// Game frames so far, or -1 while the "Show FPS" setting is off.
+extern "C" JNIEXPORT jint JNICALL
+Java_io_github_bownz_dk64recomp_GameState_nativeFrameCount(JNIEnv*, jclass) {
+    return g_show_fps.load() ? static_cast<jint>(g_frames.load(std::memory_order_relaxed) & 0x7FFFFFFF) : -1;
 }

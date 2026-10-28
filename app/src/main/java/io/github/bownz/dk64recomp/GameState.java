@@ -81,6 +81,7 @@ final class GameState {
     /** One Kong's progress. */
     static final class Kong {
         int weapon;            // 0 = not bought yet
+        int moves;             // special moves bought from Cranky (Lanky: 1+ = Orangstand)
         int instrument;        // 0 = not bought yet
         int coins;
         int instrumentEnergy;
@@ -111,6 +112,16 @@ final class GameState {
     private static native boolean nativeRead(int[] out);
     private static native boolean nativeReadFlags(int[] ids, int[] out);
     private static native int nativeKongSwap();
+    private static native int nativeFrameCount();
+
+    /** Game frames so far, or -1 while the "Show FPS" setting is off. */
+    static int frameCount() {
+        try {
+            return nativeFrameCount();
+        } catch (UnsatisfiedLinkError e) {
+            return -1;
+        }
+    }
 
     static final int SWAP_SETTING = 1;   // "Touch Kong Swap" is on
     static final int SWAP_MOD = 2;       // the Tag Anywhere mod is enabled
@@ -137,6 +148,12 @@ final class GameState {
     boolean canFirstPerson;
     /** A save file is being played (not the title screen or file select). */
     boolean fileLoaded;
+    /** Swimming (on the surface or underwater). */
+    boolean swimming;
+    /** The player's control state (DK64's own numbering). */
+    int controlState;
+    /** The game's input-handler set for the player (0x0C standing, 0x0D walking, 0x3C crouching; 0xFF unknown). */
+    int inputSet = 0xFF;
     final int[][] goldenByLevel = new int[KONG_COUNT][LEVELS];
     final int[][] colouredByLevel = new int[KONG_COUNT][LEVELS];
 
@@ -189,7 +206,8 @@ final class GameState {
         for (int k = 0; k < KONG_COUNT; k++) {
             int base = 8 + k * 6;
             Kong kong = kongs[k];
-            kong.weapon = raw[base];
+            kong.weapon = raw[base] & 0xFF;
+            kong.moves = (raw[base] >> 8) & 0xFF;
             kong.instrument = raw[base + 1];
             kong.coins = raw[base + 2];
             kong.instrumentEnergy = raw[base + 3];
@@ -206,6 +224,9 @@ final class GameState {
         canZMoves = (raw[COUNT - 1] & 4) != 0;
         canFirstPerson = (raw[COUNT - 1] & 8) != 0;
         fileLoaded = (raw[COUNT - 1] & 16) != 0;
+        swimming = (raw[COUNT - 1] & 32) != 0;
+        controlState = (raw[COUNT - 1] >> 8) & 0xFF;
+        inputSet = (raw[COUNT - 1] >> 16) & 0xFF;
         for (int k = 0; k < KONG_COUNT; k++) {
             for (int l = 0; l < LEVELS; l++) {
                 int base = 8 + KONG_COUNT * 6 + 2 + (k * LEVELS + l) * 2;

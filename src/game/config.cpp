@@ -352,6 +352,26 @@ static void add_graphics_options(recomp::config::Config &config) {
     );
 #if defined(__ANDROID__)
     add_gpu_driver_option(config);
+
+    // Android: game frames per second in the corner of the screen.
+    static const std::string show_fps_option = "android_show_fps";
+    static EnumOptionVector show_fps_options = {
+        {0u, "Off", "Off"},
+        {1u, "On", "On"},
+    };
+    config.add_enum_option(
+        show_fps_option,
+        "Show FPS",
+        "Shows the game's frame rate in the top corner of the screen.",
+        show_fps_options,
+        0u
+    );
+    config.add_option_change_callback(show_fps_option,
+        [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
+            if (context != recomp::config::OptionChangeContext::Temporary) {
+                dk64::android::set_show_fps(std::get<uint32_t>(cur) == 1u);
+            }
+        });
 #endif
 }
 

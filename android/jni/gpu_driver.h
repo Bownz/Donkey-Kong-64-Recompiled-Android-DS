@@ -25,4 +25,6 @@ namespace dk64::android {
     std::string app_version();
     // The "Touch Kong Swap" setting (android/jni/game_state.cpp reports it to the bottom screen).
     void set_touch_kong_swap(bool enabled);
+    // The "Show FPS" setting (the counter is drawn by DK64Activity).
+    void set_show_fps(bool enabled);
 }

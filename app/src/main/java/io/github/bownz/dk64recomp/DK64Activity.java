@@ -103,8 +103,54 @@ public class DK64Activity extends SDLActivity
             overlay = new TouchControllerView(this);
             mLayout.addView(overlay, new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            addFpsCounter();
         }
     }
+
+    // ------------------------------------------------------------------------------
+    // FPS counter (Graphics > Show FPS)
+    // ------------------------------------------------------------------------------
+
+    private android.widget.TextView fpsView;
+    private final android.os.Handler fpsHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private int fpsLastFrames = -1;
+    private long fpsLastTime;
+
+    private void addFpsCounter() {
+        fpsView = new android.widget.TextView(this);
+        fpsView.setTextColor(0xFFFFFF60);
+        fpsView.setShadowLayer(4f, 0f, 0f, 0xFF000000);
+        fpsView.setTypeface(android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.BOLD);
+        fpsView.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14);
+        int pad = (int) (8 * getResources().getDisplayMetrics().density);
+        fpsView.setPadding(pad * 2, pad, pad, pad);
+        fpsView.setVisibility(View.GONE);
+        mLayout.addView(fpsView, new ViewGroup.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        fpsHandler.post(fpsTick);
+    }
+
+    private final Runnable fpsTick = new Runnable() {
+        @Override
+        public void run() {
+            int frames = GameState.frameCount();
+            long now = android.os.SystemClock.uptimeMillis();
+            if (frames < 0) {
+                fpsView.setVisibility(View.GONE);
+                fpsLastFrames = -1;
+            } else {
+                if (fpsLastFrames >= 0 && now > fpsLastTime && frames >= fpsLastFrames) {
+                    float fps = (frames - fpsLastFrames) * 1000f / (now - fpsLastTime);
+                    fpsView.setText(String.format(java.util.Locale.US, "%.0f FPS", fps));
+                    fpsView.setVisibility(View.VISIBLE);
+                    fpsView.bringToFront();
+                }
+                fpsLastFrames = frames;
+                fpsLastTime = now;
+            }
+            fpsHandler.postDelayed(this, 500);
+        }
+    };
 
     @Override
     protected void onStart() {

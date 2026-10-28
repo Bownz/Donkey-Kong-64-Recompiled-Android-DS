@@ -852,6 +852,8 @@ int main(int argc, char** argv) {
     REGISTER_FUNC(recomp_get_ui_bounds);
     REGISTER_FUNC(recomp_get_ui_pillar);
     REGISTER_FUNC(recomp_get_gyro_deltas);
+    REGISTER_FUNC(recomp_report_input_handler);
+    REGISTER_FUNC(recomp_report_frame);
     REGISTER_FUNC(recomp_get_mouse_deltas);
     REGISTER_FUNC(recomp_get_inverted_axes);
     REGISTER_FUNC(recomp_get_analog_inverted_axes);

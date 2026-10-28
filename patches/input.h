@@ -28,5 +28,7 @@ DECLARE_FUNC(void, recomp_get_gyro_inverted_axes, s32* x, s32* y);
 DECLARE_FUNC(void, recomp_get_mouse_inverted_axes, s32* x, s32* y);
 DECLARE_FUNC(void, recomp_get_right_analog_inputs, float* x, float* y);
 DECLARE_FUNC(void, recomp_set_right_analog_suppressed, s32 suppressed);
+DECLARE_FUNC(void, recomp_report_input_handler, u32 index);
+DECLARE_FUNC(void, recomp_report_frame);
 
 #endif

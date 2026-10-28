@@ -22,6 +22,7 @@ extern u8 D_menu_800339D0_02175720;
 extern s16 D_global_asm_807476F4;
 RECOMP_DECLARE_EVENT(recomp_on_init());
 RECOMP_DECLARE_EVENT(dk64recomp_every_frame());
+void dk64_android_hooks_every_frame(void);
 RECOMP_DECLARE_EVENT(recomp_on_map_load());
 RECOMP_DECLARE_EVENT(recomp_on_eeprom_load());
 #define TEXT_SCALE 0.25f
@@ -304,6 +305,8 @@ RECOMP_PATCH void func_global_asm_805FBFF4(s32 arg0) {
 
         while (D_global_asm_80744460) {}
 
+        // @recomp: Input-handler reporting and frame counting for the Android bottom screen.
+        dk64_android_hooks_every_frame();
         // @recomp: Fire per-frame event.
         dk64recomp_every_frame();
         // @recomp Run Ui Callbacks

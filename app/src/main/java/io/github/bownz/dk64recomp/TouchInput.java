@@ -42,7 +42,7 @@ final class TouchInput {
     static native void nativeSetAxis(int axis, float value);
 
     // N64 button bits (recompinput values), for buttons that act on the game directly.
-    static final int N64_Z = 0x2000;
+    static final int N64_Z = 0x2000, N64_B = 0x4000;
     static final int N64_C_UP = 0x0008, N64_C_DOWN = 0x0004, N64_C_LEFT = 0x0002, N64_C_RIGHT = 0x0001;
     static final int N64_DPAD_UP = 0x0800, N64_DPAD_DOWN = 0x0400, N64_DPAD_LEFT = 0x0200, N64_DPAD_RIGHT = 0x0100;
 

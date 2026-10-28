@@ -83,6 +83,7 @@ public final class BottomScreenView extends View {
     private final RectF barrelRect = new RectF();
     private final Path path = new Path();
     private float fpX, fpY, fpR;
+    private float osX, osY, osR;
     private float healthX, healthY, melonR;
     private float unit;
     private float rowText;
@@ -96,8 +97,8 @@ public final class BottomScreenView extends View {
         public void run() {
             int levelBefore = state.level;
             boolean changed = state.refresh();
-            noteAvailability();
-            if (changed || greyPending()) {
+            updateOrangstand();
+            if (changed) {
                 if (state.level != levelBefore && state.level >= 0) {
                     showTotals = false;   // entering a new place shows that place first
                 }
@@ -148,6 +149,10 @@ public final class BottomScreenView extends View {
         }
         if (swapTarget >= 0) {
             swapEnd();
+        }
+        if (orangstandBusy) {
+            TouchInput.setN64Buttons(0);
+            orangstandBusy = false;
         }
         if (active) {
             handler.post(poll);
@@ -330,6 +335,118 @@ public final class BottomScreenView extends View {
         }
     };
 
+    // ------------------------------------------------------------------------------
+    // Lanky's Orangstand toggle
+    // ------------------------------------------------------------------------------
+    //
+    // Entering presses Z then B (as on a controller: crouch, then B). The game's own way out
+    // isn't documented, so leaving tries B, then Z, until Lanky is back on his feet (standing,
+    // walking or crouching input). The button stays lit while he's on his hands.
+
+    private static final int SET_STANDING = 0x0C, SET_WALKING = 0x0D, SET_CROUCHING = 0x3C;
+    private boolean orangstand;      // Lanky is on his hands (entered with this button)
+    private boolean orangstandBusy;
+
+    private boolean onFeet() {
+        int set = state.inputSet;
+        return set == SET_STANDING || set == SET_WALKING || set == SET_CROUCHING;
+    }
+
+    private boolean showOrangstand() {
+        return state.inGame() && state.currentKong == GameState.LANKY
+            && state.kongs[GameState.LANKY].moves >= 1;
+    }
+
+    /** Called on each poll: notice when Lanky is back on his feet (or isn't Lanky). */
+    private void updateOrangstand() {
+        if (orangstand && !orangstandBusy && (!showOrangstand() || onFeet() || state.swimming)) {
+            orangstand = false;
+            invalidate();
+        }
+    }
+
+    private void toggleOrangstand() {
+        if (orangstandBusy || running != null) {
+            return;
+        }
+        performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+        orangstandBusy = true;
+        invalidate();
+        if (!orangstand) {
+            if (!state.canZMoves || state.gunOut) {
+                orangstandBusy = false;
+                invalidate();
+                return;
+            }
+            final int z = TouchInput.N64_Z, b = TouchInput.N64_B;
+            TouchInput.setN64Buttons(z);
+            handler.postDelayed(() -> TouchInput.setN64Buttons(z | b), Z_LEAD_MS);
+            handler.postDelayed(() -> TouchInput.setN64Buttons(z), Z_LEAD_MS + C_HOLD_MS);
+            handler.postDelayed(() -> TouchInput.setN64Buttons(0), Z_LEAD_MS + C_HOLD_MS + Z_TAIL_MS);
+            handler.postDelayed(() -> {
+                state.refresh();
+                orangstand = !onFeet() && !state.swimming;
+                orangstandBusy = false;
+                invalidate();
+            }, Z_LEAD_MS + C_HOLD_MS + Z_TAIL_MS + 350);
+            return;
+        }
+        // Leaving: B, and if he's still on his hands, Z.
+        TouchInput.setN64Buttons(TouchInput.N64_B);
+        handler.postDelayed(() -> TouchInput.setN64Buttons(0), C_HOLD_MS);
+        handler.postDelayed(() -> {
+            state.refresh();
+            if (onFeet()) {
+                orangstand = false;
+                orangstandBusy = false;
+                invalidate();
+                return;
+            }
+            TouchInput.setN64Buttons(TouchInput.N64_Z);
+            handler.postDelayed(() -> TouchInput.setN64Buttons(0), C_HOLD_MS);
+            handler.postDelayed(() -> {
+                state.refresh();
+                orangstand = !onFeet();
+                orangstandBusy = false;
+                invalidate();
+            }, C_HOLD_MS + 350);
+        }, C_HOLD_MS + 350);
+    }
+
+    /** A round badge like the first-person one: Lanky's face, upside down. */
+    private void drawOrangstandButton(Canvas c) {
+        boolean pressed = orangstand || orangstandBusy;
+        boolean enabled = orangstand || (!state.swimming && !state.gunOut);
+        float r = osR * 0.92f;
+        float cy = osY - osR * 0.08f;
+        int saved = c.saveLayerAlpha(osX - osR * 1.1f, osY - osR * 1.1f, osX + osR * 1.1f, osY + osR * 1.1f, enabled ? 255 : 90);
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(OUTLINE);
+        c.drawCircle(osX, cy, r, paint);
+        int top = pressed ? Color.rgb(250, 200, 90) : Color.rgb(200, 130, 50);
+        int bottom = pressed ? Color.rgb(200, 120, 30) : Color.rgb(120, 70, 20);
+        paint.setShader(new LinearGradient(0, cy - r, 0, cy + r, top, bottom, Shader.TileMode.CLAMP));
+        c.drawCircle(osX, cy, r * 0.87f, paint);
+        paint.setShader(null);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(unit * 0.006f);
+        paint.setColor(pressed ? BANANA : Color.argb(140, 255, 255, 255));
+        c.drawCircle(osX, cy, r * 0.87f, paint);
+        paint.setStyle(Paint.Style.FILL);
+        c.save();
+        c.rotate(180f, osX, cy);
+        if (!RomIcons.draw(c, RomIcons.face[GameState.LANKY], osX, cy, r * 0.62f)) {
+            DkIcons.eye(c, osX, cy, r * 0.5f);
+        }
+        c.restore();
+        tmp.set(osX - osR * 0.95f, osY + osR * 0.58f, osX + osR * 0.95f, osY + osR * 0.98f);
+        tagPlate(c, tmp);
+        text.setTextAlign(Paint.Align.CENTER);
+        text.setTextSize(fitText("Orangstand", tmp.width() * 0.86f, tmp.height() * 0.66f));
+        outlined(c, "Orangstand", tmp.centerX(), tmp.centerY() + text.getTextSize() * 0.36f, CREAM);
+        c.restoreToCount(saved);
+    }
+
     /** The tab being shown: a Kong (0-4) or SHARED_TAB. */
     private int displayedKong() {
         if (selectedKong == SHARED_TAB || (selectedKong >= 0 && !isLocked(selectedKong))) {
@@ -366,64 +483,48 @@ public final class BottomScreenView extends View {
     }
 
     /**
-     * Whether the Kong can do this right now (not climbing, swinging, swimming, in the air...).
-     * A move that's under way, the gun while it's out and leaving first person always work.
+     * Whether the game takes this move right now. When it doesn't only because of what the
+     * Kong is doing for a moment (jumping, attacking, rolling...), the button looks normal
+     * but does nothing; see {@link #greyed} for when it's greyed out.
      */
     private boolean usableNow(Move move) {
         if (running == move) {
             return true;
         }
-        long now = android.os.SystemClock.uptimeMillis();
-        boolean z = state.canZMoves || now - zMovesSeenAt < GREY_DELAY_MS;
-        boolean fp = state.canFirstPerson || now - firstPersonSeenAt < GREY_DELAY_MS;
         switch (move) {
-            case FIRST_PERSON: return fp || state.firstPerson || state.gunOut;
-            case WEAPON: return z || state.gunOut;
-            default: return z && !state.gunOut;   // with the gun out, only the gun and first person
+            case FIRST_PERSON: return state.canFirstPerson || state.firstPerson || state.gunOut;
+            case WEAPON: return state.canZMoves || state.gunOut;
+            default: return state.canZMoves && !state.gunOut;
         }
     }
 
     /**
-     * How long a move must be unavailable before its button greys out (0: right away, so
-     * buttons also grey out during jumps and rolls).
+     * Greyed out: nothing to use it with (no ammo, oranges, film or instrument energy),
+     * swimming, or (for the other moves) while the gun is out. The gun button stays lit while
+     * the gun is out so it can always be put away, even with no ammo left.
      */
-    private static final long GREY_DELAY_MS = 0;
-    private long zMovesSeenAt;
-    private long firstPersonSeenAt;
-
-    /** A button is waiting to grey out: redraw so it happens without a state change. */
-    private boolean greyPending() {
-        long now = android.os.SystemClock.uptimeMillis();
-        return (!state.canZMoves && now - zMovesSeenAt < GREY_DELAY_MS + POLL_MS * 2)
-            || (!state.canFirstPerson && now - firstPersonSeenAt < GREY_DELAY_MS + POLL_MS * 2);
-    }
-
-    private void noteAvailability() {
-        long now = android.os.SystemClock.uptimeMillis();
-        if (state.canZMoves) {
-            zMovesSeenAt = now;
-        }
-        if (state.canFirstPerson) {
-            firstPersonSeenAt = now;
-        }
-    }
-
-    /** Whether an owned move has something to use; if not its button is greyed out. */
-    private boolean available(Move move) {
-        if (!state.inGame()) {
-            return true;
-        }
-        if (!usableNow(move)) {
+    private boolean greyed(Move move) {
+        if (!state.inGame() || running == move) {
             return false;
         }
         GameState.Kong k = state.kongs[state.currentKong];
         switch (move) {
-            case WEAPON: return state.ammo > 0 || state.homingAmmo > 0;
-            case ORANGE: return state.oranges > 0;
-            case INSTRUMENT: return k.instrumentEnergy > 0;
-            case CAMERA: return state.film > 0;
-            default: return true;
+            case FIRST_PERSON: return false;
+            case WEAPON:
+                if (state.gunOut) {
+                    return false;
+                }
+                return state.swimming || (state.ammo <= 0 && state.homingAmmo <= 0);
+            case ORANGE: return state.swimming || state.gunOut || state.oranges <= 0;
+            case INSTRUMENT: return state.swimming || state.gunOut || k.instrumentEnergy <= 0;
+            case CAMERA: return state.swimming || state.gunOut || state.film <= 0;
+            default: return false;
         }
+    }
+
+    /** A tap on this button does something now. */
+    private boolean available(Move move) {
+        return !state.inGame() || (!greyed(move) && usableNow(move));
     }
 
     // ------------------------------------------------------------------------------
@@ -460,6 +561,12 @@ public final class BottomScreenView extends View {
         healthX = fpX + fpR + m * 1.8f + melonR;
         healthY = fpY;
 
+        // Lanky's Orangstand toggle, at the right end of the top row, after up to 3 melons.
+        float healthRight = healthX + 2 * melonR * 2.4f + melonR * 1.1f;
+        osR = Math.max(fpR * 0.5f, Math.min(fpR * 0.8f, (right - healthRight - m * 0.4f) / 2f));
+        osX = right - osR;
+        osY = fpY;
+
         float tabsTop = m + 2 * fpR + m;
         float tabH = unit * 0.13f;
         float tabGap = m * 0.5f;
@@ -486,6 +593,9 @@ public final class BottomScreenView extends View {
         }
         drawFirstPersonButton(canvas);
         drawHealth(canvas);
+        if (showOrangstand()) {
+            drawOrangstandButton(canvas);
+        }
         drawTabs(canvas);
         drawKongPanel(canvas);
         drawLocationBar(canvas);
@@ -696,7 +806,7 @@ public final class BottomScreenView extends View {
      */
     private void drawFirstPersonButton(Canvas c) {
         boolean pressed = running == Move.FIRST_PERSON || state.firstPerson;
-        boolean enabled = !state.inGame() || usableNow(Move.FIRST_PERSON);
+        boolean enabled = !greyed(Move.FIRST_PERSON);
         int saved = c.saveLayerAlpha(fpX - fpR * 1.1f, fpY - fpR * 1.1f, fpX + fpR * 1.1f, fpY + fpR * 1.1f, enabled ? 255 : 90);
         float r = fpR * 0.92f;
         float cy = fpY - fpR * 0.08f;
@@ -1079,7 +1189,7 @@ public final class BottomScreenView extends View {
             }
             // The weapon button stays lit while the Kong has the gun out.
             boolean pressed = running == move || (move == Move.WEAPON && state.gunOut);
-            boolean enabled = available(move);
+            boolean enabled = !greyed(move);
 
             int saved = c.saveLayerAlpha(r.left - unit * 0.02f, r.top - unit * 0.02f,
                 r.right + unit * 0.02f, r.bottom + unit * 0.02f, enabled ? 255 : 90);
@@ -1146,9 +1256,14 @@ public final class BottomScreenView extends View {
         int index = event.getActionIndex();
         float x = event.getX(index), y = event.getY(index);
 
+        float ox = x - osX, oy = y - osY;
+        if (showOrangstand() && ox * ox + oy * oy <= osR * osR * 1.3f) {
+            toggleOrangstand();
+            return true;
+        }
         float dx = x - fpX, dy = y - fpY;
         if (dx * dx + dy * dy <= fpR * fpR * 1.3f) {
-            if (usableNow(Move.FIRST_PERSON)) {
+            if (available(Move.FIRST_PERSON)) {
                 perform(Move.FIRST_PERSON);
             }
             return true;
