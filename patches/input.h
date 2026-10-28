@@ -30,5 +30,6 @@ DECLARE_FUNC(void, recomp_get_right_analog_inputs, float* x, float* y);
 DECLARE_FUNC(void, recomp_set_right_analog_suppressed, s32 suppressed);
 DECLARE_FUNC(void, recomp_report_input_handler, u32 index);
 DECLARE_FUNC(void, recomp_report_frame);
+DECLARE_FUNC(s32, recomp_get_tag_target);
 
 #endif

@@ -52,6 +52,7 @@ extern "C" void recomp_error(uint8_t* rdram, recomp_context* ctx) {
 // android/jni/game_state.cpp: what the Android bottom screen and FPS counter read.
 extern "C" void dk64_android_report_input_handler(uint32_t index);
 extern "C" void dk64_android_report_frame();
+extern "C" int32_t dk64_android_tag_target();
 #endif
 
 // patches/android_hooks.c: the player's current input-handler set (see there).
@@ -70,6 +71,16 @@ extern "C" void recomp_report_frame(uint8_t* rdram, recomp_context* ctx) {
     (void)ctx;
 #if defined(__ANDROID__)
     dk64_android_report_frame();
+#endif
+}
+
+// patches/android_hooks.c: the Kong a Touch Kong Swap is going to, or -1.
+extern "C" void recomp_get_tag_target(uint8_t* rdram, recomp_context* ctx) {
+    (void)rdram;
+#if defined(__ANDROID__)
+    _return<int32_t>(ctx, dk64_android_tag_target());
+#else
+    _return<int32_t>(ctx, -1);
 #endif
 }
 

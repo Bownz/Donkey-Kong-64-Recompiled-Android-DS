@@ -12,6 +12,7 @@ RECOMP_DECLARE_EVENT(recomp_on_file_start());
 RECOMP_DECLARE_EVENT(recomp_on_new_file_start());
 RECOMP_DECLARE_EVENT(recomp_on_dirty_file_start());
 RECOMP_DECLARE_EVENT(recomp_on_flag_check(s16 *flag, u8 *flag_type));
+extern s32 dk64_android_tag_target; // android_hooks.c
 RECOMP_DECLARE_EVENT(recomp_on_flag_change(s16 *flag, u8 *target_state, u8 *flag_type));
 
 void AlterVolumes(void) {
@@ -1264,6 +1265,17 @@ RECOMP_PATCH u8 isFlagSet(s16 flagIndex, u8 flagType) { // TODO: Can we use the 
     recomp_on_flag_check(&flagIndex, &flagType);
     if (flagIndex == -1) {
         return 0;
+    }
+    // @recomp (Android Touch Kong Swap, android_hooks.c): only the chosen Kong counts as
+    // freed for the moment it takes Tag Anywhere to swap to them.
+    if ((dk64_android_tag_target >= 0) && (flagType == FLAG_TYPE_PERMANENT)) {
+        static const s16 kong_freed_flags[5] = { 0x181, 0x006, 0x046, 0x042, 0x075 };
+        s32 k;
+        for (k = 0; k < 5; k++) {
+            if ((flagIndex == kong_freed_flags[k]) && (k != dk64_android_tag_target)) {
+                return FALSE;
+            }
+        }
     }
     switch (flagType) {
         case FLAG_TYPE_PERMANENT:

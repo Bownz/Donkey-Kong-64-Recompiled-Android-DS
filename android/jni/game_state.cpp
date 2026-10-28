@@ -25,6 +25,7 @@ namespace {
     std::atomic<uint32_t> g_input_set{0xFFFFFFFFu};  // the first set reported in the last frame
     std::atomic<uint32_t> g_frames{0};
     std::atomic<bool> g_show_fps{false};
+    std::atomic<int32_t> g_tag_target{-1};
     constexpr const char* kTagAnywhereModId = "dk64_tag_anywhere";
 
     // N64 virtual addresses (KSEG0) for the US 1.0 release.
@@ -422,4 +423,14 @@ void dk64::android::set_show_fps(bool enabled) {
 extern "C" JNIEXPORT jint JNICALL
 Java_io_github_bownz_dk64recomp_GameState_nativeFrameCount(JNIEnv*, jclass) {
     return g_show_fps.load() ? static_cast<jint>(g_frames.load(std::memory_order_relaxed) & 0x7FFFFFFF) : -1;
+}
+
+// Touch Kong Swap: the Kong the bottom screen is taking the player to (-1: none).
+extern "C" int32_t dk64_android_tag_target() {
+    return g_tag_target.load(std::memory_order_relaxed);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_io_github_bownz_dk64recomp_GameState_nativeSetTagTarget(JNIEnv*, jclass, jint kong) {
+    g_tag_target.store(kong >= 0 && kong < 5 ? kong : -1, std::memory_order_relaxed);
 }

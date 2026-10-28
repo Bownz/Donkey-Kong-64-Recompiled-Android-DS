@@ -7,7 +7,8 @@
 // actually in use. At startup each mode's "always called first" handler is wrapped to report
 // its index (recomp_report_input_handler) and then run the original handler.
 //
-// recomp_report_frame() is called once per game frame for the on-screen FPS counter.
+// recomp_report_frame() is called once per game frame for the on-screen FPS counter, and
+// recomp_get_tag_target() for Touch Kong Swap (below).
 
 #include "patch_helpers.h"
 #include "input.h"
@@ -23,6 +24,12 @@ extern InputHandlerSet D_global_asm_80751004[];
 #define INPUT_HANDLER_SETS 107
 
 static InputHandlerFunc original_first_handlers[INPUT_HANDLER_SETS];
+
+// Touch Kong Swap (Android bottom screen): while the screen is taking the player to a Kong,
+// this is that Kong (0-4), else -1. isFlagSet (sound_options_patches.c) then reports the
+// other Kongs as not freed, so Tag Anywhere's next/previous step lands on the chosen Kong
+// in one go instead of passing through the ones in between.
+s32 dk64_android_tag_target = -1;
 static int input_handlers_wrapped = 0;
 
 static void input_handler_report_0(void) { recomp_report_input_handler(0); original_first_handlers[0](); }
@@ -254,4 +261,5 @@ void dk64_android_hooks_every_frame(void) {
         }
     }
     recomp_report_frame();
+    dk64_android_tag_target = recomp_get_tag_target();
 }

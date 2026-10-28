@@ -307,6 +307,9 @@ public final class BottomScreenView extends View {
         swapButton = right <= left ? TouchInput.N64_DPAD_RIGHT : TouchInput.N64_DPAD_LEFT;
         swapTarget = k;
         swapSteps = 0;
+        // The game counts only the chosen Kong as freed while this runs, so one step of
+        // Tag Anywhere lands straight on them.
+        GameState.setTagTarget(k);
         performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
         swapPress();
         handler.postDelayed(swapTick, SWAP_TICK_MS);
@@ -326,6 +329,7 @@ public final class BottomScreenView extends View {
     }
 
     private void swapEnd() {
+        GameState.setTagTarget(-1);
         TouchInput.setN64Buttons(0);
         swapPressed = false;
         swapTarget = -1;

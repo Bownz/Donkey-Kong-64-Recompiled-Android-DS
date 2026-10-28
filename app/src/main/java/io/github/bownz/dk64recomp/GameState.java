@@ -128,6 +128,15 @@ final class GameState {
     private static native boolean nativeReadFlags(int[] ids, int[] out);
     private static native int nativeKongSwap();
     private static native int nativeFrameCount();
+    private static native void nativeSetTagTarget(int kong);
+
+    /** Touch Kong Swap: the Kong being swapped to (-1: none); see patches/android_hooks.c. */
+    static void setTagTarget(int kong) {
+        try {
+            nativeSetTagTarget(kong);
+        } catch (UnsatisfiedLinkError ignored) {
+        }
+    }
 
     /** Game frames so far, or -1 while the "Show FPS" setting is off. */
     static int frameCount() {
