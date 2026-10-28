@@ -1,4 +1,51 @@
-# Donkey Kong 64: Recompiled
+# Donkey Kong 64: Recompiled — Android & Dual Screen
+
+An **unofficial Android port** of [Donkey Kong 64: Recompiled](https://github.com/Rainchus/Donkey-Kong-64-Recompiled), built for dual-screen Android handhelds such as the **AYN Thor**. The game runs on the top screen; the bottom screen becomes a DK-themed companion with your health, collectibles and touch buttons for moves.
+
+> **Status: beta.** Developed and tested on an AYN Thor (Adreno 740, Android 13). Other devices may work but haven't been tested.
+
+**This repository and its builds contain no game assets or ROM data.** You need your own NTSC-U 1.0 Donkey Kong 64 ROM. Icons on the bottom screen are read from your ROM on the device; none are shipped.
+
+## What the Android port adds
+
+**Running on Android**
+- arm64 APK (Android 9+, Vulkan 1.1), built with Gradle + NDK on top of the desktop CMake project
+- Rendering fixes for Adreno GPUs, and an optional custom Vulkan driver (e.g. Turnip) chosen in *Graphics → GPU Driver*
+- Gyro aiming with the device's own motion sensors
+- Touch controls on screen when no controller is connected
+- Tester tools: log sharing (*Technical → Share Log*), crash report prompt, version shown on the start screen
+- Optional on-screen frame rate (*Graphics → Show FPS*)
+
+**The bottom screen (second display)**
+- Health melons, the current Kong's collectibles for the level (golden bananas, bananas, blueprints, medals, coins) and Kong tabs
+- Touch buttons for oranges, the gun, instruments, the camera and first person, which press the real game buttons (Z + C) and grey out when they can't be used (no ammo, swimming, climbing, on a vine, paused)
+- A move button that changes with the Kong: Lanky's Orangstand toggle, Diddy's Chimpy Charge, Chunky's Primate Punch, or *Cancel* while a barrel ability is active
+- While paused: a progress table for every Kong in the level, with fairies, crowns, keys and rainbow coins, and arrows to browse the levels you've reached
+- Small animations when something changes (a collectible spins, a melon shakes when you're hit)
+- **Touch Kong Swap** (*Settings → Dual Screen*): tap a Kong to swap straight to them, using the bundled [Tag Anywhere](https://github.com/Killklli/DK64TagAnywhereRecomp) mod (off by default; enable it in *Mods*)
+- The bottom screen can be switched off in *Settings → Dual Screen*
+
+## Building
+
+See **[BUILDING-ANDROID.md](BUILDING-ANDROID.md)**. In short: provide your ROM, then build with Android Studio or the included GitHub Actions workflow, which produces a signed APK.
+
+## Authors
+
+- **[Bownz](https://github.com/Bownz)**: project lead, design, device testing
+- **Claude** ([Anthropic](https://www.anthropic.com)), AI assistant: wrote the Android port's code (build setup, renderer and input fixes, the bottom screen and its game patches) under Bownz's direction. Commits it made are marked `Co-Authored-By: Claude`.
+
+The Android port is a fan project and isn't affiliated with or endorsed by the DK64: Recompiled team, Nintendo or Rare. Everything below is the original project's README, kept for reference; credit for the recompilation itself goes to its authors.
+
+## Credits for the Android port
+- [Donkey Kong 64: Recompiled](https://github.com/Rainchus/Donkey-Kong-64-Recompiled) and everything it builds on (listed below)
+- [SDL2](https://www.libsdl.org/) for the Android app framework
+- [libadrenotools](https://github.com/bylaws/libadrenotools) for loading custom Vulkan drivers
+- [Tag Anywhere](https://github.com/Killklli/DK64TagAnywhereRecomp) (CC0) for Kong swapping, bundled as a mod
+- The [Donkey Kong 64 decompilation](https://gitlab.com/dk64_decomp/dk64), used to understand the game's memory and controls
+
+---
+
+# Upstream: Donkey Kong 64: Recompiled
 Donkey Kong 64: Recompiled is a project that uses [N64: Recompiled](https://github.com/Mr-Wiseguy/N64Recomp) to **statically recompile** Donkey Kong 64 into a native port with many new features and enhancements. This project uses [RT64](https://github.com/rt64/rt64) as the rendering engine to provide some of these enhancements.
 
 ### [Check out the latest release here](https://github.com/Rainchus/Donkey-Kong-64-Recompiled/releases).
