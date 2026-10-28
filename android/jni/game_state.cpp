@@ -42,6 +42,10 @@ namespace {
     constexpr uint32_t kPlayerGunOut = 0x20C;               // u8 in the player actor: gun held
     constexpr uint32_t kPlayerControlState = 0x154;         // u8 in the player actor
     // Control states 2-5: first-person view (looking, and aiming in first person).
+    constexpr uint32_t kCharacterChange = 0x807FC924;       // CharacterChange* character_change_array
+    constexpr uint32_t kCcSize = 0x2C0;                     // u8: 0 small, 1 normal, 2 big
+    constexpr uint32_t kExtraPlayerInfo = 0x807FD580;       // PlayerAdditionalActorData* extra_player_info_pointer
+    constexpr uint32_t kPaadFlags = 0x1F0;                  // s32 bitfield
     constexpr uint32_t kGameMode = 0x80755318;              // u8 game_mode (6: adventure, i.e. a file is loaded)
     constexpr uint8_t kGameModeAdventure = 6;
 
@@ -252,7 +256,7 @@ Java_io_github_bownz_dk64recomp_GameState_nativeRead(JNIEnv* env, jclass, jintAr
     {
         const uint32_t player = read_u32(rdram, kPlayerPointer);
         // Bits: 1 gun held, 2 first-person view, 4 Z + C moves possible now, 8 C-Up (first
-        // person) possible now, 16 a save file is being played, 32 swimming, 64 paused; bits 8-15: the
+        // person) possible now, 16 a save file is being played, 32 swimming, 64 paused, 128 a barrel ability is on; bits 8-15: the
         // player's control state; bits 16-23: the input-handler set (0xFF: not known).
         jint bits = 0;
         if (read_u8(rdram, kGameMode) == kGameModeAdventure) {
@@ -260,6 +264,26 @@ Java_io_github_bownz_dk64recomp_GameState_nativeRead(JNIEnv* env, jclass, jintAr
         }
         if (read_u32(rdram, kGlobalProperties) & 2) {
             bits |= 64; // paused (code_450.c sets this once the pause menu opens)
+        }
+        // A Kong barrel ability is on (code_CEAE0.c): not normal size (Mini Monkey, Hunky
+        // Chunky), or PaaD->unk1F0 & 0x30 (Strong Kong and the like), or the Rocketbarrel
+        // (control state 0x63). Z + C-Left ends them.
+        {
+            const uint32_t cc = read_u32(rdram, kCharacterChange);
+            const uint32_t paad = read_u32(rdram, kExtraPlayerInfo);
+            bool transformed = false;
+            if (cc >= 0x80000000u && cc < 0x80800000u - 0x300) {
+                transformed |= read_u8(rdram, cc + kCcSize) != 1;
+            }
+            if (paad >= 0x80000000u && paad < 0x80800000u - 0x200) {
+                transformed |= (read_u32(rdram, paad + kPaadFlags) & 0x30) != 0;
+            }
+            if (player >= 0x80000000u && player < 0x80800000u - 0x300) {
+                transformed |= read_u8(rdram, player + kPlayerControlState) == 0x63;
+            }
+            if (transformed) {
+                bits |= 128;
+            }
         }
         if (player >= 0x80000000u && player < 0x80800000u - 0x300) {
             if (read_u8(rdram, player + kPlayerGunOut) != 0) {

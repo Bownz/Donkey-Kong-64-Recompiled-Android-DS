@@ -96,7 +96,14 @@ public final class BottomScreenView extends View {
         @Override
         public void run() {
             int levelBefore = state.level;
+            int crystalsBefore = state.crystals;
             boolean changed = state.refresh();
+            if (state.inGame() && state.crystals < crystalsBefore) {
+                crystalsDrainedAt = android.os.SystemClock.uptimeMillis();
+            }
+            boolean cancelBefore = cancelShown;
+            cancelShown = showCancel();
+            changed |= cancelShown != cancelBefore;
             updateOrangstand();
             if (changed) {
                 if (state.level != levelBefore && state.level >= 0) {
@@ -413,6 +420,88 @@ public final class BottomScreenView extends View {
         }, C_HOLD_MS + 350);
     }
 
+    // ------------------------------------------------------------------------------
+    // Ending a Kong barrel ability (same place as the Orangstand button)
+    // ------------------------------------------------------------------------------
+    //
+    // Mini Monkey, Hunky Chunky, Strong Kong, Rocketbarrel, Baboon Balloon and the like use
+    // up crystal coconuts while they last, and Z + C-Left ends them (code_CEAE0.c). The
+    // button shows while the game reports one, or while crystals are running down.
+
+    private long crystalsDrainedAt;
+    private boolean cancelShown;
+    private boolean cancelBusy;
+
+    private boolean showCancel() {
+        return state.inGame() && (state.transformed || android.os.SystemClock.uptimeMillis() - crystalsDrainedAt < 1500);
+    }
+
+    private void cancelAbility() {
+        if (cancelBusy || running != null || state.paused) {
+            return;
+        }
+        performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+        cancelBusy = true;
+        invalidate();
+        final int z = TouchInput.N64_Z, c = TouchInput.N64_C_LEFT;
+        TouchInput.setN64Buttons(z);
+        handler.postDelayed(() -> TouchInput.setN64Buttons(z | c), Z_LEAD_MS);
+        handler.postDelayed(() -> TouchInput.setN64Buttons(z), Z_LEAD_MS + C_HOLD_MS);
+        handler.postDelayed(() -> {
+            TouchInput.setN64Buttons(0);
+            crystalsDrainedAt = 0;
+        }, Z_LEAD_MS + C_HOLD_MS + Z_TAIL_MS);
+        handler.postDelayed(() -> {
+            cancelBusy = false;
+            invalidate();
+        }, Z_LEAD_MS + C_HOLD_MS + Z_TAIL_MS + 400);
+    }
+
+    /** A round red badge with the Kong's face and a cross: ends the barrel ability. */
+    private void drawCancelButton(Canvas c) {
+        boolean enabled = !state.paused;
+        float r = osR * 0.92f;
+        float cy = osY - osR * 0.08f;
+        int saved = c.saveLayerAlpha(osX - osR * 1.1f, osY - osR * 1.1f, osX + osR * 1.1f, osY + osR * 1.1f, enabled ? 255 : 90);
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(OUTLINE);
+        c.drawCircle(osX, cy, r, paint);
+        int top = cancelBusy ? Color.rgb(255, 140, 120) : Color.rgb(220, 70, 50);
+        int bottom = cancelBusy ? Color.rgb(200, 60, 40) : Color.rgb(120, 20, 15);
+        paint.setShader(new LinearGradient(0, cy - r, 0, cy + r, top, bottom, Shader.TileMode.CLAMP));
+        c.drawCircle(osX, cy, r * 0.87f, paint);
+        paint.setShader(null);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(unit * 0.006f);
+        paint.setColor(cancelBusy ? BANANA : Color.argb(140, 255, 255, 255));
+        c.drawCircle(osX, cy, r * 0.87f, paint);
+        paint.setStyle(Paint.Style.FILL);
+        int kong = state.currentKong;
+        if (kong < 0 || kong >= GameState.KONG_COUNT || !RomIcons.draw(c, RomIcons.face[kong], osX, cy, r * 0.55f)) {
+            DkIcons.eye(c, osX, cy, r * 0.45f);
+        }
+        // Cross over the face.
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeCap(Paint.Cap.ROUND);
+        float k = r * 0.42f;
+        paint.setStrokeWidth(r * 0.2f);
+        paint.setColor(OUTLINE);
+        c.drawLine(osX - k, cy - k, osX + k, cy + k, paint);
+        c.drawLine(osX - k, cy + k, osX + k, cy - k, paint);
+        paint.setStrokeWidth(r * 0.12f);
+        paint.setColor(CREAM);
+        c.drawLine(osX - k, cy - k, osX + k, cy + k, paint);
+        c.drawLine(osX - k, cy + k, osX + k, cy - k, paint);
+        paint.setStrokeCap(Paint.Cap.BUTT);
+        paint.setStyle(Paint.Style.FILL);
+        tmp.set(osX - osR * 0.95f, osY + osR * 0.58f, osX + osR * 0.95f, osY + osR * 0.98f);
+        tagPlate(c, tmp);
+        text.setTextAlign(Paint.Align.CENTER);
+        text.setTextSize(fitText("Cancel", tmp.width() * 0.8f, tmp.height() * 0.66f));
+        outlined(c, "Cancel", tmp.centerX(), tmp.centerY() + text.getTextSize() * 0.36f, CREAM);
+        c.restoreToCount(saved);
+    }
+
     /** A round badge like the first-person one: Lanky's face, upside down. */
     private void drawOrangstandButton(Canvas c) {
         boolean pressed = orangstand || orangstandBusy;
@@ -596,7 +685,9 @@ public final class BottomScreenView extends View {
         }
         drawFirstPersonButton(canvas);
         drawHealth(canvas);
-        if (showOrangstand()) {
+        if (showCancel()) {
+            drawCancelButton(canvas);
+        } else if (showOrangstand()) {
             drawOrangstandButton(canvas);
         }
         drawTabs(canvas);
@@ -1275,6 +1366,10 @@ public final class BottomScreenView extends View {
         float x = event.getX(index), y = event.getY(index);
 
         float ox = x - osX, oy = y - osY;
+        if (showCancel() && ox * ox + oy * oy <= osR * osR * 1.3f) {
+            cancelAbility();
+            return true;
+        }
         if (showOrangstand() && ox * ox + oy * oy <= osR * osR * 1.3f) {
             toggleOrangstand();
             return true;

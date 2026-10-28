@@ -154,6 +154,8 @@ final class GameState {
     boolean climbing;
     /** The pause menu is open. */
     boolean paused;
+    /** A Kong barrel ability is on (Mini Monkey, Hunky Chunky, Strong Kong, Rocketbarrel...). */
+    boolean transformed;
     /** The player's control state (DK64's own numbering). */
     int controlState;
     /** The game's input-handler set for the player (0x0C standing, 0x0D walking, 0x3C crouching; 0xFF unknown). */
@@ -230,6 +232,7 @@ final class GameState {
         fileLoaded = (raw[COUNT - 1] & 16) != 0;
         swimming = (raw[COUNT - 1] & 32) != 0;
         paused = (raw[COUNT - 1] & 64) != 0;
+        transformed = (raw[COUNT - 1] & 128) != 0;
         controlState = (raw[COUNT - 1] >> 8) & 0xFF;
         // Control states (code_EFDC0.c, code_EBBE0.c): 0x4E/0x4F swimming, 0x57 on a vine,
         // 0x59 climbing a tree or pole.
