@@ -398,31 +398,6 @@ static void add_graphics_options(recomp::config::Config &config) {
         show_fps_options,
         0u
     );
-    // Android: internal render resolution (patch in RecompFrontend's rt64_render_context.cpp).
-    static const std::string render_res_option = "android_render_resolution";
-    static EnumOptionVector render_res_options = {
-        {0u, "Screen", "Screen"},
-        {3u, "720p", "720p"},
-        {2u, "480p", "480p"},
-    };
-    config.add_enum_option(
-        render_res_option,
-        "Render Resolution",
-        "The resolution the game is drawn at when Resolution is set to Auto. "
-        "<recomp-color primary>Screen</recomp-color> matches the display (960p on a 1080p screen). "
-        "<recomp-color primary>720p</recomp-color> draws about half as many pixels, which makes "
-        "anti-aliasing much cheaper and still looks sharp on a handheld screen. "
-        "Takes effect the next time the game starts.",
-        render_res_options,
-        0u
-    );
-    config.add_option_change_callback(render_res_option,
-        [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
-            if (context != recomp::config::OptionChangeContext::Temporary) {
-                dk64::android::set_render_resolution(static_cast<int>(std::get<uint32_t>(cur)));
-            }
-        });
-
     config.add_option_change_callback(show_fps_option,
         [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
             if (context != recomp::config::OptionChangeContext::Temporary) {
