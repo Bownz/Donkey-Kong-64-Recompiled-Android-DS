@@ -19,7 +19,7 @@ final class GameState {
         "Crystal Caves", "Creepy Castle", "DK Isles", "Hideout Helm",
     };
 
-    private static final int COUNT = 8 + KONG_COUNT * 6 + 2 + KONG_COUNT * LEVELS * 2 + 1;
+    private static final int COUNT = 8 + KONG_COUNT * 6 + 2 + KONG_COUNT * LEVELS * 2 + 1 + 1;
 
     // ---- Permanent flags (DK64 Randomizer location lists; US release) ----------------
     // Shared collectibles, per level slot.
@@ -164,6 +164,8 @@ final class GameState {
     int level = -1;
     /** The Kong is holding their gun out (after Z + C-Left, until it's put away). */
     boolean gunOut;
+    /** Bananas the current Kong holds in this level (not yet spent at Troff 'n' Scoff). */
+    int heldBananas;
     /** In first-person view (C-Up), until it's left. */
     boolean firstPerson;
     /** Z + C moves (weapon, oranges, instrument, camera) work in the current state. */
@@ -253,6 +255,7 @@ final class GameState {
         if (newLevel >= 0 && newLevel < LEVELS) {
             level = newLevel;
         }
+        heldBananas = raw[COUNT - 2];
         gunOut = (raw[COUNT - 1] & 1) != 0;
         firstPerson = (raw[COUNT - 1] & 2) != 0;
         canZMoves = (raw[COUNT - 1] & 4) != 0;

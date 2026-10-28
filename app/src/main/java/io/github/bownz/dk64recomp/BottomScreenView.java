@@ -72,6 +72,7 @@ public final class BottomScreenView extends View {
     private static final int TAB_COUNT = GameState.KONG_COUNT;   // shared items are on the pause screen
     private final RectF[] tabRects = new RectF[TAB_COUNT];
     private final RectF locationRect = new RectF();
+    private final RectF carryRect = new RectF();
     private final RectF pauseHeadRect = new RectF(), pausePrevRect = new RectF(), pauseNextRect = new RectF(), pauseTableRect = new RectF();
     private int pauseLevel = -1;     // pause screen: the level shown (-1: all levels)
     private boolean wasPaused;
@@ -767,17 +768,20 @@ public final class BottomScreenView extends View {
         osX = right - osR;
         osY = fpY;
 
-        float tabsTop = m + 2 * fpR + m;
+        // Under the top row: what the Kong is carrying; then the panel; Kong tabs at the bottom.
+        float carryTop = m + 2 * fpR + m;
+        float carryH = unit * 0.1f;
+        carryRect.set(left, carryTop, right, carryTop + carryH);
         float tabH = unit * 0.13f;
+        float tabsTop = h - m - tabH;
         float tabGap = m * 0.5f;
         float tabW = (right - left - tabGap * (TAB_COUNT - 1)) / TAB_COUNT;
         for (int i = 0; i < TAB_COUNT; i++) {
             float l = left + i * (tabW + tabGap);
             tabRects[i].set(l, tabsTop, l + tabW, tabsTop + tabH);
         }
-        float barH = unit * 0.1f;
         locationRect.setEmpty();
-        panelRect.set(left, tabsTop + tabH + m * 0.6f, right, h - m);
+        panelRect.set(left, carryRect.bottom + m * 0.6f, right, tabsTop - m * 0.6f);
 
         // Pause screen: header (arrows + level name) and the table under it.
         float headH = unit * 0.13f;
@@ -820,9 +824,52 @@ public final class BottomScreenView extends View {
         } else if (zbMoveName() != null) {
             drawZbMoveButton(canvas);
         }
+        drawCarrying(canvas);
         drawTabs(canvas);
         drawKongPanel(canvas);
         drawActions(canvas);
+    }
+
+    /**
+     * What the Kong is carrying right now: bananas held in this level (what Troff 'n' Scoff
+     * takes), coins and crystal coconuts. The panel below is progress (collected of total).
+     */
+    private void drawCarrying(Canvas c) {
+        RectF r = carryRect;
+        woodPanel(c, r, r.height() * 0.3f, false);
+        int k = playingKong();
+        int crystals = (state.crystals + 149) / 150;   // stored in 150ths (hud.c)
+        Row[] items = {
+            colored(new Row("Bananas", RomIcons.of(RomIcons.banana, k), 0, state.level >= 0 ? state.heldBananas : 0, -1), KONG_COLORS[k]),
+            colored(new Row("Coins", RomIcons.of(RomIcons.coin, k), 1, state.kongs[k].coins, -1), darker(KONG_COLORS[k])),
+            colored(new Row("Crystal Coconuts", null, 3, crystals, -1), Color.rgb(200, 80, 160)),
+        };
+        float labelW = r.width() * 0.2f;
+        text.setTextAlign(Paint.Align.CENTER);
+        text.setTextSize(fitText("Carrying", labelW * 0.85f, r.height() * 0.3f));
+        outlined(c, "Carrying", r.left + labelW / 2f + r.height() * 0.15f, r.centerY() + text.getTextSize() * 0.36f, CREAM);
+        float slot = (r.width() - labelW) / items.length;
+        float badgeR = r.height() * 0.34f;
+        for (int i = 0; i < items.length; i++) {
+            Row item = items[i];
+            float sx = r.left + labelW + slot * i;
+            float bx = sx + slot * 0.18f + badgeR, cy = r.centerY();
+            String spinKey = "carry" + item.label;
+            watch("carryv" + item.label, item.have, spinKey);
+            float spin = animProgress(spinKey, SPIN_MS);
+            int saved = c.save();
+            if (spin >= 0) {
+                float sxk = (float) Math.cos(2 * Math.PI * spin);
+                float pop = 1f + 0.18f * (float) Math.sin(Math.PI * spin);
+                c.scale(Math.abs(sxk) < 0.08f ? 0.08f : sxk * pop, pop, bx, cy);
+            }
+            badge(c, bx, cy, badgeR, item);
+            c.restoreToCount(saved);
+            String value = String.valueOf(item.have);
+            text.setTextAlign(Paint.Align.LEFT);
+            text.setTextSize(fitText(value, slot - (bx - sx) - badgeR * 1.4f, r.height() * 0.46f));
+            outlined(c, value, bx + badgeR * 1.25f, cy + text.getTextSize() * 0.36f, BANANA);
+        }
     }
 
     // ------------------------------------------------------------------------------
@@ -1459,6 +1506,7 @@ public final class BottomScreenView extends View {
         int tab = displayedKong();
         java.util.List<Row> rows = rowsFor(tab, shownLevel());
         rows.removeIf(r -> r.total == 0);   // nothing of that kind here (e.g. bananas in Helm)
+        rows.removeIf(r -> r.label.equals("Coins"));   // shown under Carrying
 
         // Dark inset board.
         float frame = unit * 0.035f;
@@ -1525,9 +1573,42 @@ public final class BottomScreenView extends View {
             switch (row.fallback) {
                 case 0: DkIcons.banana(c, x, y, r * 0.55f); break;
                 case 1: DkIcons.coin(c, x, y, r * 0.5f); break;
+                case 3: crystal(c, x, y, r * 0.55f); break;
                 default: DkIcons.star(c, x, y, r * 0.55f); break;
             }
         }
+    }
+
+    /** A crystal coconut: a faceted pink gem. */
+    private void crystal(Canvas c, float x, float y, float r) {
+        path.reset();
+        path.moveTo(x, y - r);
+        path.lineTo(x + r * 0.75f, y - r * 0.2f);
+        path.lineTo(x, y + r);
+        path.lineTo(x - r * 0.75f, y - r * 0.2f);
+        path.close();
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(Color.rgb(255, 190, 235));
+        c.drawPath(path, paint);
+        paint.setColor(Color.rgb(230, 120, 200));
+        path.reset();
+        path.moveTo(x, y - r);
+        path.lineTo(x + r * 0.75f, y - r * 0.2f);
+        path.lineTo(x, y + r);
+        path.close();
+        c.drawPath(path, paint);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeJoin(Paint.Join.ROUND);
+        paint.setStrokeWidth(r * 0.14f);
+        paint.setColor(OUTLINE);
+        path.reset();
+        path.moveTo(x, y - r);
+        path.lineTo(x + r * 0.75f, y - r * 0.2f);
+        path.lineTo(x, y + r);
+        path.lineTo(x - r * 0.75f, y - r * 0.2f);
+        path.close();
+        c.drawPath(path, paint);
+        paint.setStyle(Paint.Style.FILL);
     }
 
     /** An orange wooden plate (the item tags and the first-person label). */

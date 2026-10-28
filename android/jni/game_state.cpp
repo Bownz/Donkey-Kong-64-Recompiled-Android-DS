@@ -214,7 +214,7 @@ namespace {
 extern "C" JNIEXPORT jboolean JNICALL
 Java_io_github_bownz_dk64recomp_GameState_nativeRead(JNIEnv* env, jclass, jintArray out) {
     const uint8_t* rdram = g_rdram.load();
-    constexpr jsize kCount = 8 + 5 * 6 + 2 + 5 * kLevelSlots * 2 + 1;
+    constexpr jsize kCount = 8 + 5 * 6 + 2 + 5 * kLevelSlots * 2 + 1 + 1;
     if (rdram == nullptr || out == nullptr || env->GetArrayLength(out) < kCount) {
         return JNI_FALSE;
     }
@@ -250,6 +250,11 @@ Java_io_github_bownz_dk64recomp_GameState_nativeRead(JNIEnv* env, jclass, jintAr
         const uint32_t map = read_u32(rdram, kCurrentMap);
         const int level = map < 0xD8 ? read_u8(rdram, kLevelIndexByMap + map) : -1;
         values[39] = level < kLevelSlots ? level : -1;
+        // [kCount - 2]: bananas the current Kong holds in this level (not yet fed to
+        // Troff 'n' Scoff), what the boss door counts.
+        const uint8_t kong = read_u8(rdram, kCurrentCharacterIndex);
+        values[kCount - 2] = (kong < 5 && level >= 0 && level < kLevels)
+            ? read_u16(rdram, kPlayerProgress + kong * kCharacterProgressSize + kCpColouredBananas + level * 2) : 0;
     }
     for (int k = 0; k < 5; k++) {
         const uint32_t cp = kPlayerProgress + k * kCharacterProgressSize;
