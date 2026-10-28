@@ -163,6 +163,8 @@ final class GameState {
     int inputSet = 0xFF;
     /** The game ran standing, walking or crouching input this frame. */
     boolean onFeet;
+    /** Looking through the fairy camera (Z + C-Down). */
+    boolean camera;
     final int[][] goldenByLevel = new int[KONG_COUNT][LEVELS];
     final int[][] colouredByLevel = new int[KONG_COUNT][LEVELS];
 
@@ -243,6 +245,7 @@ final class GameState {
         climbing = controlState == 0x57 || controlState == 0x59;
         inputSet = (raw[COUNT - 1] >> 16) & 0xFF;
         onFeet = (raw[COUNT - 1] & (1 << 24)) != 0;
+        camera = (raw[COUNT - 1] & (1 << 25)) != 0;
         for (int k = 0; k < KONG_COUNT; k++) {
             for (int l = 0; l < LEVELS; l++) {
                 int base = 8 + KONG_COUNT * 6 + 2 + (k * LEVELS + l) * 2;

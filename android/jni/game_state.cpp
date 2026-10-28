@@ -296,8 +296,11 @@ Java_io_github_bownz_dk64recomp_GameState_nativeRead(JNIEnv* env, jclass, jintAr
                 bits |= 1;
             }
             const uint8_t control_state = read_u8(rdram, player + kPlayerControlState);
-            if (control_state >= 2 && control_state <= 5) {
-                bits |= 2;
+            if (control_state == 2 || control_state == 3) {
+                bits |= 2;          // first person (on land, in water)
+            }
+            if (control_state == 4 || control_state == 5 || control_state == 0x64 || control_state == 0x65) {
+                bits |= 1 << 25;    // fairy camera (looking, taking a photo)
             }
             const uint32_t input_set = g_input_set.load();
             const uint64_t sets[2] = { g_sets_frame[0].load(), g_sets_frame[1].load() };
@@ -320,7 +323,7 @@ Java_io_github_bownz_dk64recomp_GameState_nativeRead(JNIEnv* env, jclass, jintAr
                 }
             }
             if (control_state == 0x3C) {
-                bits |= 1 << 24; // crouching
+                bits |= (1 << 24) | 4; // crouching: Z + C moves come from here
             }
         }
         values[kCount - 1] = bits;

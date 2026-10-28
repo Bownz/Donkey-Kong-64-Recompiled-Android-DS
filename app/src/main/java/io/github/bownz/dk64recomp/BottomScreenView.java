@@ -192,6 +192,27 @@ public final class BottomScreenView extends View {
             default:         c = TouchInput.N64_C_UP; break;
         }
 
+        if (move == Move.CAMERA && state.camera) {
+            // Leaving the camera: C-Down on its own (code_EBBE0.c), then C-Up if that didn't.
+            TouchInput.setN64Buttons(TouchInput.N64_C_DOWN);
+            handler.postDelayed(() -> TouchInput.setN64Buttons(0), C_HOLD_MS);
+            handler.postDelayed(() -> {
+                state.refresh();
+                if (!state.camera) {
+                    running = null;
+                    invalidate();
+                    return;
+                }
+                TouchInput.setN64Buttons(TouchInput.N64_C_UP);
+                handler.postDelayed(() -> {
+                    TouchInput.setN64Buttons(0);
+                    running = null;
+                    invalidate();
+                }, C_HOLD_MS);
+            }, C_HOLD_MS + 250);
+            return;
+        }
+
         if (move == Move.FIRST_PERSON) {
             // C-Up on its own enters first-person view, and pressing it again leaves it.
             TouchInput.setN64Buttons(c);
@@ -468,6 +489,7 @@ public final class BottomScreenView extends View {
         c.drawCircle(osX, cy, r, paint);
         int top = zbBusy ? Color.rgb(250, 200, 90) : Color.rgb(200, 130, 50);
         int bottom = zbBusy ? Color.rgb(200, 120, 30) : Color.rgb(120, 70, 20);
+        paint.setAlpha(255);
         paint.setShader(new LinearGradient(0, cy - r, 0, cy + r, top, bottom, Shader.TileMode.CLAMP));
         c.drawCircle(osX, cy, r * 0.87f, paint);
         paint.setShader(null);
@@ -535,6 +557,7 @@ public final class BottomScreenView extends View {
         c.drawCircle(osX, cy, r, paint);
         int top = cancelBusy ? Color.rgb(255, 140, 120) : Color.rgb(220, 70, 50);
         int bottom = cancelBusy ? Color.rgb(200, 60, 40) : Color.rgb(120, 20, 15);
+        paint.setAlpha(255);
         paint.setShader(new LinearGradient(0, cy - r, 0, cy + r, top, bottom, Shader.TileMode.CLAMP));
         c.drawCircle(osX, cy, r * 0.87f, paint);
         paint.setShader(null);
@@ -581,6 +604,7 @@ public final class BottomScreenView extends View {
         c.drawCircle(osX, cy, r, paint);
         int top = pressed ? Color.rgb(250, 200, 90) : Color.rgb(200, 130, 50);
         int bottom = pressed ? Color.rgb(200, 120, 30) : Color.rgb(120, 70, 20);
+        paint.setAlpha(255);
         paint.setShader(new LinearGradient(0, cy - r, 0, cy + r, top, bottom, Shader.TileMode.CLAMP));
         c.drawCircle(osX, cy, r * 0.87f, paint);
         paint.setShader(null);
@@ -647,6 +671,9 @@ public final class BottomScreenView extends View {
         if (running == move) {
             return true;
         }
+        if (move == Move.CAMERA && state.camera) {
+            return true;   // tapping again puts the camera away
+        }
         switch (move) {
             case FIRST_PERSON: return state.canFirstPerson || state.firstPerson || state.gunOut;
             case WEAPON: return state.canZMoves || state.gunOut;
@@ -676,7 +703,7 @@ public final class BottomScreenView extends View {
                 return state.swimming || state.climbing || (state.ammo <= 0 && state.homingAmmo <= 0);
             case ORANGE: return state.swimming || state.climbing || state.gunOut || state.oranges <= 0;
             case INSTRUMENT: return state.swimming || state.climbing || state.gunOut || k.instrumentEnergy <= 0;
-            case CAMERA: return state.swimming || state.climbing || state.gunOut || state.film <= 0;
+            case CAMERA: return !state.camera && (state.swimming || state.climbing || state.gunOut || state.film <= 0);
             default: return false;
         }
     }
@@ -822,6 +849,7 @@ public final class BottomScreenView extends View {
         board.set(p.left + frame, p.top + frame, p.right - frame, p.bottom - frame);
         float br = unit * 0.02f;
         paint.setStyle(Paint.Style.FILL);
+        paint.setAlpha(255);
         paint.setShader(new LinearGradient(0, board.top, 0, board.bottom, Color.rgb(46, 26, 12), Color.rgb(70, 40, 18), Shader.TileMode.CLAMP));
         c.drawRoundRect(board, br, br, paint);
         paint.setShader(null);
@@ -949,10 +977,12 @@ public final class BottomScreenView extends View {
     /** Deep jungle backdrop with big leaves around the edges. */
     private void drawJungle(Canvas c, int w, int h) {
         paint.setStyle(Paint.Style.FILL);
+        paint.setAlpha(255);
         paint.setShader(new LinearGradient(0, 0, 0, h, JUNGLE_TOP, JUNGLE_BOTTOM, Shader.TileMode.CLAMP));
         c.drawRect(0, 0, w, h, paint);
         paint.setShader(null);
         // Soft light from above, through the canopy.
+        paint.setAlpha(255);
         paint.setShader(new LinearGradient(0, 0, 0, h * 0.5f, Color.argb(60, 190, 230, 120), Color.argb(0, 190, 230, 120), Shader.TileMode.CLAMP));
         c.drawRect(0, 0, w, h * 0.5f, paint);
         paint.setShader(null);
@@ -994,6 +1024,7 @@ public final class BottomScreenView extends View {
     /** A wooden board: planks with seams and grain, a dark edge and nails. */
     private void woodPanel(Canvas c, RectF r, float radius, boolean lit) {
         paint.setStyle(Paint.Style.FILL);
+        paint.setAlpha(255);
         paint.setShader(new LinearGradient(0, r.top, 0, r.bottom,
             lit ? Color.rgb(186, 124, 64) : WOOD_LIGHT, lit ? Color.rgb(136, 84, 40) : WOOD_DARK, Shader.TileMode.CLAMP));
         c.drawRoundRect(r, radius, radius, paint);
@@ -1079,6 +1110,7 @@ public final class BottomScreenView extends View {
         if (locked) {
             paint.setColor(Color.rgb(58, 56, 52));
         } else {
+            paint.setAlpha(255);
             paint.setShader(new LinearGradient(r.left, 0, r.right, 0,
                 new int[] { WOOD_DARK, lit ? Color.rgb(196, 132, 66) : WOOD_LIGHT, WOOD_DARK }, null, Shader.TileMode.CLAMP));
         }
@@ -1121,6 +1153,7 @@ public final class BottomScreenView extends View {
         c.drawCircle(fpX, cy, r, paint);
         int top = pressed ? Color.rgb(120, 200, 230) : Color.rgb(70, 150, 190);
         int bottom = pressed ? Color.rgb(40, 120, 160) : Color.rgb(24, 80, 120);
+        paint.setAlpha(255);
         paint.setShader(new LinearGradient(0, cy - r, 0, cy + r, top, bottom, Shader.TileMode.CLAMP));
         c.drawCircle(fpX, cy, r * 0.87f, paint);
         paint.setShader(null);
@@ -1337,6 +1370,7 @@ public final class BottomScreenView extends View {
         board.set(p.left + frame, p.top + frame, p.right - frame, p.bottom - frame);
         float br = unit * 0.02f;
         paint.setStyle(Paint.Style.FILL);
+        paint.setAlpha(255);
         paint.setShader(new LinearGradient(0, board.top, 0, board.bottom, Color.rgb(46, 26, 12), Color.rgb(70, 40, 18), Shader.TileMode.CLAMP));
         c.drawRoundRect(board, br, br, paint);
         paint.setShader(null);
@@ -1370,6 +1404,7 @@ public final class BottomScreenView extends View {
         paint.setColor(OUTLINE);
         c.drawCircle(x, y, r, paint);
         int base = row.color;
+        paint.setAlpha(255);
         paint.setShader(new LinearGradient(0, y - r, 0, y + r, lighten(base), base, Shader.TileMode.CLAMP));
         c.drawCircle(x, y, r * 0.86f, paint);
         paint.setShader(null);
@@ -1390,6 +1425,7 @@ public final class BottomScreenView extends View {
     private void tagPlate(Canvas c, RectF r) {
         float rad = r.height() * 0.3f;
         paint.setStyle(Paint.Style.FILL);
+        paint.setAlpha(255);
         paint.setShader(new LinearGradient(0, r.top, 0, r.bottom, Color.rgb(240, 150, 50), Color.rgb(184, 96, 26), Shader.TileMode.CLAMP));
         c.drawRoundRect(r, rad, rad, paint);
         paint.setShader(null);
@@ -1404,6 +1440,7 @@ public final class BottomScreenView extends View {
     private void tag(Canvas c, RectF r, String value, boolean complete) {
         float rad = r.height() * 0.3f;
         paint.setStyle(Paint.Style.FILL);
+        paint.setAlpha(255);
         paint.setShader(new LinearGradient(0, r.top, 0, r.bottom, Color.rgb(240, 150, 50), Color.rgb(184, 96, 26), Shader.TileMode.CLAMP));
         c.drawRoundRect(r, rad, rad, paint);
         paint.setShader(null);
@@ -1476,8 +1513,9 @@ public final class BottomScreenView extends View {
                 c.drawRoundRect(r, r.height() * 0.18f, r.height() * 0.18f, paint);
                 continue;
             }
-            // The weapon button stays lit while the Kong has the gun out.
-            boolean pressed = running == move || (move == Move.WEAPON && state.gunOut);
+            // The gun and camera buttons stay lit while the gun is out / the camera is up.
+            boolean pressed = running == move || (move == Move.WEAPON && state.gunOut)
+                || (move == Move.CAMERA && state.camera);
             boolean enabled = !greyed(move);
 
             int saved = c.saveLayerAlpha(r.left - unit * 0.02f, r.top - unit * 0.02f,
