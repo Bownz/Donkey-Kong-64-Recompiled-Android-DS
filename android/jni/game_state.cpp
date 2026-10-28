@@ -420,7 +420,8 @@ namespace {
     };
     constexpr HeavyArea kHeavyAreas[] = {
         // Filled in from testing on the AYN Thor.
-        { 0xFFFFFFFFu, -2 }, // (placeholder; never matches)
+        // Angry Aztec (map 0x26): the tunnels / lit caves.
+        { 0x26, 5 }, { 0x26, 6 }, { 0x26, 7 }, { 0x26, 8 }, { 0x26, 9 },
     };
 
     std::atomic<int32_t> g_area_map{-1};
