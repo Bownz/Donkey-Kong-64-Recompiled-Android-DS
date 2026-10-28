@@ -129,6 +129,17 @@ final class GameState {
     private static native int nativeKongSwap();
     private static native int nativeFrameCount();
     private static native void nativeSetTagTarget(int kong);
+    private static native int nativeArea();
+
+    /** The current place as "map-chunk" (map in hex), for reporting slow spots. */
+    static String areaLabel() {
+        try {
+            int a = nativeArea();
+            return Integer.toHexString((a >> 16) & 0xFFFF).toUpperCase(java.util.Locale.US) + "-" + (short) (a & 0xFFFF);
+        } catch (UnsatisfiedLinkError e) {
+            return "";
+        }
+    }
 
     /** Touch Kong Swap: the Kong being swapped to (-1: none); see patches/android_hooks.c. */
     static void setTagTarget(int kong) {

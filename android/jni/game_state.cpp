@@ -9,6 +9,7 @@
 #include <jni.h>
 
 #include <atomic>
+#include <chrono>
 #include <string>
 
 #include "librecomp/mods.hpp"
@@ -401,8 +402,93 @@ extern "C" void dk64_android_report_input_handler(uint32_t index) {
     }
 }
 
+// ---- Heavy areas: a fixed draw distance cap per place -----------------------------------
+//
+// Some enclosed areas (caves full of lights and enemies) can't hold 30 FPS with a long draw
+// distance on a handheld, and gain nothing from it since the walls hide the distance anyway.
+// In the places listed here the draw distance is held at the game's normal (vanilla) value;
+// everywhere else the Draw Distance setting applies as usual. A place is a map and, inside
+// it, a chunk (DK64 splits maps into chunks; CharacterChange->chunk at 0x290). chunk -1 is the
+// whole map. Slow places are written to the log ("Slow area"), and with Show FPS on the
+// counter shows the current place, so new ones can be added from testing.
+namespace {
+    constexpr uint32_t kCcChunk = 0x290;          // s16 CharacterChange::chunk
+
+    struct HeavyArea {
+        uint32_t map;
+        int chunk;
+    };
+    constexpr HeavyArea kHeavyAreas[] = {
+        // Filled in from testing on the AYN Thor.
+        { 0xFFFFFFFFu, -2 }, // (placeholder; never matches)
+    };
+
+    std::atomic<int32_t> g_area_map{-1};
+    std::atomic<int32_t> g_area_chunk{-1};
+
+    void read_area(const uint8_t* rdram) {
+        const uint32_t map = read_u32(rdram, kCurrentMap);
+        const uint32_t cc = read_u32(rdram, kCharacterChange);
+        int chunk = -1;
+        if (cc >= 0x80000000u && cc < 0x80800000u - 0x300) {
+            chunk = static_cast<int16_t>(read_u16(rdram, cc + kCcChunk));
+        }
+        g_area_map.store(static_cast<int32_t>(map), std::memory_order_relaxed);
+        g_area_chunk.store(chunk, std::memory_order_relaxed);
+    }
+
+    bool in_heavy_area() {
+        const uint32_t map = static_cast<uint32_t>(g_area_map.load(std::memory_order_relaxed));
+        const int chunk = g_area_chunk.load(std::memory_order_relaxed);
+        for (const HeavyArea& a : kHeavyAreas) {
+            if (a.map == map && (a.chunk == -1 || a.chunk == chunk)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Logs places that run slow (at most once every 5 seconds).
+    std::chrono::steady_clock::time_point g_fps_start{};
+    uint32_t g_fps_frames = 0;
+    std::chrono::steady_clock::time_point g_last_slow_log{};
+
+    void watch_frame_rate() {
+        const auto now = std::chrono::steady_clock::now();
+        if (g_fps_frames++ == 0) {
+            g_fps_start = now;
+            return;
+        }
+        const float elapsed = std::chrono::duration<float>(now - g_fps_start).count();
+        if (elapsed < 1.0f) {
+            return;
+        }
+        const float fps = (g_fps_frames - 1) / elapsed;
+        g_fps_frames = 0;
+        if (elapsed < 2.0f && fps < 27.5f && now - g_last_slow_log > std::chrono::seconds(5)) {
+            g_last_slow_log = now;
+            __android_log_print(ANDROID_LOG_INFO, "DK64Recomp", "Slow area: map 0x%02X chunk %d, %.1f FPS%s",
+                g_area_map.load(), g_area_chunk.load(), fps, in_heavy_area() ? " (heavy area: vanilla draw distance)" : "");
+        }
+    }
+}
+
+int dk64::android::draw_distance(int configured) {
+    return in_heavy_area() ? 0 : configured;
+}
+
+// Show FPS: the current place, as "map-chunk" (hex map), for reporting slow spots.
+extern "C" JNIEXPORT jint JNICALL
+Java_io_github_bownz_dk64recomp_GameState_nativeArea(JNIEnv*, jclass) {
+    return (g_area_map.load() & 0xFFFF) << 16 | (g_area_chunk.load() & 0xFFFF);
+}
+
 extern "C" void dk64_android_report_frame() {
     g_frames.fetch_add(1, std::memory_order_relaxed);
+    if (const uint8_t* rdram = g_rdram.load(std::memory_order_relaxed)) {
+        read_area(rdram);
+    }
+    watch_frame_rate();
     const uint64_t lo = g_sets_building[0].exchange(0, std::memory_order_relaxed);
     const uint64_t hi = g_sets_building[1].exchange(0, std::memory_order_relaxed);
     if (lo != 0 || hi != 0) {

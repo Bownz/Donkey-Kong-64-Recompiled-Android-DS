@@ -412,6 +412,9 @@ dk64::CutsceneBordersMode dk64::get_cutscene_borders() {
 }
 
 int dk64::get_draw_distance() {
+#if defined(__ANDROID__)
+    return dk64::android::draw_distance(get_graphics_config_number_value<int>(dk64::configkeys::graphics::draw_distance));
+#endif
     return get_graphics_config_number_value<int>(dk64::configkeys::graphics::draw_distance);
 }
 

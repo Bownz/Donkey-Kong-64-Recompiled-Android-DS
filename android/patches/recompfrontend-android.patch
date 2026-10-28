@@ -118,6 +118,37 @@ index c89956e..03002ea 100644
          }
  
          *buttons_out = cur_buttons;
+diff --git a/recompui/src/config/ui_config_tab_graphics.cpp b/recompui/src/config/ui_config_tab_graphics.cpp
+index 4fdf81f..40c4b71 100644
+--- a/recompui/src/config/ui_config_tab_graphics.cpp
++++ b/recompui/src/config/ui_config_tab_graphics.cpp
+@@ -304,7 +304,13 @@ namespace recompui {
+                 "Framerate",
+                 get_framerate_text(60),
+                 refresh_rate_options,
++#ifdef __ANDROID__
++                // Android: 60 by default. Handhelds often refresh at 90-120 Hz, and drawing
++                // that many frames costs far more than it's worth on a mobile GPU.
++                ultramodern::renderer::RefreshRate::Manual
++#else
+                 ultramodern::renderer::RefreshRate::Display
++#endif
+             );
+ 
+             config.add_number_option(
+@@ -330,7 +336,12 @@ namespace recompui {
+                 "<br />"
+                 "<recomp-color primary>Note: This option won't be available if your GPU does not support programmable MSAA sample positions, as it is currently required to avoid rendering glitches.</recomp-color>",
+                 antialiasing_options,
++#ifdef __ANDROID__
++                // Off by default on Android: much more costly on mobile GPUs than on desktop.
++                ultramodern::renderer::Antialiasing::None
++#else
+                 ultramodern::renderer::Antialiasing::MSAA2X
++#endif
+             );
+ 
+             config.add_enum_option(
 diff --git a/recompui/src/renderer/rt64_render_context.cpp b/recompui/src/renderer/rt64_render_context.cpp
 index a7954c7..dec1073 100644
 --- a/recompui/src/renderer/rt64_render_context.cpp

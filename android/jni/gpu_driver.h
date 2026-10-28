@@ -29,4 +29,7 @@ namespace dk64::android {
     void set_show_fps(bool enabled);
     // The "Bottom Screen" setting (DK64Activity shows or hides the second-screen view).
     void set_bottom_screen(bool enabled);
+    // The draw distance to use (android/jni/game_state.cpp): the setting, or the game's normal
+    // distance in the listed heavy areas.
+    int draw_distance(int configured);
 }

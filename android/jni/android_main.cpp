@@ -11,12 +11,16 @@
 #include <jni.h>
 #include <sys/stat.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <string>
 #include <thread>
 #include <unistd.h>
+#include <sched.h>
+#include <fstream>
+#include <vector>
 
 int dk64_main(int argc, char** argv);
 
@@ -98,6 +102,43 @@ namespace {
 
 extern "C" void dk64_android_game_closing(); // gpu_driver.cpp
 
+// Keeps the game off the slowest CPU cores. Phones and handhelds mix fast cores with slow,
+// power-saving ones (the Thor's Snapdragon: 1 prime + 4 performance + 3 efficiency), and a
+// game thread scheduled onto an efficiency core stalls the frame. Set on this thread before
+// the game starts, the mask is inherited by every thread it creates (game, renderer, audio).
+static void prefer_fast_cores() {
+    const long count = sysconf(_SC_NPROCESSORS_CONF);
+    if (count <= 1 || count > CPU_SETSIZE) {
+        return;
+    }
+    std::vector<long> max_freq(count, 0);
+    long slowest = 0, fastest = 0;
+    for (long i = 0; i < count; i++) {
+        std::ifstream f("/sys/devices/system/cpu/cpu" + std::to_string(i) + "/cpufreq/cpuinfo_max_freq");
+        long khz = 0;
+        if (f >> khz) {
+            max_freq[i] = khz;
+            slowest = slowest == 0 ? khz : std::min(slowest, khz);
+            fastest = std::max(fastest, khz);
+        }
+    }
+    if (slowest == 0 || slowest == fastest) {
+        return; // unknown, or all cores alike
+    }
+    cpu_set_t set;
+    CPU_ZERO(&set);
+    int chosen = 0;
+    for (long i = 0; i < count; i++) {
+        if (max_freq[i] > slowest) {
+            CPU_SET(i, &set);
+            chosen++;
+        }
+    }
+    if (chosen >= 2 && sched_setaffinity(0, sizeof(set), &set) == 0) {
+        __android_log_print(ANDROID_LOG_INFO, "DK64Recomp", "Running on the %d faster CPU cores (of %ld)", chosen, count);
+    }
+}
+
 extern "C" int SDL_main(int argc, char* argv[]) {
     redirect_stdio_to_logcat();
 
@@ -146,6 +187,7 @@ extern "C" int SDL_main(int argc, char* argv[]) {
     __android_log_print(ANDROID_LOG_INFO, log_tag, "Assets: %s", game_dir.c_str());
     __android_log_print(ANDROID_LOG_INFO, log_tag, "User data: %s", data_dir.c_str());
 
+    prefer_fast_cores();
     const int result = dk64_main(argc, argv);
     dk64_android_game_closing();
     return result;

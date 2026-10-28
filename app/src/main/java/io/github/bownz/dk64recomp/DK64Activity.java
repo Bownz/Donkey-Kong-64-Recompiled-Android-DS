@@ -141,7 +141,7 @@ public class DK64Activity extends SDLActivity
             } else {
                 if (fpsLastFrames >= 0 && now > fpsLastTime && frames >= fpsLastFrames) {
                     float fps = (frames - fpsLastFrames) * 1000f / (now - fpsLastTime);
-                    fpsView.setText(String.format(java.util.Locale.US, "%.0f FPS", fps));
+                    fpsView.setText(String.format(java.util.Locale.US, "%.0f FPS  \u00B7  area %s", fps, GameState.areaLabel()));
                     fpsView.setVisibility(View.VISIBLE);
                     fpsView.bringToFront();
                 }
