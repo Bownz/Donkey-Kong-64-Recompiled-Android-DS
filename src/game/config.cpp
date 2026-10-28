@@ -271,7 +271,7 @@ static void add_gpu_driver_option(recomp::config::Config &config) {
         selected_index
     );
     config.add_option_change_callback(gpu_driver_option,
-        [&config, install_index](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
+        [install_index](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
             const uint32_t index = std::get<uint32_t>(cur);
             std::string selected_now;
             dk64::android::list_gpu_drivers(selected_now);
@@ -285,9 +285,9 @@ static void add_gpu_driver_option(recomp::config::Config &config) {
                 // The Android side keeps the choice (it can also change outside the game);
                 // show its value without marking the tab as changed.
                 if (index != actual) {
-                    config.set_option_value(gpu_driver_option, actual);
-                    config.apply_option_value(gpu_driver_option);
-                    config.modified_options.clear();
+                    recompui::config::get_graphics_config().set_option_value(gpu_driver_option, actual);
+                    recompui::config::get_graphics_config().apply_option_value(gpu_driver_option);
+                    recompui::config::get_graphics_config().modified_options.clear();
                 }
                 return;
             }
@@ -323,10 +323,15 @@ static void add_dual_screen_options(recomp::config::Config &config) {
         bottom_screen_options,
         1u
     );
+    // This tab applies changes straight away; save them straight away too (the menu only
+    // saves when the tab is closed, which doesn't happen if the app is closed from it).
     config.add_option_change_callback(bottom_screen_option,
         [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
             if (context != recomp::config::OptionChangeContext::Temporary) {
                 dk64::android::set_bottom_screen(std::get<uint32_t>(cur) == 1u);
+            }
+            if (context == recomp::config::OptionChangeContext::Permanent) {
+                recompui::config::get_config("dual_screen").save_config();
             }
         });
     // Android: tapping a Kong on the bottom screen swaps to them, using the bundled
@@ -348,8 +353,11 @@ static void add_dual_screen_options(recomp::config::Config &config) {
         0u
     );
     config.add_option_change_callback(touch_kong_swap_option,
-        [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext) {
+        [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
             dk64::android::set_touch_kong_swap(std::get<uint32_t>(cur) == 1u);
+            if (context == recomp::config::OptionChangeContext::Permanent) {
+                recompui::config::get_config("dual_screen").save_config();
+            }
         });
 }
 #endif
@@ -424,13 +432,13 @@ static void add_technical_options(recomp::config::Config &config) {
         0u
     );
     config.add_option_change_callback(share_log_option,
-        [&config](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
+        [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
             const uint32_t value = std::get<uint32_t>(cur);
             if (context == recomp::config::OptionChangeContext::Load) {
                 if (value != 0) {
-                    config.set_option_value(share_log_option, 0u);
-                    config.apply_option_value(share_log_option);
-                    config.modified_options.clear();
+                    recompui::config::get_config("technical").set_option_value(share_log_option, 0u);
+                    recompui::config::get_config("technical").apply_option_value(share_log_option);
+                    recompui::config::get_config("technical").modified_options.clear();
                 }
                 return;
             }
