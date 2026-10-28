@@ -1622,8 +1622,8 @@ public final class BottomScreenView extends View {
                 r.right + unit * 0.02f, r.bottom + unit * 0.02f, enabled ? 255 : 90);
             float squash = animProgress("squash" + move, SQUASH_MS);
             if (squash >= 0) {
-                float k = 1f - 0.08f * (float) Math.sin(Math.PI * squash);
-                c.scale(k, k, r.centerX(), r.centerY());
+                float sq = 1f - 0.08f * (float) Math.sin(Math.PI * squash);
+                c.scale(sq, sq, r.centerX(), r.centerY());
             }
             woodPanel(c, r, r.height() * 0.18f, pressed);
 
@@ -1664,8 +1664,8 @@ public final class BottomScreenView extends View {
                 float bump = animProgress("bump" + move, BUMP_MS);
                 int countSaved = c.save();
                 if (bump >= 0) {
-                    float k = 1f + 0.3f * (float) Math.sin(Math.PI * bump);
-                    c.scale(k, k, countRight - text.measureText(counts[i]) / 2f, iconY);
+                    float grow = 1f + 0.3f * (float) Math.sin(Math.PI * bump);
+                    c.scale(grow, grow, countRight - text.measureText(counts[i]) / 2f, iconY);
                 }
                 outlined(c, counts[i], countRight, iconY + text.getTextSize() * 0.36f, BANANA);
                 c.restoreToCount(countSaved);
