@@ -39,6 +39,7 @@ final class Diagnostics {
     static final String AUTHORITY_SUFFIX = ".logs";
     private static final String PREFS = "diagnostics";
     private static final String KEY_LAST_EXIT = "last_exit_seen";
+    private static final String KEY_LEFT_AT = "left_at";
     private static final int MAX_LOG_BYTES = 3 * 1024 * 1024;
 
     private Diagnostics() {}
@@ -75,6 +76,20 @@ final class Diagnostics {
     // ---- Crash detection -----------------------------------------------------------------
 
     /**
+     * The player is leaving the game (it went to the background, or is closing). Android can
+     * report the game as crashed when it is killed or shuts down after that; those aren't
+     * crashes the player saw, so they aren't offered as reports.
+     */
+    static void markLeaving(Context c) {
+        c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putLong(KEY_LEFT_AT, System.currentTimeMillis()).commit();
+    }
+
+    /** Back in the game: a crash from now on is one the player would see. */
+    static void markPlaying(Context c) {
+        c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putLong(KEY_LEFT_AT, 0).apply();
+    }
+
+    /**
      * If the game's process ended in a crash or freeze since we last checked, a short
      * description; otherwise null. Android 11+ only (ApplicationExitInfo).
      */
@@ -87,6 +102,7 @@ final class Diagnostics {
             List<ApplicationExitInfo> exits = am.getHistoricalProcessExitReasons(c.getPackageName(), 0, 5);
             SharedPreferences p = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
             long lastSeen = p.getLong(KEY_LAST_EXIT, 0);
+            long leftAt = p.getLong(KEY_LEFT_AT, 0);
             long newest = lastSeen;
             String found = null;
             for (ApplicationExitInfo exit : exits) {
@@ -96,6 +112,9 @@ final class Diagnostics {
                 newest = Math.max(newest, exit.getTimestamp());
                 if (exit.getTimestamp() <= lastSeen || found != null) {
                     continue;
+                }
+                if (leftAt > 0 && exit.getTimestamp() >= leftAt) {
+                    continue; // ended while closing or in the background, not mid-game
                 }
                 int reason = exit.getReason();
                 if (reason == ApplicationExitInfo.REASON_CRASH || reason == ApplicationExitInfo.REASON_CRASH_NATIVE

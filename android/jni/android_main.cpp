@@ -96,6 +96,8 @@ namespace {
     }
 }
 
+extern "C" void dk64_android_game_closing(); // gpu_driver.cpp
+
 extern "C" int SDL_main(int argc, char* argv[]) {
     redirect_stdio_to_logcat();
 
@@ -144,5 +146,7 @@ extern "C" int SDL_main(int argc, char* argv[]) {
     __android_log_print(ANDROID_LOG_INFO, log_tag, "Assets: %s", game_dir.c_str());
     __android_log_print(ANDROID_LOG_INFO, log_tag, "User data: %s", data_dir.c_str());
 
-    return dk64_main(argc, argv);
+    const int result = dk64_main(argc, argv);
+    dk64_android_game_closing();
+    return result;
 }

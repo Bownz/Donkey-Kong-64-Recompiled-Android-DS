@@ -50,6 +50,7 @@
 #include "librecomp/mods.hpp"
 #if defined(__ANDROID__)
 extern "C" void dk64_android_start_device_motion();
+extern "C" void dk64_android_watch_quit();
 #endif
 #include "librecomp/helpers.hpp"
 
@@ -156,6 +157,8 @@ ultramodern::gfx_callbacks_t::gfx_data_t create_gfx() {
 #if defined(__ANDROID__)
     // Gyro aiming with the device's own motion sensors (android/jni/device_motion.cpp).
     dk64_android_start_device_motion();
+    // A crash while the game closes shouldn't be offered as a crash report (gpu_driver.cpp).
+    dk64_android_watch_quit();
 #endif
 
     return {};

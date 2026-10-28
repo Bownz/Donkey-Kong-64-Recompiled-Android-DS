@@ -198,3 +198,23 @@ extern "C" int dk64_android_display_rotation() {
     std::string value = call_activity("getDisplayRotation", "()Ljava/lang/String;", nullptr);
     return value.empty() ? 0 : (value[0] - '0') & 3;
 }
+
+// The game is shutting down (quit from its menu, or SDL told to quit): tell DK64Activity, so
+// a crash while closing isn't offered as a crash report on the next start.
+namespace {
+    int on_sdl_event(void*, SDL_Event* event) {
+        if (event->type == SDL_QUIT || event->type == SDL_APP_TERMINATING) {
+            call_activity("gameClosing", "()Ljava/lang/String;", nullptr);
+        }
+        return 0;
+    }
+}
+
+extern "C" void dk64_android_game_closing() {
+    call_activity("gameClosing", "()Ljava/lang/String;", nullptr);
+}
+
+// Called once after SDL_Init (src/main/main.cpp).
+extern "C" void dk64_android_watch_quit() {
+    SDL_AddEventWatch(on_sdl_event, nullptr);
+}

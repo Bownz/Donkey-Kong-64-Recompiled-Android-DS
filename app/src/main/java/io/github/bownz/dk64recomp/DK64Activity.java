@@ -168,6 +168,7 @@ public class DK64Activity extends SDLActivity
         hideSystemBars();
         // Controllers or displays may have changed while we were away.
         updateTouchControls();
+        Diagnostics.markPlaying(this);
     }
 
     @Override
@@ -181,6 +182,7 @@ public class DK64Activity extends SDLActivity
         }
         inputManager.unregisterInputDeviceListener(this);
         displayManager.unregisterDisplayListener(this);
+        Diagnostics.markLeaving(this);
         super.onPause();
     }
 
@@ -194,6 +196,7 @@ public class DK64Activity extends SDLActivity
 
     @Override
     protected void onDestroy() {
+        Diagnostics.markLeaving(this);
         dismissPresentation();
         TouchInput.shutdown();
         super.onDestroy();
@@ -335,6 +338,13 @@ public class DK64Activity extends SDLActivity
     }
 
     /** For the in-game settings: e.g. "0.2.0-beta (76e2c32)". */
+    /** Called from native code when the game is shutting down (it was quit from its menu). */
+    @SuppressWarnings("unused")
+    public String gameClosing() {
+        Diagnostics.markLeaving(this);
+        return null;
+    }
+
     public String getAppVersion() {
         return Diagnostics.version(this);
     }
