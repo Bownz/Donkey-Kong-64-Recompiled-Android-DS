@@ -180,6 +180,7 @@ public final class BottomScreenView extends View {
         }
         running = move;
         performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+        startAnim("squash" + move);
         invalidate();
 
         // The buttons press N64 Z and C directly (not through the controller mappings).
@@ -783,6 +784,14 @@ public final class BottomScreenView extends View {
 
     @Override
     protected void onDraw(Canvas canvas) {
+        animating = false;
+        drawContent(canvas);
+        if (animating) {
+            postInvalidateOnAnimation();
+        }
+    }
+
+    private void drawContent(Canvas canvas) {
         drawJungle(canvas, getWidth(), getHeight());
         if (!state.inGame()) {
             drawTitle(canvas, getWidth(), getHeight());
@@ -792,6 +801,7 @@ public final class BottomScreenView extends View {
             drawPauseProgress(canvas);
             return;
         }
+        watch("kong", state.currentKong, "tab" + state.currentKong);
         drawFirstPersonButton(canvas);
         drawHealth(canvas);
         if (showCancel()) {
@@ -1195,10 +1205,28 @@ public final class BottomScreenView extends View {
             outlined(c, hint, hintX, healthY + melonR * 0.2f, CREAM);
             return;
         }
+        // A hit shakes the melon that lost a quarter; healing makes the one that gained pulse.
+        Integer before = lastValue.put("health", state.health);
+        if (before != null && before != state.health) {
+            healthHurt = state.health < before;
+            healthMelon = Math.max(0, Math.min(state.melons - 1, (healthHurt ? state.health : state.health - 1) / 4));
+            startAnim("melon");
+        }
+        float hp = animProgress("melon", MELON_MS);
         float x = healthX;
         int remaining = state.health;
         for (int i = 0; i < state.melons; i++) {
+            int saved = c.save();
+            if (hp >= 0 && i == healthMelon) {
+                if (healthHurt) {
+                    c.translate((float) Math.sin(hp * Math.PI * 6) * melonR * 0.18f * (1 - hp), 0);
+                } else {
+                    float pulse = 1f + 0.25f * (float) Math.sin(Math.PI * hp);
+                    c.scale(pulse, pulse, x, healthY);
+                }
+            }
             drawMelon(c, x, healthY, melonR, Math.max(0, Math.min(4, remaining)));
+            c.restoreToCount(saved);
             remaining -= 4;
             x += melonR * 2.4f;
         }
@@ -1222,6 +1250,45 @@ public final class BottomScreenView extends View {
         }
     }
 
+    // ------------------------------------------------------------------------------
+    // Event animations: played once when something changes, then still
+    // ------------------------------------------------------------------------------
+
+    private static final long SPIN_MS = 520, MELON_MS = 420, SQUASH_MS = 160, BUMP_MS = 300, HOP_MS = 360;
+    private final java.util.HashMap<String, Long> animStart = new java.util.HashMap<>();
+    private final java.util.HashMap<String, Integer> lastValue = new java.util.HashMap<>();
+    private boolean animating;      // some animation is running: keep redrawing
+    private boolean healthHurt;
+    private int healthMelon;
+
+    private void startAnim(String key) {
+        animStart.put(key, android.os.SystemClock.uptimeMillis());
+        postInvalidateOnAnimation();
+    }
+
+    /** 0..1 through the animation, or -1 when it isn't running. */
+    private float animProgress(String key, long durationMs) {
+        Long start = animStart.get(key);
+        if (start == null) {
+            return -1f;
+        }
+        float p = (android.os.SystemClock.uptimeMillis() - start) / (float) durationMs;
+        if (p >= 1f) {
+            animStart.remove(key);
+            return -1f;
+        }
+        animating = true;
+        return p;
+    }
+
+    /** Starts the animation when a watched value changes (not the first time it's seen). */
+    private void watch(String key, int value, String animKey) {
+        Integer before = lastValue.put(key, value);
+        if (before != null && before != value) {
+            startAnim(animKey);
+        }
+    }
+
     private void drawTabs(Canvas c) {
         int shown = displayedKong();
         int playing = state.inGame() ? state.currentKong : -1;
@@ -1234,8 +1301,14 @@ public final class BottomScreenView extends View {
             r.set(t.centerX() - bw / 2, t.top, t.centerX() + bw / 2, t.bottom);
             boolean locked = isLocked(i);
             boolean lit = !locked && i == shown;
+            float hop = animProgress("tab" + i, HOP_MS);
+            int tabSaved = c.save();
+            if (hop >= 0) {
+                c.translate(0, -(float) Math.sin(Math.PI * hop) * r.height() * 0.14f);
+            }
             barrel(c, r, lit, locked);
             if (locked) {
+                c.restoreToCount(tabSaved);
                 continue; // Greyed out, no face or name, until the Kong is freed.
             }
             float faceR = Math.min(r.height(), r.width()) * 0.36f;
@@ -1245,6 +1318,7 @@ public final class BottomScreenView extends View {
                 if (!RomIcons.draw(c, icon, r.centerX(), r.centerY(), faceR)) {
                     DkIcons.banana(c, r.centerX(), r.centerY(), faceR * 0.8f);
                 }
+                c.restoreToCount(tabSaved);
                 continue;
             }
             Bitmap face = RomIcons.of(RomIcons.face, i);
@@ -1269,6 +1343,7 @@ public final class BottomScreenView extends View {
                 // A little banana marks the Kong you're playing.
                 DkIcons.banana(c, r.right - r.width() * 0.16f, r.top + r.height() * 0.17f, r.height() * 0.14f);
             }
+            c.restoreToCount(tabSaved);
         }
     }
 
@@ -1406,7 +1481,20 @@ public final class BottomScreenView extends View {
             // Tag first, so the badge overlaps its left end.
             tmp.set(bx + badgeR * 0.4f, cy - badgeR * 0.55f, cx + cellW * 0.93f, cy + badgeR * 0.55f);
             tag(c, tmp, value, complete);
-            badge(c, bx, cy, badgeR, r);
+            // Spins once (like the item in the game) when its count changes.
+            String spinKey = "spin" + tab + r.label;
+            watch("row" + tab + ":" + shownLevel() + ":" + r.label, r.have, spinKey);
+            float spin = animProgress(spinKey, SPIN_MS);
+            if (spin >= 0) {
+                int saved = c.save();
+                float sx = (float) Math.cos(2 * Math.PI * spin);
+                float pop = 1f + 0.18f * (float) Math.sin(Math.PI * spin);
+                c.scale(Math.abs(sx) < 0.08f ? 0.08f : sx * pop, pop, bx, cy);
+                badge(c, bx, cy, badgeR, r);
+                c.restoreToCount(saved);
+            } else {
+                badge(c, bx, cy, badgeR, r);
+            }
         }
     }
 
@@ -1532,6 +1620,11 @@ public final class BottomScreenView extends View {
 
             int saved = c.saveLayerAlpha(r.left - unit * 0.02f, r.top - unit * 0.02f,
                 r.right + unit * 0.02f, r.bottom + unit * 0.02f, enabled ? 255 : 90);
+            float squash = animProgress("squash" + move, SQUASH_MS);
+            if (squash >= 0) {
+                float k = 1f - 0.08f * (float) Math.sin(Math.PI * squash);
+                c.scale(k, k, r.centerX(), r.centerY());
+            }
             woodPanel(c, r, r.height() * 0.18f, pressed);
 
             // Icon, with the count beside it.
@@ -1566,9 +1659,26 @@ public final class BottomScreenView extends View {
                 float countRight = r.right - r.width() * 0.1f;
                 text.setTextAlign(Paint.Align.RIGHT);
                 text.setTextSize(fitText("000", countRight - countLeft, r.height() * 0.36f));
+                // The count bumps when it changes (an orange thrown, ammo used or picked up).
+                watch("count" + move, parseCount(counts[i]), "bump" + move);
+                float bump = animProgress("bump" + move, BUMP_MS);
+                int countSaved = c.save();
+                if (bump >= 0) {
+                    float k = 1f + 0.3f * (float) Math.sin(Math.PI * bump);
+                    c.scale(k, k, countRight - text.measureText(counts[i]) / 2f, iconY);
+                }
                 outlined(c, counts[i], countRight, iconY + text.getTextSize() * 0.36f, BANANA);
+                c.restoreToCount(countSaved);
             }
             c.restoreToCount(saved);
+        }
+    }
+
+    private static int parseCount(String s) {
+        try {
+            return Integer.parseInt(s);
+        } catch (NumberFormatException e) {
+            return -1;
         }
     }
 
