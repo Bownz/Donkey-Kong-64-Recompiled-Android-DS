@@ -9,7 +9,6 @@
 #include <jni.h>
 
 #include <atomic>
-#include <chrono>
 #include <string>
 
 #include "librecomp/mods.hpp"
@@ -402,73 +401,8 @@ extern "C" void dk64_android_report_input_handler(uint32_t index) {
     }
 }
 
-// Auto draw distance: lowers the draw distance while the game runs slower than its normal 30
-// frames per second (busy areas such as Angry Aztec's lit caves) and raises it back,
-// up to the Draw Distance setting, once it keeps up again.
-namespace {
-    std::atomic<bool> g_auto_draw{false};
-    std::atomic<int> g_auto_draw_level{100};    // percent, before the setting's cap
-    std::chrono::steady_clock::time_point g_window_start{};
-    uint32_t g_window_frames = 0;
-    int g_slow_windows = 0, g_fast_windows = 0;
-
-    void update_auto_draw_distance() {
-        const auto now = std::chrono::steady_clock::now();
-        if (g_window_frames == 0) {
-            g_window_start = now;
-        }
-        g_window_frames++;
-        const float elapsed = std::chrono::duration<float>(now - g_window_start).count();
-        if (elapsed < 0.5f) {
-            return;
-        }
-        const float fps = (g_window_frames - 1) / elapsed;
-        g_window_frames = 0;
-        if (elapsed > 2.0f) {
-            return; // a pause or loading stall, not a busy scene
-        }
-        int level = g_auto_draw_level.load();
-        if (fps < 27.5f) {
-            g_fast_windows = 0;
-            if (++g_slow_windows >= 2 && level > 0) {
-                level = level > 15 ? level - 15 : 0;
-                g_slow_windows = 0;
-                __android_log_print(ANDROID_LOG_INFO, "DK64Recomp", "Auto draw distance: %.1f FPS, down to %d%%", fps, level);
-            }
-        } else if (fps >= 29.3f) {
-            g_slow_windows = 0;
-            if (++g_fast_windows >= 6 && level < 100) {
-                level = level < 95 ? level + 5 : 100;
-                g_fast_windows = 0;
-            }
-        } else {
-            g_slow_windows = 0;
-            g_fast_windows = 0;
-        }
-        g_auto_draw_level.store(level);
-    }
-}
-
-void dk64::android::set_auto_draw_distance(bool enabled) {
-    g_auto_draw.store(enabled);
-    if (!enabled) {
-        g_auto_draw_level.store(100);
-    }
-}
-
-int dk64::android::draw_distance(int configured) {
-    if (!g_auto_draw.load()) {
-        return configured;
-    }
-    const int level = g_auto_draw_level.load();
-    return configured * level / 100;
-}
-
 extern "C" void dk64_android_report_frame() {
     g_frames.fetch_add(1, std::memory_order_relaxed);
-    if (g_auto_draw.load(std::memory_order_relaxed)) {
-        update_auto_draw_distance();
-    }
     const uint64_t lo = g_sets_building[0].exchange(0, std::memory_order_relaxed);
     const uint64_t hi = g_sets_building[1].exchange(0, std::memory_order_relaxed);
     if (lo != 0 || hi != 0) {
