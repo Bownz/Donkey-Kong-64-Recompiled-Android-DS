@@ -118,6 +118,24 @@ index c89956e..03002ea 100644
          }
  
          *buttons_out = cur_buttons;
+diff --git a/recompui/src/config/ui_config_tab_graphics.cpp b/recompui/src/config/ui_config_tab_graphics.cpp
+index 4fdf81f..89cd03c 100644
+--- a/recompui/src/config/ui_config_tab_graphics.cpp
++++ b/recompui/src/config/ui_config_tab_graphics.cpp
+@@ -330,7 +330,13 @@ namespace recompui {
+                 "<br />"
+                 "<recomp-color primary>Note: This option won't be available if your GPU does not support programmable MSAA sample positions, as it is currently required to avoid rendering glitches.</recomp-color>",
+                 antialiasing_options,
++#ifdef __ANDROID__
++                // Off by default on Android: on tile-based mobile GPUs MSAA costs far more
++                // than on desktop (e.g. ~25% frame rate in heavy scenes on an Adreno 740).
++                ultramodern::renderer::Antialiasing::None
++#else
+                 ultramodern::renderer::Antialiasing::MSAA2X
++#endif
+             );
+ 
+             config.add_enum_option(
 diff --git a/recompui/src/renderer/rt64_render_context.cpp b/recompui/src/renderer/rt64_render_context.cpp
 index a7954c7..dec1073 100644
 --- a/recompui/src/renderer/rt64_render_context.cpp
