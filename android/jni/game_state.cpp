@@ -158,12 +158,14 @@ namespace {
     }
 
     // Input handlers that mark a mode (see move_availability).
-    constexpr uint32_t kZCombos[] = { 0x806E4E88u, 0x806E5044u };          // Z + C-Left / C-Right
-    constexpr uint32_t kFirstPersonEntries[] = { 0x806EA958u, 0x806EAA44u, 0x806EA04Cu };
+    // Seen on a device (logcat "Input set"): standing/walking sets have Z = 806E4D84, which
+    // crouches (code_E4090.c), and Z + C moves come from the crouch that follows. 806E4E88 and
+    // 806E5044 handle Z + C-Left / C-Right directly.
+    constexpr uint32_t kZCrouch = 0x806E4D84u;
+    constexpr uint32_t kZCombos[] = { kZCrouch, 0x806E4E88u, 0x806E5044u };
+    constexpr uint32_t kNothing = 0x806E1864u;                              // the do-nothing handler
     constexpr uint32_t kSwimmingHandlers[] = { 0x806E6B98u, 0x806E65BCu }; // swimming steering
     constexpr uint32_t kFirstPersonUnderwater = 0x806EA04Cu;
-    constexpr uint8_t kSetCrouching = 0x3C;
-    constexpr uint8_t kSetWalking = 0x0D;
 
     bool in(uint32_t value, const uint32_t* list, size_t n) {
         for (size_t i = 0; i < n; i++) {
@@ -187,10 +189,10 @@ namespace {
         // handlers[1] is the patch's reporting wrapper; the swimming steering is the last one.
         const uint32_t last = handler(rdram, s, 0x40);
         jint bits = 0;
-        if (s == kSetCrouching || s == kSetWalking || in(z, kZCombos, 2)) {
+        if (in(z, kZCombos, 3)) {
             bits |= 4;
         }
-        if (in(c_up, kFirstPersonEntries, 3)) {
+        if (c_up != kNothing) {
             bits |= 8;
         }
         if (in(last, kSwimmingHandlers, 2) || c_up == kFirstPersonUnderwater) {
@@ -312,10 +314,13 @@ Java_io_github_bownz_dk64recomp_GameState_nativeRead(JNIEnv* env, jclass, jintAr
             bits |= static_cast<jint>(control_state) << 8;
             bits |= static_cast<jint>(input_set < 0xFF ? input_set : 0xFF) << 16;
             // Bit 24: on his feet (standing, walking or crouching input this frame).
-            for (uint32_t i : { 0x0Cu, 0x0Du, 0x3Cu }) {
-                if ((sets[i >> 6] >> (i & 63)) & 1) {
+            for (uint32_t i = 0; i < static_cast<uint32_t>(kControlStates); i++) {
+                if (((sets[i >> 6] >> (i & 63)) & 1) && handler(rdram, static_cast<uint8_t>(i), kHandlerZ) == kZCrouch) {
                     bits |= 1 << 24;
                 }
+            }
+            if (control_state == 0x3C) {
+                bits |= 1 << 24; // crouching
             }
         }
         values[kCount - 1] = bits;
