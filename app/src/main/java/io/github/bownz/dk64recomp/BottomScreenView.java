@@ -129,7 +129,13 @@ public final class BottomScreenView extends View {
         for (int i = 0; i < tabRects.length; i++) {
             tabRects[i] = new RectF();
         }
-        text.setFakeBoldText(true);
+        // A chunky cartoon face close to the game's pause-screen lettering (Luckiest Guy,
+        // Apache 2.0, assets/fonts). Falls back to bold sans if it can't be loaded.
+        try {
+            text.setTypeface(android.graphics.Typeface.createFromAsset(context.getAssets(), "fonts/LuckiestGuy-Regular.ttf"));
+        } catch (RuntimeException e) {
+            text.setFakeBoldText(true);
+        }
         setHapticFeedbackEnabled(true);
         setContentDescription("DK64 bottom screen: health, collectibles and action buttons");
     }
