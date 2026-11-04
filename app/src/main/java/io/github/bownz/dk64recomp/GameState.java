@@ -131,6 +131,17 @@ final class GameState {
     private static native void nativeSetTagTarget(int kong);
     private static native int nativeArea();
     private static native int nativeOverlay();
+    private static native boolean nativeFontMetrics(byte[] out);
+
+    /** The pause-screen font's metrics from the game (see GameFont), or null if not readable yet. */
+    static byte[] fontMetrics() {
+        byte[] out = new byte[6 + 57 + 96 * 4];
+        try {
+            return nativeFontMetrics(out) ? out : null;
+        } catch (UnsatisfiedLinkError e) {
+            return null;
+        }
+    }
 
     /** Corner readouts that are on: 1 FPS, 2 area. */
     static int overlay() {

@@ -41,6 +41,7 @@ final class RomIcons {
         final int table, file, width, height;
         final boolean flipped;
         final int format;       // RGBA5551, RGBA32 or IA8
+        boolean lenient;        // skip the "has a solid middle" check
 
         Spec(int table, int file, int width, int height, boolean flipped) {
             this(table, file, width, height, flipped, RGBA5551);
@@ -66,6 +67,9 @@ final class RomIcons {
     private static final Spec KEY = new Spec(TEXTURES_GEOMETRY, 0x16F5, 44, 44, true);
     private static final Spec RAINBOW_COIN = new Spec(TEXTURES_GEOMETRY, 5963, 48, 42, true);
     private static final Spec FAIRY = new Spec(TEXTURES_GEOMETRY, 5869, 32, 32, true, RGBA32);
+    // Crystal Coconut: the HUD's spinning sprite (D_global_asm_80720508, 8 frames of 40x51 in
+    // table 7 from 0x177). The widest frame (most visible pixels) is the face-on one.
+    private static final int CRYSTAL_FIRST = 0x177, CRYSTAL_FRAMES = 8;
     // The first-person / gun crosshair from the HUD.
     private static final Spec CROSSHAIR = new Spec(TEXTURES_HUD, 0x38, 64, 64, false, IA8);
     // Banana Coins: the face-on frame of each Kong's spinning coin (48x42 sprites; the 44x44
@@ -106,7 +110,7 @@ final class RomIcons {
     };
 
     static volatile Bitmap melon, orange, film, goldenBanana;
-    static volatile Bitmap medal, blueprint, crown, key, rainbowCoin, fairy, crosshair;
+    static volatile Bitmap medal, blueprint, crown, key, rainbowCoin, fairy, crosshair, crystal;
     static final Bitmap[] coin = new Bitmap[5];
     // The game's medal is gold for everyone; this is it recoloured to each Kong's colour.
     static final Bitmap[] medalByKong = new Bitmap[5];
@@ -159,8 +163,9 @@ final class RomIcons {
                 rainbowCoin = load(f, RAINBOW_COIN);
                 fairy = load(f, FAIRY);
                 crosshair = load(f, CROSSHAIR);
+                crystal = loadWidestFrame(f, CRYSTAL_FIRST, CRYSTAL_FRAMES, 40, 51);
                 int[] medalPixels = pixels(f, MEDAL);
-                int found = count(melon, orange, film, goldenBanana, medal, blueprint, crown, key, rainbowCoin, fairy, crosshair);
+                int found = count(melon, orange, film, goldenBanana, medal, blueprint, crown, key, rainbowCoin, fairy, crosshair, crystal);
                 for (int k = 0; k < 5; k++) {
                     coin[k] = load(f, COIN[k]);
                     if (medalPixels != null) {
@@ -181,7 +186,7 @@ final class RomIcons {
                     face[k] = loadFace(f, FACE_HALVES[k]);
                     found += count(banana[k], weapon[k], instrument[k], face[k]);
                 }
-                Log.i(TAG, "Bottom screen: " + found + " of 40 icons loaded from the ROM");
+                Log.i(TAG, "Bottom screen: " + found + " of 41 icons loaded from the ROM");
             } catch (IOException | RuntimeException e) {
                 Log.w(TAG, "Bottom screen: couldn't read icons from the ROM", e);
             }
@@ -264,6 +269,72 @@ final class RomIcons {
     private static Bitmap load(RandomAccessFile f, Spec spec) {
         int[] argb = pixels(f, spec);
         return argb == null ? null : Bitmap.createBitmap(argb, spec.width, spec.height, Bitmap.Config.ARGB_8888);
+    }
+
+    /** Of {@code frames} consecutive sprite frames, the one with the most visible pixels. */
+    private static Bitmap loadWidestFrame(RandomAccessFile f, int first, int frames, int w, int h) {
+        int[] best = null;
+        int bestCount = 0;
+        for (int i = 0; i < frames; i++) {
+            int[] argb = pixels(f, new Spec(TEXTURES_UNCOMPRESSED, first + i, w, h, true));
+            if (argb == null) {
+                continue;
+            }
+            int n = 0;
+            for (int p : argb) {
+                if ((p >>> 24) != 0) {
+                    n++;
+                }
+            }
+            if (n > bestCount) {
+                bestCount = n;
+                best = argb;
+            }
+        }
+        return best == null ? null : Bitmap.createBitmap(best, w, h, Bitmap.Config.ARGB_8888);
+    }
+
+    /**
+     * A HUD texture (table 14) as ARGB, stored right way up, with no "looks like an icon"
+     * check (font sheets are mostly empty). Null if it can't be read.
+     */
+    static int[] hudTexture(RandomAccessFile f, int file, int w, int h) {
+        try {
+            byte[] data = readFile(f, TEXTURES_HUD, file, 0);
+            if (data == null) {
+                return null;
+            }
+            if (data.length > 2 && (data[0] & 0xFF) == 0x1F && (data[1] & 0xFF) == 0x8B) {
+                data = gunzip(data);
+            }
+            Spec spec = new Spec(TEXTURES_HUD, file, w, h, false);
+            spec.lenient = true;
+            return decode(data, spec);
+        } catch (IOException | RuntimeException e) {
+            return null;
+        }
+    }
+
+    /** The ROM in the data folder, if it's the US release (the only one these offsets fit). */
+    static RandomAccessFile openUsRom() {
+        String dataDir = dataDirectory;
+        if (dataDir == null) {
+            return null;
+        }
+        File rom = new File(dataDir, "DK64.z64");
+        if (!rom.isFile()) {
+            return null;
+        }
+        try {
+            RandomAccessFile f = new RandomAccessFile(rom, "r");
+            if (isUsRom(f)) {
+                return f;
+            }
+            f.close();
+        } catch (IOException e) {
+            // fall through
+        }
+        return null;
     }
 
     /** A Kong's face: two 32x64 halves side by side. */
@@ -377,7 +448,7 @@ final class RomIcons {
             }
         }
         // A real icon has a solid middle (a face half may be fully opaque).
-        if (opaque < w * h / (spec.format == IA8 ? 60 : 8)) {
+        if (!spec.lenient && opaque < w * h / (spec.format == IA8 ? 60 : 8)) {
             return null;
         }
         return argb;

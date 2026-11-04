@@ -537,3 +537,40 @@ extern "C" JNIEXPORT void JNICALL
 Java_io_github_bownz_dk64recomp_GameState_nativeSetTagTarget(JNIEnv*, jclass, jint kong) {
     g_tag_target.store(kong >= 0 && kong < 5 ? kong : -1, std::memory_order_relaxed);
 }
+
+// The game's pause-screen font (text style 1, printStyledText in code_100180.c), so the bottom
+// screen can draw its labels with it. Only the metrics are read here, from the game's static
+// data in RDRAM; the glyph textures themselves are decoded from the player's ROM in Java.
+//   0x80754A34: 8 style records { first texture, texture count, height, space, kerning, anim }
+//   0x80754A18: 7 pointers to 96 glyphs { s16 x_start, u8 width, u8 texture (1-based) }
+//   0x80754A64: style 1's character map (the game looks each character up with strchr)
+// Out: 6 style bytes, 57 map bytes, then 96 x 4 glyph bytes. False until the data is there.
+extern "C" JNIEXPORT jboolean JNICALL
+Java_io_github_bownz_dk64recomp_GameState_nativeFontMetrics(JNIEnv* env, jclass, jbyteArray out) {
+    constexpr uint32_t kStyles = 0x80754A34;
+    constexpr uint32_t kGlyphTables = 0x80754A18;
+    constexpr uint32_t kStyle1Map = 0x80754A64;
+    constexpr int kStyle = 1, kMapLength = 57, kGlyphs = 96;
+    constexpr jsize kCount = 6 + kMapLength + kGlyphs * 4;
+    const uint8_t* rdram = g_rdram.load();
+    if (rdram == nullptr || out == nullptr || env->GetArrayLength(out) < kCount) {
+        return JNI_FALSE;
+    }
+    const uint32_t glyphs = read_u32(rdram, kGlyphTables + kStyle * 4);
+    if (glyphs < 0x80000000u || glyphs >= 0x80800000u - kGlyphs * 4) {
+        return JNI_FALSE;
+    }
+    jbyte bytes[kCount];
+    int n = 0;
+    for (int i = 0; i < 6; i++) {
+        bytes[n++] = static_cast<jbyte>(read_u8(rdram, kStyles + kStyle * 6 + i));
+    }
+    for (int i = 0; i < kMapLength; i++) {
+        bytes[n++] = static_cast<jbyte>(read_u8(rdram, kStyle1Map + i));
+    }
+    for (int i = 0; i < kGlyphs * 4; i++) {
+        bytes[n++] = static_cast<jbyte>(read_u8(rdram, glyphs + i));
+    }
+    env->SetByteArrayRegion(out, 0, kCount, bytes);
+    return JNI_TRUE;
+}

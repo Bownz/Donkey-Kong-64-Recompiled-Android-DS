@@ -115,6 +115,9 @@ public final class BottomScreenView extends View {
                 invalidate();
             }
             RomIcons.ensureLoaded(BottomScreenView.this::postInvalidate);
+            if (state.inGame()) {   // the font's metrics are the game's own data
+                GameFont.ensureLoaded(BottomScreenView.this::postInvalidate);
+            }
             if (active) {
                 handler.postDelayed(this, POLL_MS);
             }
@@ -845,7 +848,7 @@ public final class BottomScreenView extends View {
         Row[] items = {
             colored(new Row("Bananas", RomIcons.of(RomIcons.banana, k), 0, state.level >= 0 ? state.heldBananas : 0, -1), KONG_COLORS[k]),
             colored(new Row("Coins", RomIcons.of(RomIcons.coin, k), 1, state.kongs[k].coins, -1), darker(KONG_COLORS[k])),
-            colored(new Row("Crystal Coconuts", null, 3, crystals, -1), Color.rgb(200, 80, 160)),
+            colored(new Row("Crystal Coconuts", RomIcons.crystal, 3, crystals, -1), Color.rgb(200, 80, 160)),
         };
         float labelW = r.width() * 0.2f;
         text.setTextAlign(Paint.Align.CENTER);
@@ -1164,6 +1167,11 @@ public final class BottomScreenView extends View {
 
     /** Chunky banana-yellow text with a dark outline, DKC style. */
     private void outlined(Canvas c, String s, float x, float y, int fill) {
+        if (GameFont.ready()) {
+            // The game's own pause-screen lettering, decoded from the ROM (GameFont).
+            GameFont.draw(c, s, x, y, text, fill, OUTLINE);
+            return;
+        }
         text.setStyle(Paint.Style.STROKE);
         text.setStrokeWidth(text.getTextSize() * 0.16f);
         text.setStrokeJoin(Paint.Join.ROUND);
@@ -1758,7 +1766,7 @@ public final class BottomScreenView extends View {
                 int countSaved = c.save();
                 if (bump >= 0) {
                     float grow = 1f + 0.3f * (float) Math.sin(Math.PI * bump);
-                    c.scale(grow, grow, countRight - text.measureText(counts[i]) / 2f, iconY);
+                    c.scale(grow, grow, countRight - textWidth(counts[i]) / 2f, iconY);
                 }
                 outlined(c, counts[i], countRight, iconY + text.getTextSize() * 0.36f, BANANA);
                 c.restoreToCount(countSaved);
@@ -1776,9 +1784,14 @@ public final class BottomScreenView extends View {
     }
 
     /** Largest text size up to {@code max} at which {@code s} fits in {@code width}. */
+    /** Width of {@code s} at the current text size, in whichever font outlined() will use. */
+    private float textWidth(String s) {
+        return GameFont.ready() ? GameFont.measure(s, text.getTextSize(), text) : text.measureText(s);
+    }
+
     private float fitText(String s, float width, float max) {
         text.setTextSize(max);
-        float measured = text.measureText(s);
+        float measured = textWidth(s);
         return measured <= width ? max : max * width / measured;
     }
 
