@@ -836,9 +836,9 @@ public final class BottomScreenView extends View {
         } else if (zbMoveName() != null) {
             drawZbMoveButton(canvas);
         }
-        drawCarrying(canvas);
         drawTabs(canvas);
         drawKongPanel(canvas);
+        drawCarrying(canvas);   // after the panel, so its icons can poke out over it
         drawActions(canvas);
     }
 
@@ -861,11 +861,12 @@ public final class BottomScreenView extends View {
         text.setTextSize(fitText("Carrying", labelW * 0.85f, r.height() * 0.3f));
         outlined(c, "Carrying", r.left + labelW / 2f + r.height() * 0.15f, r.centerY() + text.getTextSize() * 0.36f, CREAM);
         float slot = (r.width() - labelW) / items.length;
-        float badgeR = r.height() * 0.34f;
+        // Just the item, no badge, a little bigger than the bar is tall (it may poke out).
+        float badgeR = r.height() * 0.58f;
         for (int i = 0; i < items.length; i++) {
             Row item = items[i];
             float sx = r.left + labelW + slot * i;
-            float bx = sx + slot * 0.18f + badgeR, cy = r.centerY();
+            float bx = sx + slot * 0.12f + badgeR, cy = r.centerY();
             String spinKey = "carry" + item.label;
             watch("carryv" + item.label, item.have, spinKey);
             float spin = animProgress(spinKey, SPIN_MS);
@@ -875,12 +876,12 @@ public final class BottomScreenView extends View {
                 float pop = 1f + 0.18f * (float) Math.sin(Math.PI * spin);
                 c.scale(Math.abs(sxk) < 0.08f ? 0.08f : sxk * pop, pop, bx, cy);
             }
-            badge(c, bx, cy, badgeR, item);
+            itemIcon(c, bx, cy, badgeR, item);
             c.restoreToCount(saved);
             String value = String.valueOf(item.have);
             text.setTextAlign(Paint.Align.LEFT);
-            text.setTextSize(fitText(value, slot - (bx - sx) - badgeR * 1.4f, r.height() * 0.46f));
-            outlined(c, value, bx + badgeR * 1.25f, cy + text.getTextSize() * 0.36f, BANANA);
+            text.setTextSize(fitText(value, slot - (bx - sx) - badgeR * 1.15f, r.height() * 0.46f));
+            outlined(c, value, bx + badgeR * 1.05f, cy + text.getTextSize() * 0.36f, BANANA);
         }
     }
 
@@ -1545,14 +1546,26 @@ public final class BottomScreenView extends View {
         c.drawRoundRect(board, br, br, paint);
         paint.setStyle(Paint.Style.FILL);
 
+        // The level the counts are for, as a title across the top of the board.
+        int level = shownLevel();
+        float titleH = 0;
+        if (level >= 0 && level < GameState.LEVEL_NAMES.length) {
+            titleH = Math.min(board.height() * 0.2f, unit * 0.085f);
+            String title = GameState.LEVEL_NAMES[level];
+            text.setTextAlign(Paint.Align.CENTER);
+            text.setTextSize(fitText(title, board.width() * 0.8f, titleH * 0.62f));
+            outlined(c, title, board.centerX(), board.top + titleH * 0.6f + text.getTextSize() * 0.36f, BANANA);
+        }
+
         int cols = 2;
         int lines = (rows.size() + cols - 1) / cols;
         float cellW = board.width() / cols;
-        float cellH = board.height() / Math.max(lines, 1);
+        float rowsTop = board.top + titleH;
+        float cellH = (board.bottom - rowsTop) / Math.max(lines, 1);
         float badgeR = Math.min(cellH * 0.34f, cellW * 0.17f);
         for (int i = 0; i < rows.size(); i++) {
             Row r = rows.get(i);
-            float cx = board.left + (i % cols) * cellW, cy = board.top + (i / cols) * cellH + cellH / 2;
+            float cx = board.left + (i % cols) * cellW, cy = rowsTop + (i / cols) * cellH + cellH / 2;
             float bx = cx + cellW * 0.08f + badgeR;
             String value = r.total < 0 ? String.valueOf(r.have) : r.have + "/" + r.total;
             boolean complete = r.total > 0 && r.have >= r.total;
@@ -1572,6 +1585,18 @@ public final class BottomScreenView extends View {
                 c.restoreToCount(saved);
             } else {
                 badge(c, bx, cy, badgeR, r);
+            }
+        }
+    }
+
+    /** The item's icon on its own (no badge), fitted into a square of radius r. */
+    private void itemIcon(Canvas c, float x, float y, float r, Row row) {
+        if (!RomIcons.draw(c, row.icon, x, y, r)) {
+            switch (row.fallback) {
+                case 0: DkIcons.banana(c, x, y, r * 0.85f); break;
+                case 1: DkIcons.coin(c, x, y, r * 0.8f); break;
+                case 3: crystal(c, x, y, r * 0.85f); break;
+                default: DkIcons.star(c, x, y, r * 0.85f); break;
             }
         }
     }
