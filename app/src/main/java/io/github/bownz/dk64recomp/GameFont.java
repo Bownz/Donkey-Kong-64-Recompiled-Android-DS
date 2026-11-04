@@ -99,6 +99,14 @@ final class GameFont {
         }
         // Sheets are 1-based in the game (texture = first + sheet - 1); allow 0-based too.
         int offset = minSheet == 0 ? 0 : -1;
+        StringBuilder dump = new StringBuilder("Game font map:");
+        for (int i = 0; i < MAP_LENGTH && m[6 + i] != 0; i++) {
+            int g = base + i * 4;
+            dump.append(' ').append((char) (m[6 + i] & 0xFF)).append('=')
+                .append((short) (((m[g] & 0xFF) << 8) | (m[g + 1] & 0xFF))).append(',')
+                .append(m[g + 2] & 0xFF).append(',').append(m[g + 3] & 0xFF);
+        }
+        Log.i(TAG, dump.toString());
         Log.i(TAG, "Game font: style 1 first texture " + first + ", " + count + " sheets, " + mapped
             + " glyphs, sheet numbers " + minSheet + "-" + maxSheet + ", space " + spaceWidth + ", kerning " + kerning);
         if (mapped < 20 || count == 0 || count > 40 || maxSheet + offset >= count || first == 0) {

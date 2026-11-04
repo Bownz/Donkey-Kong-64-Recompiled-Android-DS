@@ -1165,9 +1165,13 @@ public final class BottomScreenView extends View {
         c.drawCircle(x - r * 0.25f, y - r * 0.25f, r * 0.45f, paint);
     }
 
+    // Off: the glyphs came out wrong on device. GameFont still loads and logs its metrics so
+    // the mapping can be worked out from a log.
+    private static final boolean USE_GAME_FONT = false;
+
     /** Chunky banana-yellow text with a dark outline, DKC style. */
     private void outlined(Canvas c, String s, float x, float y, int fill) {
-        if (GameFont.ready()) {
+        if (USE_GAME_FONT && GameFont.ready()) {
             // The game's own pause-screen lettering, decoded from the ROM (GameFont).
             GameFont.draw(c, s, x, y, text, fill, OUTLINE);
             return;
@@ -1786,7 +1790,7 @@ public final class BottomScreenView extends View {
     /** Largest text size up to {@code max} at which {@code s} fits in {@code width}. */
     /** Width of {@code s} at the current text size, in whichever font outlined() will use. */
     private float textWidth(String s) {
-        return GameFont.ready() ? GameFont.measure(s, text.getTextSize(), text) : text.measureText(s);
+        return USE_GAME_FONT && GameFont.ready() ? GameFont.measure(s, text.getTextSize(), text) : text.measureText(s);
     }
 
     private float fitText(String s, float width, float max) {
