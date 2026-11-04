@@ -81,6 +81,15 @@ final class RomIcons {
         new Spec(TEXTURES_UNCOMPRESSED, 0xDC, 48, 42, true),
         new Spec(TEXTURES_UNCOMPRESSED, 0x10C, 48, 42, true),
     };
+    // Blueprints are coloured per Kong: each Kong's 8-frame 48x42 sprite (DKBP 0x80720A34,
+    // DiddyBP 0x807209EC, LankyBP 0x807207E0, TinyBP 0x80720A58, ChunkyBP 0x80720A10), frame 4.
+    private static final Spec[] BLUEPRINT_BY_KONG = {
+        new Spec(TEXTURES_GEOMETRY, 0x15F8 + 4, 48, 42, true),
+        new Spec(TEXTURES_GEOMETRY, 0x15E8 + 4, 48, 42, true),
+        new Spec(TEXTURES_GEOMETRY, 0x158F + 4, 48, 42, true),
+        new Spec(TEXTURES_GEOMETRY, 0x1600 + 4, 48, 42, true),
+        new Spec(TEXTURES_GEOMETRY, 0x15F0 + 4, 48, 42, true),
+    };
     // Per Kong: DK, Diddy, Lanky, Tiny, Chunky.
     private static final Spec[] BANANA = {
         new Spec(TEXTURES_UNCOMPRESSED, 0xA8, 44, 44, true),
@@ -112,6 +121,7 @@ final class RomIcons {
     static volatile Bitmap melon, orange, film, goldenBanana;
     static volatile Bitmap medal, blueprint, crown, key, rainbowCoin, fairy, crosshair, crystal;
     static final Bitmap[] coin = new Bitmap[5];
+    static final Bitmap[] blueprintByKong = new Bitmap[5];
     // The game's medal is gold for everyone; this is it recoloured to each Kong's colour.
     static final Bitmap[] medalByKong = new Bitmap[5];
     private static final int[] KONG_HUES = { -1, 0xD9383A, 0x3C78D8, 0x9B59D0, 0x4CAF50 };
@@ -181,12 +191,14 @@ final class RomIcons {
                 }
                 for (int k = 0; k < 5; k++) {
                     banana[k] = load(f, BANANA[k]);
+                    blueprintByKong[k] = load(f, BLUEPRINT_BY_KONG[k]);
+                    found += count(blueprintByKong[k]);
                     weapon[k] = load(f, WEAPON[k]);
                     instrument[k] = load(f, INSTRUMENT[k]);
                     face[k] = loadFace(f, FACE_HALVES[k]);
                     found += count(banana[k], weapon[k], instrument[k], face[k]);
                 }
-                Log.i(TAG, "Bottom screen: " + found + " of 41 icons loaded from the ROM");
+                Log.i(TAG, "Bottom screen: " + found + " of 46 icons loaded from the ROM");
             } catch (IOException | RuntimeException e) {
                 Log.w(TAG, "Bottom screen: couldn't read icons from the ROM", e);
             }

@@ -813,6 +813,9 @@ public final class BottomScreenView extends View {
         drawContent(canvas);
         if (animating) {
             postInvalidateOnAnimation();
+        } else if (state.inGame() && !state.paused) {
+            // The item icons' gentle idle bob: a light 20 FPS redraw, not every display frame.
+            postInvalidateDelayed(IDLE_FRAME_MS);
         }
     }
 
@@ -1332,6 +1335,19 @@ public final class BottomScreenView extends View {
     // Event animations: played once when something changes, then still
     // ------------------------------------------------------------------------------
 
+    private static final long IDLE_FRAME_MS = 50, IDLE_PERIOD_MS = 3200;
+
+    /**
+     * Applies a slow, small bob and tilt to the canvas around (x, y) for an item icon, each
+     * icon out of step with the others (by {@code seed}) so they don't move in unison.
+     */
+    private void idleSway(Canvas c, float x, float y, float r, int seed) {
+        long now = android.os.SystemClock.uptimeMillis();
+        double t = 2 * Math.PI * ((now + (seed & 0x7FFF) * 37L) % IDLE_PERIOD_MS) / IDLE_PERIOD_MS;
+        c.translate(0, (float) Math.sin(t) * r * 0.06f);
+        c.rotate((float) Math.sin(t * 0.5 + 1.3) * 5f, x, y);
+    }
+
     private static final long SPIN_MS = 520, MELON_MS = 420, SQUASH_MS = 160, BUMP_MS = 300, HOP_MS = 360;
     private final java.util.HashMap<String, Long> animStart = new java.util.HashMap<>();
     private final java.util.HashMap<String, Integer> lastValue = new java.util.HashMap<>();
@@ -1511,7 +1527,7 @@ public final class BottomScreenView extends View {
         }
         rows.add(colored(new Row("Golden Bananas", RomIcons.goldenBanana, 0, golden, goldenTotal), Color.rgb(60, 150, 60)));
         rows.add(colored(new Row("Bananas", RomIcons.of(RomIcons.banana, tab), 0, coloured, colouredTotal), KONG_COLORS[tab]));
-        rows.add(colored(new Row("Blueprints", RomIcons.blueprint, 2, prints, printsTotal), Color.rgb(60, 120, 200)));
+        rows.add(colored(new Row("Blueprints", RomIcons.of(RomIcons.blueprintByKong, tab) != null ? RomIcons.of(RomIcons.blueprintByKong, tab) : RomIcons.blueprint, 2, prints, printsTotal), Color.rgb(60, 120, 200)));
         rows.add(colored(new Row("Banana Medals", RomIcons.of(RomIcons.medalByKong, tab), 2, medals, medalsTotal), darker(KONG_COLORS[tab])));
         rows.add(colored(new Row("Coins", RomIcons.of(RomIcons.coin, tab), 1, kong.coins, -1), darker(KONG_COLORS[tab])));
         return rows;
@@ -1591,6 +1607,13 @@ public final class BottomScreenView extends View {
 
     /** The item's icon on its own (no badge), fitted into a square of radius r. */
     private void itemIcon(Canvas c, float x, float y, float r, Row row) {
+        int swaySaved = c.save();
+        idleSway(c, x, y, r, row.label.hashCode());
+        drawItemIcon(c, x, y, r, row);
+        c.restoreToCount(swaySaved);
+    }
+
+    private void drawItemIcon(Canvas c, float x, float y, float r, Row row) {
         if (!RomIcons.draw(c, row.icon, x, y, r)) {
             switch (row.fallback) {
                 case 0: DkIcons.banana(c, x, y, r * 0.85f); break;
@@ -1615,6 +1638,8 @@ public final class BottomScreenView extends View {
         paint.setColor(Color.argb(70, 255, 255, 255));
         tmp2.set(x - r * 0.55f, y - r * 0.78f, x + r * 0.55f, y - r * 0.1f);
         c.drawOval(tmp2, paint);
+        int swaySaved = c.save();
+        idleSway(c, x, y, r, row.label.hashCode());
         if (!RomIcons.draw(c, row.icon, x, y, r * 0.62f)) {
             switch (row.fallback) {
                 case 0: DkIcons.banana(c, x, y, r * 0.55f); break;
@@ -1623,6 +1648,7 @@ public final class BottomScreenView extends View {
                 default: DkIcons.star(c, x, y, r * 0.55f); break;
             }
         }
+        c.restoreToCount(swaySaved);
     }
 
     /** A crystal coconut: a faceted pink gem. */
