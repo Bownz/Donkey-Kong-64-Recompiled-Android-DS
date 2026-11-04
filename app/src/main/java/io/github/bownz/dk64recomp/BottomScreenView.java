@@ -191,6 +191,7 @@ public final class BottomScreenView extends View {
         running = move;
         performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
         startAnim("squash" + move);
+        startAnim("wiggle" + move);
         invalidate();
 
         // The buttons press N64 Z and C directly (not through the controller mappings).
@@ -814,7 +815,7 @@ public final class BottomScreenView extends View {
         if (animating) {
             postInvalidateOnAnimation();
         } else if (state.inGame() && !state.paused) {
-            // The item icons' gentle idle bob: a light 20 FPS redraw, not every display frame.
+            // The health melons' gentle idle bob: a light 20 FPS redraw, not every display frame.
             postInvalidateDelayed(IDLE_FRAME_MS);
         }
     }
@@ -1298,6 +1299,7 @@ public final class BottomScreenView extends View {
         int remaining = state.health;
         for (int i = 0; i < state.melons; i++) {
             int saved = c.save();
+            idleSway(c, x, healthY, melonR, i * 211);   // a gentle bob, all the time
             if (hp >= 0 && i == healthMelon) {
                 if (healthHurt) {
                     c.translate((float) Math.sin(hp * Math.PI * 6) * melonR * 0.18f * (1 - hp), 0);
@@ -1335,7 +1337,7 @@ public final class BottomScreenView extends View {
     // Event animations: played once when something changes, then still
     // ------------------------------------------------------------------------------
 
-    private static final long IDLE_FRAME_MS = 50, IDLE_PERIOD_MS = 3200;
+    private static final long IDLE_FRAME_MS = 50, IDLE_PERIOD_MS = 3200, WIGGLE_MS = 900;
 
     /**
      * Applies a slow, small bob and tilt to the canvas around (x, y) for an item icon, each
@@ -1607,10 +1609,7 @@ public final class BottomScreenView extends View {
 
     /** The item's icon on its own (no badge), fitted into a square of radius r. */
     private void itemIcon(Canvas c, float x, float y, float r, Row row) {
-        int swaySaved = c.save();
-        idleSway(c, x, y, r, row.label.hashCode());
         drawItemIcon(c, x, y, r, row);
-        c.restoreToCount(swaySaved);
     }
 
     private void drawItemIcon(Canvas c, float x, float y, float r, Row row) {
@@ -1638,8 +1637,6 @@ public final class BottomScreenView extends View {
         paint.setColor(Color.argb(70, 255, 255, 255));
         tmp2.set(x - r * 0.55f, y - r * 0.78f, x + r * 0.55f, y - r * 0.1f);
         c.drawOval(tmp2, paint);
-        int swaySaved = c.save();
-        idleSway(c, x, y, r, row.label.hashCode());
         if (!RomIcons.draw(c, row.icon, x, y, r * 0.62f)) {
             switch (row.fallback) {
                 case 0: DkIcons.banana(c, x, y, r * 0.55f); break;
@@ -1648,7 +1645,6 @@ public final class BottomScreenView extends View {
                 default: DkIcons.star(c, x, y, r * 0.55f); break;
             }
         }
-        c.restoreToCount(swaySaved);
     }
 
     /** A crystal coconut: a faceted pink gem. */
@@ -1794,6 +1790,18 @@ public final class BottomScreenView extends View {
             float iconR = Math.min(r.height() * 0.36f, r.width() * (hasCount ? 0.22f : 0.3f));
             float iconX = hasCount ? r.left + r.width() * 0.1f + iconR : r.centerX();
             float iconY = r.centerY();
+            // The icon sways for a moment when it's used (pressed, or its count changes).
+            if (hasCount) {
+                watch("wigglecount" + move, parseCount(counts[i]), "wiggle" + move);
+            }
+            int iconSaved = c.save();
+            float wiggle = animProgress("wiggle" + move, WIGGLE_MS);
+            if (wiggle >= 0) {
+                float fade = 1f - wiggle;
+                double t = 2 * Math.PI * wiggle * 2.5;
+                c.translate(0, -(float) Math.abs(Math.sin(t)) * iconR * 0.12f * fade);
+                c.rotate((float) Math.sin(t) * 10f * fade, iconX, iconY);
+            }
             switch (move) {
                 case WEAPON:
                     if (!RomIcons.draw(c, RomIcons.of(RomIcons.weapon, kong), iconX, iconY, iconR)) {
@@ -1816,6 +1824,7 @@ public final class BottomScreenView extends View {
                     }
                     break;
             }
+            c.restoreToCount(iconSaved);
             if (hasCount) {
                 float countLeft = iconX + iconR * 1.2f;
                 float countRight = r.right - r.width() * 0.1f;
