@@ -1,0 +1,39 @@
+diff --git a/ultramodern/src/threads.cpp b/ultramodern/src/threads.cpp
+index 6e3ed18..6eed542 100644
+--- a/ultramodern/src/threads.cpp
++++ b/ultramodern/src/threads.cpp
+@@ -110,6 +110,26 @@ void ultramodern::set_native_thread_name(const std::string& name) {
+     prctl(PR_SET_NAME, name.c_str());
+ }
+ 
++#if defined(__ANDROID__)
++#include <sys/resource.h>
++#include <unistd.h>
++
++// Android: per-thread "nice" values (apps may raise their own threads' priority this way).
++// The VI thread paces the whole game and the game threads build each frame, so they run
++// ahead of background work such as RT64's shader compilation.
++void ultramodern::set_native_thread_priority(ThreadPriority pri) {
++    int nice = 0;
++    switch (pri) {
++        case ThreadPriority::Low: nice = 5; break;
++        case ThreadPriority::Normal: nice = 0; break;
++        case ThreadPriority::High: nice = -4; break;
++        case ThreadPriority::VeryHigh: nice = -8; break;
++        case ThreadPriority::Critical: nice = -10; break;
++        default: break;
++    }
++    setpriority(PRIO_PROCESS, gettid(), nice);
++}
++#else
+ void ultramodern::set_native_thread_priority(ThreadPriority pri) {
+     // TODO linux thread priority
+     // printf("set_native_thread_priority unimplemented\n");
+@@ -137,6 +157,7 @@ void ultramodern::set_native_thread_priority(ThreadPriority pri) {
+     //         break;
+     // }
+ }
++#endif
+ #elif defined(__APPLE__)
+ void ultramodern::set_native_thread_name(const std::string& name) {
+     if (name.length() > 15) {

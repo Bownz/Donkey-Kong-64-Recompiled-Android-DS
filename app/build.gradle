@@ -117,6 +117,7 @@ def ensurePatches = {
         ['lib/rt64', 'android/patches/rt64-android.patch'],
         ['lib/rt64/src/contrib/plume', 'android/patches/plume-android.patch'],
         ['lib/RecompFrontend', 'android/patches/recompfrontend-android.patch'],
+        ['lib/N64ModernRuntime', 'android/patches/n64modernruntime-android.patch'],
     ].each { submodule, patch ->
         def dir = new File(repoRoot, submodule)
         def patchFile = new File(repoRoot, patch).absolutePath

@@ -51,6 +51,7 @@
 #if defined(__ANDROID__)
 extern "C" void dk64_android_start_device_motion();
 extern "C" void dk64_android_watch_quit();
+extern "C" void dk64_android_start_perf_monitor();
 #endif
 #include "librecomp/helpers.hpp"
 
@@ -159,6 +160,8 @@ ultramodern::gfx_callbacks_t::gfx_data_t create_gfx() {
     dk64_android_start_device_motion();
     // A crash while the game closes shouldn't be offered as a crash report (gpu_driver.cpp).
     dk64_android_watch_quit();
+    // Where frame time goes, every 5 seconds in the log (android/jni/perf_monitor.cpp).
+    dk64_android_start_perf_monitor();
 #endif
 
     return {};

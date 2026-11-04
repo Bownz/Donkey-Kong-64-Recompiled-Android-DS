@@ -24,7 +24,7 @@ namespace {
     constexpr const char* log_tag = "DK64Recomp";
     constexpr SDL_JoystickID device_motion_id = -1000;
     constexpr int looper_id = 0x6D6F; // "mo"
-    constexpr int sample_period_us = 1000000 / 200;
+    constexpr int sample_period_us = 1000000 / 100; // 100 Hz: plenty for aiming, half the wake-ups
 
     std::atomic<bool> started{false};
 

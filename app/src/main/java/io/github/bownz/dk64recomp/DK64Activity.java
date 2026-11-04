@@ -233,11 +233,12 @@ public class DK64Activity extends SDLActivity
         attributes.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
         window.setAttributes(attributes);
 
-        // Steadier clocks over a long session instead of bursts followed by throttling.
+        // Sustained performance mode is left off: where it's supported it holds the CPU and GPU
+        // to clocks the device can keep up indefinitely without a fan, well below what a
+        // cooled handheld like the Thor can run, and busy scenes then miss 30 FPS.
         PowerManager power = (PowerManager) getSystemService(Context.POWER_SERVICE);
-        if (power != null && power.isSustainedPerformanceModeSupported()) {
-            window.setSustainedPerformanceMode(true);
-        }
+        android.util.Log.i("DK64Recomp", "Sustained performance mode supported: "
+            + (power != null && power.isSustainedPerformanceModeSupported()) + " (not used)");
     }
 
     @SuppressWarnings("deprecation")
