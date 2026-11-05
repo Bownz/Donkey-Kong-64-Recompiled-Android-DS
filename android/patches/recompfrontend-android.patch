@@ -267,15 +267,16 @@ index 277a421..b33343d 100644
  
 diff --git a/recompui/src/composites/ui_menu_bar.cpp b/recompui/src/composites/ui_menu_bar.cpp
 new file mode 100644
-index 0000000..4a91bb5
+index 0000000..29a4523
 --- /dev/null
 +++ b/recompui/src/composites/ui_menu_bar.cpp
-@@ -0,0 +1,163 @@
+@@ -0,0 +1,233 @@
 +// Android: the in-game menu bar. The menu button opens a slim bar across the top of the
 +// screen (in the bottom screen's DK style) instead of the full settings window; the bar opens
 +// Settings, Controls or Mods in the settings window, or quits. Like the Dusklight port's.
 +#ifdef __ANDROID__
 +
++#include <chrono>
 +#include "recompui.h"
 +#include "recompui/config.h"
 +#include "elements/ui_element.h"
@@ -350,25 +351,87 @@ index 0000000..4a91bb5
 +        }
 +    };
 +
-+    // The bar's root: closes on Back / the menu button.
++    // The bar's root: closes on Back / the menu button. The bar slides down from the top of
++    // the screen when it opens and back up when it closes.
++    constexpr float slide_ms = 180.0f;
++
 +    class MenuBarRoot : public Element {
++    private:
++        enum class Anim { None, Opening, Closing };
++        Anim anim = Anim::None;
++        std::chrono::steady_clock::time_point anim_start;
++
++        // f: 0 = hidden above the screen, 1 = fully down.
++        void apply(float f) {
++            if (bar != nullptr) {
++                bar->set_translate_2D(0.0f, -100.0f * (1.0f - f), Unit::Percent);
++            }
++            set_background_color(Color{0, 0, 0, static_cast<uint8_t>(90.0f * f)});
++        }
 +    protected:
 +        void process_event(const Event &e) override {
 +            if (e.type == EventType::MenuAction) {
 +                MenuAction action = std::get<EventMenuAction>(e.variant).action;
 +                if (action == MenuAction::Back || action == MenuAction::Toggle) {
-+                    recompui::hide_context(menu_bar_context);
++                    slide_up();
++                }
++            } else if (e.type == EventType::Update && anim != Anim::None) {
++                float t = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - anim_start).count() / slide_ms;
++                if (t > 1.0f) {
++                    t = 1.0f;
++                }
++                if (anim == Anim::Opening) {
++                    apply(1.0f - (1.0f - t) * (1.0f - t) * (1.0f - t));   // ease out
++                } else {
++                    apply(1.0f - t * t);                                   // ease in
++                }
++                if (t >= 1.0f) {
++                    const bool closing = anim == Anim::Closing;
++                    anim = Anim::None;
++                    if (closing) {
++                        recompui::hide_context(menu_bar_context);
++                    }
++                } else {
++                    queue_update();
 +                }
 +            }
 +        }
 +        std::string_view get_type_name() override { return "MenuBarRoot"; }
 +    public:
++        Element *bar = nullptr;
++
 +        MenuBarRoot(ResourceId rid, Element *parent) :
-+            Element(rid, parent, Events(EventType::MenuAction), "div", false) {}
++            Element(rid, parent, Events(EventType::MenuAction, EventType::Update), "div", false) {}
++
++        // Called with the menu bar's context open.
++        void slide_down() {
++            anim = Anim::Opening;
++            anim_start = std::chrono::steady_clock::now();
++            apply(0.0f);
++            queue_update();
++        }
++
++        void slide_up() {
++            if (anim == Anim::Closing) {
++                return;
++            }
++            anim = Anim::Closing;
++            anim_start = std::chrono::steady_clock::now();
++            queue_update();
++        }
++
++        // Straight away, e.g. when the settings window opens over it.
++        void hide_now() {
++            anim = Anim::None;
++            apply(1.0f);
++            recompui::hide_context(menu_bar_context);
++        }
 +    };
 +
++    MenuBarRoot *menu_bar_root = nullptr;
++
 +    void open_settings_tab(const std::string &tab) {
-+        recompui::hide_context(menu_bar_context);
++        menu_bar_root->hide_now();
 +        recompui::config::set_tab(tab);
 +        recompui::config::open();
 +    }
@@ -404,17 +467,19 @@ index 0000000..4a91bb5
 +    bar->set_border_bottom_width(4.0f);
 +    bar->set_border_bottom_color(wood_edge);
 +    bar->set_as_navigation_container(NavigationType::Horizontal);
++    root->bar = bar;
++    menu_bar_root = root;
 +
 +    MenuBarItem *settings = context.create_element<MenuBarItem>(bar, "SETTINGS", []() { open_settings_tab(config::general::id); });
 +    context.create_element<MenuBarItem>(bar, "CONTROLS", []() { open_settings_tab(config::controls::id); });
 +    context.create_element<MenuBarItem>(bar, "MODS", []() { open_settings_tab(config::mods::id); });
 +    context.create_element<MenuBarItem>(bar, "QUIT", []() {
-+        recompui::hide_context(menu_bar_context);
++        menu_bar_root->hide_now();
 +        recompui::open_quit_game_prompt();
 +    });
 +    Element *spacer = context.create_element<Element>(bar);
 +    spacer->set_flex_grow(1.0f);
-+    context.create_element<MenuBarItem>(bar, "X", []() { recompui::hide_context(menu_bar_context); });
++    context.create_element<MenuBarItem>(bar, "X", []() { menu_bar_root->slide_up(); });
 +
 +    context.set_autofocus_element(settings);
 +    context.close();
@@ -427,6 +492,11 @@ index 0000000..4a91bb5
 +    }
 +    if (!recompui::is_context_shown(menu_bar_context)) {
 +        recompui::show_context(menu_bar_context, "");
++        bool opened = menu_bar_context.open_if_not_already();
++        menu_bar_root->slide_down();
++        if (opened) {
++            menu_bar_context.close();
++        }
 +    }
 +    return true;
 +}
@@ -1098,7 +1168,7 @@ index 4fdf81f..4834249 100644
  
              config.add_enum_option(
 diff --git a/recompui/src/elements/ui_modal.cpp b/recompui/src/elements/ui_modal.cpp
-index b057f46..e7552a7 100644
+index b057f46..2214007 100644
 --- a/recompui/src/elements/ui_modal.cpp
 +++ b/recompui/src/elements/ui_modal.cpp
 @@ -35,7 +35,11 @@ public:
@@ -1143,7 +1213,55 @@ index b057f46..e7552a7 100644
  
      body = context.create_element<Element>(modal_element);
      body->set_display(Display::Flex);
-@@ -223,6 +243,9 @@ void Modal::render_menu_actions() {
+@@ -120,7 +140,29 @@ void Modal::open() {
+ 
+     is_open = true;
+     set_display(Display::Block);
++#ifdef __ANDROID__
++    grow_anim = true;
++    grow_start = std::chrono::steady_clock::now();
++    apply_grow(0.0f);
++    bool opened = modal_root_context.open_if_not_already();
++    queue_update();
++    if (opened) {
++        modal_root_context.close();
++    }
++#endif
++}
++
++#ifdef __ANDROID__
++constexpr float grow_ms = 200.0f;
++
++// t: 0 (just opened) to 1 (full size). Eased out, from 60% size and see-through.
++void Modal::apply_grow(float t) {
++    const float e = 1.0f - (1.0f - t) * (1.0f - t) * (1.0f - t);
++    const float scale = 0.6f + 0.4f * e;
++    modal_element->set_scale_2D(scale, scale);
++    modal_element->set_opacity(e);
+ }
++#endif
+ 
+ void TabbedModal::open() {
+     Modal::open();
+@@ -178,6 +220,17 @@ static std::pair<recompinput::InputDevice, int> get_last_input_info() {
+ void Modal::process_event(const Event &e) {
+     switch (e.type) {
+         case EventType::Update: {
++#ifdef __ANDROID__
++            if (grow_anim) {
++                float ms = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - grow_start).count();
++                if (ms >= grow_ms) {
++                    grow_anim = false;
++                    apply_grow(1.0f);
++                } else {
++                    apply_grow(ms / grow_ms);
++                }
++            }
++#endif
+             if (is_open) {
+                 bool update_action_labels = false;
+                 auto [current_device, current_profile] = get_last_input_info();
+@@ -223,6 +276,9 @@ void Modal::render_menu_actions() {
      ContextId context = get_current_context();
      if (menu_actions_wrapper == nullptr) {
          menu_actions_wrapper = context.create_element<Element>(modal_overlay);
@@ -1153,6 +1271,30 @@ index b057f46..e7552a7 100644
          menu_actions_wrapper->set_position(Position::Absolute);
          menu_actions_wrapper->set_bottom(0);
          menu_actions_wrapper->set_margin_left_auto();
+diff --git a/recompui/src/elements/ui_modal.h b/recompui/src/elements/ui_modal.h
+index d065a14..f713162 100644
+--- a/recompui/src/elements/ui_modal.h
++++ b/recompui/src/elements/ui_modal.h
+@@ -1,5 +1,6 @@
+ #pragma once
+ 
++#include <chrono>
+ #include "recompui/recompui.h"
+ #include "elements/ui_element.h"
+ #include "elements/ui_document.h"
+@@ -71,6 +72,12 @@ namespace recompui {
+         std::function<void()> on_close_callback;
+         std::unordered_map<MenuAction, MenuActionCallback> menu_action_callbacks;
+ 
++#ifdef __ANDROID__
++        // Android: the window grows out from the middle of the screen when it opens.
++        bool grow_anim = false;
++        std::chrono::steady_clock::time_point grow_start;
++        void apply_grow(float t);
++#endif
+         recompinput::InputDevice last_input_device = recompinput::InputDevice::COUNT;
+         int last_input_profile = -1;
+ 
 diff --git a/recompui/src/elements/ui_tab_set.cpp b/recompui/src/elements/ui_tab_set.cpp
 index 2c5dc52..3d04f98 100644
 --- a/recompui/src/elements/ui_tab_set.cpp
