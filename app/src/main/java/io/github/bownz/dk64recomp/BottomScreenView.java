@@ -395,8 +395,9 @@ public final class BottomScreenView extends View {
     // ------------------------------------------------------------------------------
     //
     // A toggle: Z then B (as on a controller) puts Lanky on his hands, and Z stays held to
-    // keep him there, as the game needs. Tapping again lets go of Z. It also lets go when he
-    // ends up back on his feet or in water (Z stays held through the pause menu).
+    // keep him there, as the game needs. Tapping again lets go of Z. Pressing Z on the
+    // controller takes over (he stays up while it's held). It also lets go when he ends up
+    // back on his feet or in water (Z stays held through the pause menu).
 
     private boolean orangstand;      // Lanky is on his hands (entered with this button)
     private boolean orangstandBusy;
@@ -412,6 +413,13 @@ public final class BottomScreenView extends View {
 
     /** Called on each poll: notice when Lanky is back on his feet (or isn't Lanky). */
     private void updateOrangstand() {
+        int physicalZ = TouchInput.takePhysicalZ();
+        if (orangstand && !orangstandBusy && (physicalZ & 2) != 0) {
+            // The player pressed Z on the controller: hand over to it. While they hold Z,
+            // Lanky stays on his hands; letting go puts him back on his feet.
+            stopOrangstand();
+            return;
+        }
         if (orangstand && !orangstandBusy && (!showOrangstand() || (!state.paused && (onFeet() || state.swimming)))) {
             stopOrangstand();
         }
@@ -439,6 +447,7 @@ public final class BottomScreenView extends View {
         handler.postDelayed(() -> TouchInput.setN64Buttons(0), Z_LEAD_MS + C_HOLD_MS);
         handler.postDelayed(() -> {
             state.refresh();
+            TouchInput.takePhysicalZ();   // forget Z presses from before he got on his hands
             orangstandBusy = false;
             orangstand = !onFeet() && !state.swimming;
             if (!orangstand) {

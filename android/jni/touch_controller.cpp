@@ -143,4 +143,29 @@ Java_io_github_bownz_dk64recomp_TouchInput_nativeSetN64Buttons(JNIEnv*, jclass, 
     direct_n64_buttons.store(static_cast<uint16_t>(buttons), std::memory_order_relaxed);
 }
 
+// Player 1's own N64 Z (controller/keyboard, without the on-screen buttons), reported by
+// recompinput's get_n64_input each time the game reads input. A press is latched so a short
+// tap between two of the bottom screen's polls isn't missed.
+static std::atomic<bool> physical_z_down{false};
+static std::atomic<bool> physical_z_pressed{false};
+
+void dk64_android_report_physical_n64_buttons(uint16_t buttons) {
+    constexpr uint16_t kZ = 0x2000;
+    const bool down = (buttons & kZ) != 0;
+    if (down && !physical_z_down.load(std::memory_order_relaxed)) {
+        physical_z_pressed.store(true, std::memory_order_relaxed);
+    }
+    physical_z_down.store(down, std::memory_order_relaxed);
+}
+
+// Bits: 1 = Z is held now, 2 = Z was pressed since the last call (then cleared).
+JNIEXPORT jint JNICALL
+Java_io_github_bownz_dk64recomp_TouchInput_nativeTakePhysicalZ(JNIEnv*, jclass) {
+    jint bits = physical_z_down.load(std::memory_order_relaxed) ? 1 : 0;
+    if (physical_z_pressed.exchange(false, std::memory_order_relaxed)) {
+        bits |= 2;
+    }
+    return bits;
+}
+
 } // extern "C"

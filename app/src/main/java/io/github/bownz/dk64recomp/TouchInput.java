@@ -54,6 +54,20 @@ final class TouchInput {
 
     private static int pressedN64, heldN64;
 
+    private static native int nativeTakePhysicalZ();
+
+    /**
+     * The player's own Z (controller or keyboard, not the on-screen buttons): bit 1 if it's
+     * held now, bit 2 if it was pressed since the last call.
+     */
+    static int takePhysicalZ() {
+        try {
+            return nativeTakePhysicalZ();
+        } catch (UnsatisfiedLinkError e) {
+            return 0;
+        }
+    }
+
     /** Buttons pressed for a moment by an on-screen button (replaces the previous ones). */
     static synchronized void setN64Buttons(int buttons) {
         pressedN64 = buttons;
