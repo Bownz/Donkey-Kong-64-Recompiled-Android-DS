@@ -343,7 +343,7 @@ index 30c463b..4cbcf09 100644
          const std::string& header_text,
          const std::string& content_text,
 diff --git a/recompui/src/base/ui_launcher.cpp b/recompui/src/base/ui_launcher.cpp
-index 6de7a94..15301ba 100644
+index 6de7a94..7e5c496 100644
 --- a/recompui/src/base/ui_launcher.cpp
 +++ b/recompui/src/base/ui_launcher.cpp
 @@ -407,12 +407,25 @@ namespace recompui {
@@ -372,8 +372,33 @@ index 6de7a94..15301ba 100644
                          callback(true);
                          return;
                      case recomp::RomValidationError::FailedToOpen:
+@@ -447,6 +460,10 @@ namespace recompui {
+         return option;
+     }
+ 
++#ifdef __ANDROID__
++    extern "C" bool dk64_android_begin_launch() __attribute__((weak));
++#endif
++
+     GameOption *GameOptionsMenu::add_start_game_or_load_rom_option(const std::string& load_rom_title, const std::string& start_game_title) {
+         GameOption *option = add_option(rom_valid ? start_game_title : load_rom_title, nullptr);
+         option->set_as_primary_focus(true);
+@@ -460,6 +477,13 @@ namespace recompui {
+                 if (recomp::mods::game_mode_count(this->mod_game_id, false) > 0) {
+                     get_launcher_menu()->show_game_mode_menu(this->game_id, this->game_display_name, this->game_thumbnail);
+                 } else {
++#ifdef __ANDROID__
++                    // Android: the logo plays its leaving animation first, then the game starts
++                    // (main.cpp's launcher update).
++                    if (dk64_android_begin_launch != nullptr && dk64_android_begin_launch()) {
++                        return;
++                    }
++#endif
+                     recomp::start_game(this->game_id, {});
+                     recompui::hide_all_contexts();
+                 }
 diff --git a/recompui/src/base/ui_state.cpp b/recompui/src/base/ui_state.cpp
-index 277a421..25a9a74 100644
+index 277a421..852be74 100644
 --- a/recompui/src/base/ui_state.cpp
 +++ b/recompui/src/base/ui_state.cpp
 @@ -278,6 +278,9 @@ public:
@@ -386,7 +411,39 @@ index 277a421..25a9a74 100644
          recompui::AssignPlayersModal::init();
          recompui::config::init_modal();
      }
-@@ -694,6 +697,52 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
+@@ -580,6 +583,31 @@ bool check_menu_button_pressed(int profile_index, recompinput::GameInput input,
+     return false;
+ }
+ 
++#ifdef __ANDROID__
++// Android: menu sounds (bongo taps) for controller navigation - implemented in the app.
++extern "C" void dk64_android_ui_sound(int kind) __attribute__((weak));
++static void menu_sound_for_key(int sdl_key) {
++    if (dk64_android_ui_sound == nullptr) {
++        return;
++    }
++    switch (sdl_key) {
++        case SDLK_UP: case SDLK_DOWN: case SDLK_LEFT: case SDLK_RIGHT: case SDLK_F16: case SDLK_F17:
++            dk64_android_ui_sound(0);
++            break;
++        case SDLK_RETURN: case SDLK_f:
++            dk64_android_ui_sound(1);
++            break;
++        case SDLK_F15:
++            dk64_android_ui_sound(2);
++            break;
++        default:
++            break;
++    }
++}
++#else
++static void menu_sound_for_key(int) {}
++#endif
++
+ int cont_button_to_key(SDL_ControllerButtonEvent& button) {
+     int player1_profile = recompinput::profiles::get_input_profile_for_player(0, recompinput::InputDevice::Controller);
+ 
+@@ -694,6 +722,52 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
              }
          }
  
@@ -439,7 +496,25 @@ index 277a421..25a9a74 100644
          if (!all_input_is_disabled) {
              bool is_mouse_input = false;
              // Implement some additional behavior for specific events on top of what RmlUi normally does with them.
-@@ -787,8 +836,11 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
+@@ -731,6 +805,7 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
+             case SDL_EventType::SDL_CONTROLLERBUTTONDOWN: {
+                 int sdl_key = cont_button_to_key(cur_event.cbutton);
+                 if (context_capturing_input && sdl_key) {
++                    menu_sound_for_key(sdl_key);
+                     ui_state->context->ProcessKeyDown(convert_sdl_to_rml(sdl_key), 0);
+                     latest_controller_key_pressed = sdl_key;
+                     next_repeat_time = clock::now() + start_repeat_delay;
+@@ -776,7 +851,8 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
+                         non_mouse_interacted = true;
+                         int sdl_key = cont_axis_to_key(cur_event.caxis, axis_value);
+                         if (context_capturing_input && sdl_key) {
+-                            ui_state->context->ProcessKeyDown(convert_sdl_to_rml(sdl_key), 0);
++                            menu_sound_for_key(sdl_key);
++                    ui_state->context->ProcessKeyDown(convert_sdl_to_rml(sdl_key), 0);
+                             latest_controller_key_pressed = sdl_key;
+                             next_repeat_time = clock::now() + start_repeat_delay;
+                         }
+@@ -787,8 +863,11 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
                  else if (*await_stick_return && fabsf(axis_value) < 0.15f) {
                      *await_stick_return = false;
                      // Stop pressing the current key if the axis that was released was the one triggering key presses.
@@ -453,7 +528,7 @@ index 277a421..25a9a74 100644
                          latest_controller_key_pressed = SDLK_UNKNOWN;
                      }
                  }
-@@ -838,7 +890,14 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
+@@ -838,7 +917,14 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
              }
  
              if (open_config) {
@@ -468,7 +543,15 @@ index 277a421..25a9a74 100644
              }
          }
      } // end dequeue event loop
-@@ -870,7 +929,12 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
+@@ -847,6 +933,7 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
+     if (latest_controller_key_pressed != SDLK_UNKNOWN) {
+         clock::time_point now = clock::now();
+         if (now >= next_repeat_time) {
++            menu_sound_for_key(latest_controller_key_pressed);
+             ui_state->context->ProcessKeyDown(convert_sdl_to_rml(latest_controller_key_pressed), 0);
+             next_repeat_time += repeat_rate;
+         }
+@@ -870,7 +957,12 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
          int height = swap_chain_framebuffer->getHeight();
  
          // Scale the UI based on the window size with 1080 vertical resolution as the reference point.

@@ -422,6 +422,12 @@ void dk64::launcher_animation_setup(recompui::LauncherMenu *menu) {
     SDL_AddEventWatch(&launcher_event_watch, nullptr);
 }
 
+static float launcher_leave = 0.0f;
+
+void dk64::set_launcher_leave(float progress) {
+    launcher_leave = std::clamp(progress, 0.0f, 1.0f);
+}
+
 void dk64::launcher_animation_update(recompui::LauncherMenu *menu) {
     std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
     float delta_time = launcher_context.started ? std::chrono::duration_cast<std::chrono::milliseconds>(now - launcher_context.last_update_time).count() / 1000.0f : 0.0f;
@@ -444,9 +450,16 @@ void dk64::launcher_animation_update(recompui::LauncherMenu *menu) {
 #ifdef __ANDROID__
     {
         const float logo_drop = std::max(0.0f, 510.0f - bg_height / 2.0f);
+        // Start Game: the logo shrinks away (ease in) before the game starts.
+        const float leave_scale = 1.0f - launcher_leave * launcher_leave;
         for (AnimatedSvg *logo : { &launcher_context.logo_d_svg, &launcher_context.logo_k_svg, &launcher_context.logo_64_svg, &launcher_context.logo_recomp_svg }) {
             logo->extra_y = logo_drop;
-            logo->scale_mult = 0.8f;
+            logo->scale_mult = 0.8f * std::max(0.001f, leave_scale);
+        }
+        if (launcher_leave > 0.0f) {
+            for (auto option : menu->get_game_options_menu()->get_options()) {
+                option->set_opacity(1.0f - launcher_leave);
+            }
         }
     }
 #endif

@@ -440,6 +440,15 @@ public class DK64Activity extends SDLActivity
 
     /** Called from the game's Controls page (any thread): "" reads the mode, "0"-"2" sets it. */
     @SuppressWarnings("unused")
+    /** From native code: a menu sound ("0" move, "1" select, "2" back). */
+    public String playUiSound(String kind) {
+        UiSounds.init(getApplicationContext());
+        if (kind != null && !kind.isEmpty()) {
+            UiSounds.play(kind.charAt(0) - '0');
+        }
+        return null;
+    }
+
     public String touchControlsMode(String mode) {
         if (mode != null && !mode.isEmpty()) {
             int value = Math.max(0, Math.min(2, mode.charAt(0) - '0'));

@@ -237,6 +237,10 @@ T get_technical_config_enum_value(const std::string& option_id) {
     return static_cast<T>(std::get<uint32_t>(recompui::config::get_config("technical").get_option_value(option_id)));
 }
 
+#if defined(__ANDROID__)
+extern "C" void dk64_android_set_ui_sounds(int enabled);
+#endif
+
 static void add_sound_options(recomp::config::Config &config) {
     config.add_percent_number_option(
         dk64::configkeys::sound::bgm_volume,
@@ -250,6 +254,27 @@ static void add_sound_options(recomp::config::Config &config) {
         "Controls the overall volume of sound effects.",
         100.0f
     );
+#if defined(__ANDROID__)
+    // Little bongo taps when moving through the menus with a controller.
+    static const std::string menu_sounds_option = "android_menu_sounds";
+    static const std::vector<recomp::config::ConfigOptionEnumOption> menu_sounds_options = {
+        {0u, "Off", "Off"},
+        {1u, "On", "On"},
+    };
+    config.add_enum_option(
+        menu_sounds_option,
+        "Menu Sounds",
+        "Small bongo taps when you move through, select or back out of the menus with a controller.",
+        menu_sounds_options,
+        1u
+    );
+    config.add_option_change_callback(menu_sounds_option,
+        [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
+            if (context != recomp::config::OptionChangeContext::Temporary) {
+                dk64_android_set_ui_sounds(static_cast<int>(std::get<uint32_t>(cur)));
+            }
+        });
+#endif
 }
 template <typename T = uint32_t>
 T get_sound_config_number_value(const std::string& option_id) {

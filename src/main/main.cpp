@@ -781,6 +781,21 @@ static bool ask_for_experience() {
 }
 #endif
 
+#ifdef __ANDROID__
+// Start Game on Android: the launcher's logo shrinks away first (launcher_animation.cpp), then
+// the game starts (on_launcher_update).
+static bool launch_pending = false;
+static std::chrono::steady_clock::time_point launch_started;
+static constexpr float launch_leave_ms = 450.0f;
+extern "C" bool dk64_android_begin_launch() {
+    if (!launch_pending) {
+        launch_pending = true;
+        launch_started = std::chrono::steady_clock::now();
+    }
+    return true;
+}
+#endif
+
 static void on_launcher_update(recompui::LauncherMenu *menu) {
     static bool skip_checked = false;
     static bool skip_pending = false;
@@ -803,6 +818,21 @@ static void on_launcher_update(recompui::LauncherMenu *menu) {
         skip_pending = dk64::get_skip_launcher() && !crashed_last_run && recomp::is_rom_valid(game.game_id)
             && recomp::mods::game_mode_count(game.mod_game_id, false) == 0;
     }
+#ifdef __ANDROID__
+    if (launch_pending) {
+        const float ms = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - launch_started).count();
+        dk64::set_launcher_leave(ms / launch_leave_ms);
+        if (ms >= launch_leave_ms) {
+            launch_pending = false;
+            recomp::start_game(game.game_id, {});
+            recompui::hide_all_contexts();
+            dk64::set_launcher_leave(0.0f);
+            return;
+        }
+        dk64::launcher_animation_update(menu);
+        return;
+    }
+#endif
     // Starting the game on the launcher's very first frame crashed it on Android, so the skip
     // waits until the launcher has been up for a moment (as if Start Game was pressed).
     if (skip_pending && std::chrono::steady_clock::now() - first_update >= std::chrono::milliseconds(1500)) {

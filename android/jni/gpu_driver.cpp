@@ -250,6 +250,19 @@ extern "C" int dk64_android_last_run_crashed() {
     return call_activity("lastRunCrashed", "()Ljava/lang/String;", nullptr) == "1" ? 1 : 0;
 }
 
+// Menu sounds (RecompFrontend ui_state.cpp; the Audio tab's Menu Sounds option).
+static std::atomic<bool> ui_sounds_enabled{ true };
+extern "C" void dk64_android_set_ui_sounds(int enabled) {
+    ui_sounds_enabled = enabled != 0;
+}
+extern "C" void dk64_android_ui_sound(int kind) {
+    if (!ui_sounds_enabled) {
+        return;
+    }
+    const std::string arg = std::to_string(kind);
+    call_activity("playUiSound", "(Ljava/lang/String;)Ljava/lang/String;", &arg);
+}
+
 extern "C" int dk64_android_touch_controls_mode() {
     const std::string query;   // empty: just read the mode
     const std::string value = call_activity("touchControlsMode", "(Ljava/lang/String;)Ljava/lang/String;", &query);
