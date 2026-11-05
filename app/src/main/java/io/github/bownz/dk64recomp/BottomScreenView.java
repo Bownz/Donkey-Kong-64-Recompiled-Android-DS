@@ -1253,6 +1253,27 @@ public final class BottomScreenView extends View {
             c.drawRoundRect(tmp2, s * 0.1f, s * 0.1f, paint);
             c.restoreToCount(armSaved);
         }
+        // A red tie (knot, then the blade), with a dark outline.
+        for (int pass = 0; pass < 2; pass++) {
+            float o = pass == 0 ? s * 0.035f : 0f;
+            paint.setColor(pass == 0 ? OUTLINE : Color.rgb(214, 40, 40));
+            paint.setAlpha(alpha);
+            path.reset();
+            path.moveTo(cx - s * 0.09f - o, cy + s * 0.06f - o);
+            path.lineTo(cx + s * 0.09f + o, cy + s * 0.06f - o);
+            path.lineTo(cx + s * 0.06f + o, cy + s * 0.17f + o);
+            path.lineTo(cx - s * 0.06f - o, cy + s * 0.17f + o);
+            path.close();
+            c.drawPath(path, paint);
+            path.reset();
+            path.moveTo(cx - s * 0.05f - o, cy + s * 0.17f);
+            path.lineTo(cx + s * 0.05f + o, cy + s * 0.17f);
+            path.lineTo(cx + s * 0.11f + o, cy + s * 0.58f);
+            path.lineTo(cx, cy + s * 0.7f + o);
+            path.lineTo(cx - s * 0.11f - o, cy + s * 0.58f);
+            path.close();
+            c.drawPath(path, paint);
+        }
         // Eyes.
         paint.setColor(Color.WHITE);
         paint.setAlpha(alpha);
