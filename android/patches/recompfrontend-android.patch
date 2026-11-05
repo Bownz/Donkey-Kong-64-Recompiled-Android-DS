@@ -306,10 +306,10 @@ index 277a421..b33343d 100644
  
 diff --git a/recompui/src/composites/ui_menu_bar.cpp b/recompui/src/composites/ui_menu_bar.cpp
 new file mode 100644
-index 0000000..937133d
+index 0000000..7957c97
 --- /dev/null
 +++ b/recompui/src/composites/ui_menu_bar.cpp
-@@ -0,0 +1,232 @@
+@@ -0,0 +1,236 @@
 +// Android: the in-game menu bar. The menu button opens a slim bar across the top of the
 +// screen (in the bottom screen's DK style) instead of the full settings window; the bar opens
 +// Settings or Mods in the settings window, or quits. Like the Dusklight port's.
@@ -530,10 +530,14 @@ index 0000000..937133d
 +    }
 +    if (!recompui::is_context_shown(menu_bar_context)) {
 +        recompui::show_context(menu_bar_context, "");
-+        bool opened = menu_bar_context.open_if_not_already();
-+        menu_bar_root->slide_down();
-+        if (opened) {
-+            menu_bar_context.close();
++        // Only one UI context can be open at a time: slide in only if ours can be opened.
++        ContextId current = get_current_context();
++        if (current == ContextId::null() || current == menu_bar_context) {
++            bool opened = menu_bar_context.open_if_not_already();
++            menu_bar_root->slide_down();
++            if (opened) {
++                menu_bar_context.close();
++            }
 +        }
 +    }
 +    return true;
@@ -1606,7 +1610,7 @@ index 4fdf81f..4834249 100644
  
              config.add_enum_option(
 diff --git a/recompui/src/elements/ui_modal.cpp b/recompui/src/elements/ui_modal.cpp
-index b057f46..2214007 100644
+index b057f46..da7fecf 100644
 --- a/recompui/src/elements/ui_modal.cpp
 +++ b/recompui/src/elements/ui_modal.cpp
 @@ -35,7 +35,11 @@ public:
@@ -1651,7 +1655,7 @@ index b057f46..2214007 100644
  
      body = context.create_element<Element>(modal_element);
      body->set_display(Display::Flex);
-@@ -120,7 +140,29 @@ void Modal::open() {
+@@ -120,8 +140,27 @@ void Modal::open() {
  
      is_open = true;
      set_display(Display::Block);
@@ -1659,14 +1663,11 @@ index b057f46..2214007 100644
 +    grow_anim = true;
 +    grow_start = std::chrono::steady_clock::now();
 +    apply_grow(0.0f);
-+    bool opened = modal_root_context.open_if_not_already();
-+    queue_update();
-+    if (opened) {
-+        modal_root_context.close();
-+    }
++    // No queue_update() here: this can be called with another UI context open (e.g. from a
++    // launcher button), and the modal's update already runs every frame.
 +#endif
-+}
-+
+ }
+ 
 +#ifdef __ANDROID__
 +constexpr float grow_ms = 200.0f;
 +
@@ -1676,12 +1677,13 @@ index b057f46..2214007 100644
 +    const float scale = 0.6f + 0.4f * e;
 +    modal_element->set_scale_2D(scale, scale);
 +    modal_element->set_opacity(e);
- }
++}
 +#endif
- 
++
  void TabbedModal::open() {
      Modal::open();
-@@ -178,6 +220,17 @@ static std::pair<recompinput::InputDevice, int> get_last_input_info() {
+ 
+@@ -178,6 +217,17 @@ static std::pair<recompinput::InputDevice, int> get_last_input_info() {
  void Modal::process_event(const Event &e) {
      switch (e.type) {
          case EventType::Update: {
@@ -1699,7 +1701,7 @@ index b057f46..2214007 100644
              if (is_open) {
                  bool update_action_labels = false;
                  auto [current_device, current_profile] = get_last_input_info();
-@@ -223,6 +276,9 @@ void Modal::render_menu_actions() {
+@@ -223,6 +273,9 @@ void Modal::render_menu_actions() {
      ContextId context = get_current_context();
      if (menu_actions_wrapper == nullptr) {
          menu_actions_wrapper = context.create_element<Element>(modal_overlay);
