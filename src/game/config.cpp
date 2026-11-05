@@ -604,7 +604,7 @@ static void set_control_defaults() {
     // stick for the camera). The N64 buttons go to the buttons with the same letters, so the
     // game's button prompts (see Controller Button Icons) read naturally:
     //   A -> A (jump), B -> B (attack), Z -> left trigger (crouch / items with C),
-    //   R -> right trigger (centre camera), L -> R3 (unused, for mods), Start -> Start,
+    //   R -> right trigger (centre camera), L -> L3 (unused, for mods), Start -> Start,
     //   C Up    -> right stick up    + X  (first person; Z + C Up: instrument)
     //   C Left  -> right stick left  + Y  (Z + C Left: fruit weapon)
     //   C Down  -> right stick down  + L shoulder (zoom; Z + C Down: fairy camera)
@@ -615,7 +615,7 @@ static void set_control_defaults() {
     set_default_mapping_for_controller(GameInput::B, { InputField::controller_digital(SDL_CONTROLLER_BUTTON_B) });
     set_default_mapping_for_controller(GameInput::Z, { InputField::controller_analog(SDL_CONTROLLER_AXIS_TRIGGERLEFT, true) });
     set_default_mapping_for_controller(GameInput::R, { InputField::controller_analog(SDL_CONTROLLER_AXIS_TRIGGERRIGHT, true) });
-    set_default_mapping_for_controller(GameInput::L, { InputField::controller_digital(SDL_CONTROLLER_BUTTON_RIGHTSTICK) });
+    set_default_mapping_for_controller(GameInput::L, { InputField::controller_digital(SDL_CONTROLLER_BUTTON_LEFTSTICK) });
     set_default_mapping_for_controller(GameInput::START, { InputField::controller_digital(SDL_CONTROLLER_BUTTON_START) });
     set_default_mapping_for_controller(GameInput::C_UP, {
         InputField::controller_analog(SDL_CONTROLLER_AXIS_RIGHTY, false),
@@ -820,11 +820,12 @@ extern "C" void dk64_android_apply_control_preset(int modern) {
         profiles::reset_profile_bindings(profile, InputDevice::Controller);
         if (modern) {
             // The right stick keeps C Down / Left / Right; only C Up (first person) comes off it,
-            // so pushing the camera up doesn't drop into first person. C Up stays on X.
+            // so pushing the camera up doesn't drop into first person. C Up is X and R3.
             for (GameInput input : { GameInput::C_UP }) {
                 for (size_t b = 0; b < num_bindings_per_input; b++) {
                     if (profiles::get_input_binding(profile, input, b).input_type == InputType::ControllerAnalog) {
-                        profiles::set_input_binding(profile, input, b, InputField{});
+                        // Pressing the right stick in is C Up instead (X still is too).
+                        profiles::set_input_binding(profile, input, b, InputField::controller_digital(SDL_CONTROLLER_BUTTON_RIGHTSTICK));
                     }
                 }
             }
