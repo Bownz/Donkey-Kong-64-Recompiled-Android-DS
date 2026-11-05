@@ -320,10 +320,10 @@ index 277a421..25a9a74 100644
  
 diff --git a/recompui/src/composites/ui_menu_bar.cpp b/recompui/src/composites/ui_menu_bar.cpp
 new file mode 100644
-index 0000000..6f8894c
+index 0000000..04a63c6
 --- /dev/null
 +++ b/recompui/src/composites/ui_menu_bar.cpp
-@@ -0,0 +1,237 @@
+@@ -0,0 +1,240 @@
 +// Android: the in-game menu bar. The menu button opens a slim bar across the top of the
 +// screen (in the bottom screen's DK style) instead of the full settings window; the bar opens
 +// Settings or Mods in the settings window, or quits. Like the Dusklight port's.
@@ -387,9 +387,12 @@ index 0000000..6f8894c
 +            set_padding_right(22.0f);
 +            set_border_width(3.0f);
 +            set_border_radius(16.0f);
-+            set_border_color(Color{0, 0, 0, 0});
++            // Every entry is a button (darker wood with a soft edge), not just the selected one.
++            set_border_color(Color{168, 128, 72, 140});
++            set_background_color(Color{62, 38, 16, 210});
 +            set_color(tan);
 +            hover_style.set_color(cream);
++            hover_style.set_background_color(Color{96, 62, 28, 230});
 +            focus_style.set_color(banana);
 +            focus_style.set_border_color(banana);
 +            focus_style.set_background_color(Color{42, 20, 4, 140});
