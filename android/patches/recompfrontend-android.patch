@@ -1,3 +1,21 @@
+diff --git a/recompinput/include/recompinput/input_types.h b/recompinput/include/recompinput/input_types.h
+index f5ed6c0..1bff207 100644
+--- a/recompinput/include/recompinput/input_types.h
++++ b/recompinput/include/recompinput/input_types.h
+@@ -68,6 +68,13 @@ namespace recompinput {
+ 
+     
+     // A single input. Combines the source of the input (see InputType) and a specific key/button/axis.
++    // Android: whether the connected controller has Nintendo-style face buttons (A on the
++    // right, B at the bottom), e.g. the AYN Thor/Odin in its "Nintendo" mode, and its name.
++    enum class FaceButtonStyle { Xbox, Nintendo, PlayStation };
++    FaceButtonStyle get_face_button_style();
++    bool controller_uses_nintendo_layout();
++    std::string connected_controller_name();
++
+     struct InputField {
+         InputType input_type;
+         // Represents a single source input. e.g. A keyboard's shift key, or a controller's R trigger
 diff --git a/recompinput/src/input_events.cpp b/recompinput/src/input_events.cpp
 index c76a1dc..fae66f0 100644
 --- a/recompinput/src/input_events.cpp
@@ -89,6 +107,134 @@ index c76a1dc..fae66f0 100644
              // constexpr float gyro_threshold = 0.05f;
              // Convert rotational velocity to degrees per second.
              constexpr float rad_to_deg = 180.0f / M_PI;
+diff --git a/recompinput/src/input_types.cpp b/recompinput/src/input_types.cpp
+index c6786e6..f6726e7 100644
+--- a/recompinput/src/input_types.cpp
++++ b/recompinput/src/input_types.cpp
+@@ -1,5 +1,6 @@
+ #include "recompinput.h"
+ #include <string>
++#include <cstring>
+ #include <array>
+ #include <unordered_map>
+ #include <unordered_set>
+@@ -85,7 +86,97 @@ const std::string& get_game_input_enum_name(GameInput input) {
+     return game_input_enum_names.at(static_cast<size_t>(input));
+ }
+ 
++// Which kind of face buttons the connected controller has (used for the button symbols).
++// SDL knows the common families (Xbox, PlayStation, Switch) from its controller database; for
++// others the name decides (AYN's "Odin Controller" is the Thor/Odin in its Nintendo mode).
++static FaceButtonStyle face_button_style() {
++    for (int i = 0; i < SDL_NumJoysticks(); i++) {
++        if (!SDL_IsGameController(i)) {
++            continue;
++        }
++        switch (SDL_GameControllerTypeForIndex(i)) {
++        case SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_PRO:
++            return FaceButtonStyle::Nintendo;
++        case SDL_CONTROLLER_TYPE_PS3:
++        case SDL_CONTROLLER_TYPE_PS4:
++        case SDL_CONTROLLER_TYPE_PS5:
++            return FaceButtonStyle::PlayStation;
++        default:
++            break;
++        }
++        const char *name = SDL_GameControllerNameForIndex(i);
++        if (name != nullptr) {
++            std::string n = name;
++            for (auto &ch : n) {
++                ch = static_cast<char>(tolower(static_cast<unsigned char>(ch)));
++            }
++            if (n.find("odin") != std::string::npos || n.find("nintendo") != std::string::npos
++                    || n.find("switch") != std::string::npos) {
++                return FaceButtonStyle::Nintendo;
++            }
++            if (n.find("playstation") != std::string::npos || n.find("dualshock") != std::string::npos
++                    || n.find("dualsense") != std::string::npos || n.find("wireless controller") == 0) {
++                return FaceButtonStyle::PlayStation;
++            }
++        }
++        return FaceButtonStyle::Xbox;   // the first controller decides
++    }
++    return FaceButtonStyle::Xbox;
++}
++
++FaceButtonStyle get_face_button_style() {
++    return face_button_style();
++}
++
++bool controller_uses_nintendo_layout() {
++    return face_button_style() == FaceButtonStyle::Nintendo;
++}
++
++std::string connected_controller_name() {
++    for (int i = 0; i < SDL_NumJoysticks(); i++) {
++        if (SDL_IsGameController(i)) {
++            const char *name = SDL_GameControllerNameForIndex(i);
++            return name != nullptr ? name : "Controller";
++        }
++    }
++    return "";
++}
++
+ static std::string controller_button_to_string(SDL_GameControllerButton button) {
++#ifdef __ANDROID__
++    // Face buttons: the symbol shows where the button is on the controller, plus its letter.
++    // With Nintendo-style buttons, A is on the right, B at the bottom, X on top, Y on the left.
++    const FaceButtonStyle style = face_button_style();
++    if (style == FaceButtonStyle::PlayStation) {
++        switch (button) {
++        case SDL_CONTROLLER_BUTTON_A: return PF_SONY_A;
++        case SDL_CONTROLLER_BUTTON_B: return PF_SONY_B;
++        case SDL_CONTROLLER_BUTTON_X: return PF_SONY_X;
++        case SDL_CONTROLLER_BUTTON_Y: return PF_SONY_Y;
++        default: break;
++        }
++    } else if (style == FaceButtonStyle::Nintendo) {
++        switch (button) {
++        case SDL_CONTROLLER_BUTTON_A: return std::string(PF_GAMEPAD_B) + "A";
++        case SDL_CONTROLLER_BUTTON_B: return std::string(PF_GAMEPAD_A) + "B";
++        case SDL_CONTROLLER_BUTTON_X: return std::string(PF_GAMEPAD_Y) + "X";
++        case SDL_CONTROLLER_BUTTON_Y: return std::string(PF_GAMEPAD_X) + "Y";
++        case SDL_CONTROLLER_BUTTON_LEFTSHOULDER: return PF_NINTENDO_LEFT_SHOULDER;
++        case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER: return PF_NINTENDO_RIGHT_SHOULDER;
++        case SDL_CONTROLLER_BUTTON_START: return PF_NINTENDO_PLUS;
++        case SDL_CONTROLLER_BUTTON_BACK: return PF_NINTENDO_MINUS;
++        default: break;
++        }
++    } else {
++        switch (button) {
++        case SDL_CONTROLLER_BUTTON_A: return std::string(PF_GAMEPAD_A) + "A";
++        case SDL_CONTROLLER_BUTTON_B: return std::string(PF_GAMEPAD_B) + "B";
++        case SDL_CONTROLLER_BUTTON_X: return std::string(PF_GAMEPAD_X) + "X";
++        case SDL_CONTROLLER_BUTTON_Y: return std::string(PF_GAMEPAD_Y) + "Y";
++        default: break;
++        }
++    }
++#endif
+     switch (button) {
+     case SDL_GameControllerButton::SDL_CONTROLLER_BUTTON_A:
+         return PF_GAMEPAD_A;
+@@ -240,8 +331,18 @@ static std::string controller_axis_to_string(int axis) {
+     case SDL_GameControllerAxis::SDL_CONTROLLER_AXIS_RIGHTY:
+         return positive ? PF_ANALOG_R_DOWN : PF_ANALOG_R_UP;
+     case SDL_GameControllerAxis::SDL_CONTROLLER_AXIS_TRIGGERLEFT:
++#ifdef __ANDROID__
++        if (recompinput::controller_uses_nintendo_layout()) {
++            return PF_NINTENDO_LEFT_TRIGGER;
++        }
++#endif
+         return positive ? PF_XBOX_LEFT_TRIGGER : PF_XBOX_LEFT_TRIGGER_PULL;
+     case SDL_GameControllerAxis::SDL_CONTROLLER_AXIS_TRIGGERRIGHT:
++#ifdef __ANDROID__
++        if (recompinput::controller_uses_nintendo_layout()) {
++            return PF_NINTENDO_RIGHT_TRIGGER;
++        }
++#endif
+         return positive ? PF_XBOX_RIGHT_TRIGGER : PF_XBOX_RIGHT_TRIGGER_PULL;
+     default:
+         return recompinput::unknown_device_input;
 diff --git a/recompinput/src/profiles.cpp b/recompinput/src/profiles.cpp
 index c89956e..c62e059 100644
 --- a/recompinput/src/profiles.cpp
@@ -1058,10 +1204,82 @@ index 0561657..06088b1 100644
  
      std::string_view get_type_name() override { return "ConfigOptionEnum"; }
 diff --git a/recompui/src/config/ui_config_page_controls.cpp b/recompui/src/config/ui_config_page_controls.cpp
-index f379a6f..175cbb4 100644
+index f379a6f..53e52c7 100644
 --- a/recompui/src/config/ui_config_page_controls.cpp
 +++ b/recompui/src/config/ui_config_page_controls.cpp
-@@ -460,6 +460,12 @@ void ConfigPageControls::on_edit_player_profile(int player_index) {
+@@ -8,6 +8,7 @@
+ #include "elements/ui_select.h"
+ #include "recompinput/profiles.h"
+ #include "recompui/config.h"
++#include "config/ui_config_option.h"
+ 
+ namespace recompui {
+ 
+@@ -114,6 +115,18 @@ GameInputRow::GameInputRow(
+     }
+ 
+     scroll_buffer = context.create_element<ScrollBuffer>(this, 16.0f);
++
++#ifdef __ANDROID__
++    // The settings rows' DK look: dark wood with a thin edge, banana-yellow edge when active.
++    style_dk_option_row(this);
++    set_height(70.0f);
++    set_padding_right(14.0f);
++    active_style.set_background_color(Color{96, 62, 28, 230});
++    active_style.set_border_color(Color{249, 214, 72, 255});
++    label->set_text_transform(TextTransform::Uppercase);
++    label->set_font_weight(700);
++    label->set_color(Color{255, 244, 214, 255});
++#endif
+ }
+ 
+ GameInputRow::~GameInputRow() {
+@@ -204,6 +217,30 @@ void ConfigPageControls::create_game_input_contexts() {
+             recompinput::get_game_input_clearable(input)
+         };
+ 
++#ifdef __ANDROID__
++        // Android: grouped like the controller - Buttons, C Buttons, Stick, D-Pad, Menu.
++        {
++            using GI = recompinput::GameInput;
++            static const char *names[] = { "Buttons", "C Buttons", "Stick", "D-Pad", "Menu" };
++            int group;
++            if (recompinput::get_game_input_is_menu(input)) {
++                group = 4;
++            } else if (input == GI::C_UP || input == GI::C_DOWN || input == GI::C_LEFT || input == GI::C_RIGHT) {
++                group = 1;
++            } else if (input == GI::X_AXIS_NEG || input == GI::X_AXIS_POS || input == GI::Y_AXIS_NEG || input == GI::Y_AXIS_POS) {
++                group = 2;
++            } else if (input == GI::DPAD_UP || input == GI::DPAD_DOWN || input == GI::DPAD_LEFT || input == GI::DPAD_RIGHT) {
++                group = 3;
++            } else {
++                group = 0;
++            }
++            while (game_input_sections.other.size() < 5) {
++                game_input_sections.other.emplace_back(names[game_input_sections.other.size()]);
++            }
++            game_input_sections.other[group].contexts.push_back(input_ctx);
++            continue;
++        }
++#endif
+         if (recompinput::get_game_input_is_menu(input)) {
+             game_input_sections.menu.contexts.push_back(input_ctx);
+         } else {
+@@ -357,6 +394,13 @@ void ConfigPageControls::render_body_mappings() {
+         body->get_right()->clear_children();
+         description_container = context.create_element<Element>(body->get_right(), 0, "p", true);
+         description_container->set_text("");
++#ifdef __ANDROID__
++        description_container->set_color(Color{232, 213, 168, 255});
++        description_container->set_font_size(22.0f);
++        description_container->set_line_height(30.0f);
++        description_container->set_padding(18.0f);
++        render_face_buttons(body->get_right());
++#endif
+     }
+ }
+ 
+@@ -460,6 +504,12 @@ void ConfigPageControls::on_edit_player_profile(int player_index) {
      }
  }
  
@@ -1074,7 +1292,7 @@ index f379a6f..175cbb4 100644
  void ConfigPageControls::render_footer() {
      if (multiplayer_enabled && !multiplayer_view_mappings) {
          hide_footer();
-@@ -473,7 +479,31 @@ void ConfigPageControls::render_footer() {
+@@ -473,7 +523,17 @@ void ConfigPageControls::render_footer() {
      {
          auto footer_left = footer->get_left();
          footer_left->clear_children();
@@ -1083,21 +1301,7 @@ index f379a6f..175cbb4 100644
 +        // Modern presets (bindings, camera type and gyro together).
 +        if (!multiplayer_enabled) {
 +            single_player_show_keyboard_mappings = false;
-+            footer_left->set_gap(12.0f);
-+            const int preset = dk64_android_control_preset != nullptr ? dk64_android_control_preset() : -1;
-+            // The chosen preset is marked with a dot (buttons update in place).
-+            auto classic = context.create_element<Button>(footer_left, preset == 0 ? "\u25CF Classic" : "Classic", ButtonStyle::Secondary);
-+            auto modern = context.create_element<Button>(footer_left, preset == 1 ? "\u25CF Modern" : "Modern", ButtonStyle::Secondary);
-+            auto apply = [this, classic, modern](int which) {
-+                if (dk64_android_apply_control_preset != nullptr) {
-+                    dk64_android_apply_control_preset(which);
-+                }
-+                classic->set_text(which == 0 ? "\u25CF Classic" : "Classic");
-+                modern->set_text(which == 1 ? "\u25CF Modern" : "Modern");
-+                this->update_control_mappings();
-+            };
-+            classic->add_pressed_callback([apply]() { apply(0); });
-+            modern->add_pressed_callback([apply]() { apply(1); });
++            // (Classic / Modern is the Layout row at the top of the list.)
 +        }
 +        if (false) {
 +#else
@@ -1106,6 +1310,206 @@ index f379a6f..175cbb4 100644
              keyboard_toggle = context.create_element<IconToggle>(footer_left, "icons/Cont.svg", "icons/Keyboard.svg", ToggleSize::Large);
              keyboard_toggle->set_checked(single_player_show_keyboard_mappings);
              keyboard_toggle->add_checked_callback([this](bool checked) {
+@@ -520,6 +580,58 @@ void ConfigPageControls::render_control_mappings() {
+ 
+         game_input_rows.clear();
+ 
++#ifdef __ANDROID__
++        // Device (what's connected, and its button layout) and Layout (Classic / Modern).
++        if (!multiplayer_enabled) {
++            Element *top = context.create_element<Element>(body_left_scroll, 0, "div", false);
++            top->set_display(Display::Block);
++            top->set_margin_top(8.0f);
++            top->set_margin_bottom(4.0f);
++            top->set_padding_left(8.0f);
++            top->set_padding_right(8.0f);
++
++            Element *device = context.create_element<Element>(top, 0, "div", false);
++            style_dk_option_row(device);
++            Label *device_name = context.create_element<Label>(device, "Device", theme::Typography::LabelMD);
++            device_name->set_text_transform(TextTransform::Uppercase);
++            device_name->set_font_weight(700);
++            device_name->set_color(Color{255, 244, 214, 255});
++            std::string controller = recompinput::connected_controller_name();
++            std::string layout;
++            switch (recompinput::get_face_button_style()) {
++            case recompinput::FaceButtonStyle::Nintendo: layout = "Nintendo layout"; break;
++            case recompinput::FaceButtonStyle::PlayStation: layout = "PlayStation layout"; break;
++            default: layout = "Xbox layout"; break;
++            }
++            Label *device_value = context.create_element<Label>(device,
++                controller.empty() ? std::string("No controller") : controller + "  \u00B7  " + layout,
++                theme::Typography::LabelMD);
++            device_value->set_font_weight(700);
++            device_value->set_color(Color{255, 244, 214, 255});
++
++            if (dk64_android_control_preset != nullptr && dk64_android_apply_control_preset != nullptr) {
++                ConfigEnumStepper *layout_row = context.create_element<ConfigEnumStepper>(top, "Layout");
++                auto preset_name = []() {
++                    const int preset = dk64_android_control_preset();
++                    return std::string(preset == 1 ? "Modern" : preset == 0 ? "Classic" : "Custom");
++                };
++                layout_row->set_value_text(preset_name());
++                layout_row->set_step_callback([this, layout_row, preset_name](int) {
++                    dk64_android_apply_control_preset(dk64_android_control_preset() == 1 ? 0 : 1);
++                    layout_row->set_value_text(preset_name());
++                    this->update_control_mappings();
++                });
++                layout_row->set_focus_callback([this](bool active) {
++                    if (active && description_container != nullptr) {
++                        description_container->set_text(
++                            "Classic: the right stick works the C buttons, like the N64. "
++                            "Modern: the right stick turns the camera, with gyro aiming on.");
++                    }
++                });
++            }
++        }
++#endif
++
+         create_game_input_contexts();
+         set_current_profile_index();
+ 
+@@ -669,7 +781,106 @@ void ConfigPageControls::on_option_hover(recompinput::GameInput input_id) {
+             description_container->set_text("");
+         }
+     }
++#ifdef __ANDROID__
++    highlight_face_buttons(input_id);
++#endif
++}
++
++#ifdef __ANDROID__
++// Where each SDL face button sits on the controller (0 top, 1 left, 2 right, 3 bottom), and
++// the letter printed on it, for the connected controller's layout.
++static int face_position(SDL_GameControllerButton button, recompinput::FaceButtonStyle style) {
++    const bool nintendo = style == recompinput::FaceButtonStyle::Nintendo;
++    switch (button) {
++    case SDL_CONTROLLER_BUTTON_A: return nintendo ? 2 : 3;
++    case SDL_CONTROLLER_BUTTON_B: return nintendo ? 3 : 2;
++    case SDL_CONTROLLER_BUTTON_X: return nintendo ? 0 : 1;
++    case SDL_CONTROLLER_BUTTON_Y: return nintendo ? 1 : 0;
++    default: return -1;
++    }
++}
++
++void ConfigPageControls::render_face_buttons(Element *parent) {
++    recompui::ContextId context = get_current_context();
++    Element *pad = context.create_element<Element>(parent, 0, "div", false);
++    pad->set_position(Position::Relative);
++    pad->set_width(300.0f);
++    pad->set_height(300.0f);
++    pad->set_margin_top(30.0f);
++    pad->set_margin_left_auto();
++    pad->set_margin_right_auto();
++
++    const recompinput::FaceButtonStyle style = recompinput::get_face_button_style();
++    const float size = 100.0f;
++    const float pos[4][2] = { { 100.0f, 0.0f }, { 0.0f, 100.0f }, { 200.0f, 100.0f }, { 100.0f, 200.0f } };
++    std::string letters[4];
++    const SDL_GameControllerButton buttons[4] = { SDL_CONTROLLER_BUTTON_A, SDL_CONTROLLER_BUTTON_B, SDL_CONTROLLER_BUTTON_X, SDL_CONTROLLER_BUTTON_Y };
++    const char *names[4] = { "A", "B", "X", "Y" };
++    for (int i = 0; i < 4; i++) {
++        letters[face_position(buttons[i], style)] = names[i];
++    }
++    if (style == recompinput::FaceButtonStyle::PlayStation) {
++        letters[0] = "\u25B3"; letters[1] = "\u25A1"; letters[2] = "\u25CB"; letters[3] = "\u2715";
++    }
++    for (int i = 0; i < 4; i++) {
++        Element *b = context.create_element<Element>(pad, 0, "div", false);
++        b->set_position(Position::Absolute);
++        b->set_left(pos[i][0]);
++        b->set_top(pos[i][1]);
++        b->set_width(size);
++        b->set_height(size);
++        b->set_border_radius(size / 2.0f);
++        b->set_border_width(3.0f);
++        b->set_display(Display::Flex);
++        b->set_align_items(AlignItems::Center);
++        b->set_justify_content(JustifyContent::Center);
++        Label *l = context.create_element<Label>(b, letters[i], theme::Typography::Header3);
++        l->set_font_family(style == recompinput::FaceButtonStyle::PlayStation ? "Fira Sans Condensed" : "Luckiest Guy");
++        l->set_font_weight(400);
++        l->set_font_size(44.0f);
++        l->set_padding_top(style == recompinput::FaceButtonStyle::PlayStation ? 0.0f : 8.0f);
++        face_buttons[i] = b;
++        face_labels[i] = l;
++    }
++    Label *caption = context.create_element<Label>(parent, "Your controller's face buttons", theme::Typography::LabelMD);
++    caption->set_display(Display::Block);
++    caption->set_text_align(TextAlign::Center);
++    caption->set_margin_top(16.0f);
++    caption->set_font_weight(700);
++    caption->set_color(Color{232, 213, 168, 255});
++    highlight_face_buttons(recompinput::GameInput::COUNT);
++}
++
++void ConfigPageControls::highlight_face_buttons(recompinput::GameInput input_id) {
++    bool lit[4] = { false, false, false, false };
++    if (input_id != recompinput::GameInput::COUNT && selected_profile_index >= 0) {
++        const recompinput::FaceButtonStyle style = recompinput::get_face_button_style();
++        for (int j = 0; j < recompinput::num_bindings_per_input; j++) {
++            recompinput::InputField field = recompinput::profiles::get_input_binding(selected_profile_index, input_id, j);
++            if (field.input_type == recompinput::InputType::ControllerDigital) {
++                int p = face_position(static_cast<SDL_GameControllerButton>(field.input_id), style);
++                if (p >= 0) {
++                    lit[p] = true;
++                }
++            }
++        }
++    }
++    for (int i = 0; i < 4; i++) {
++        if (face_buttons[i] == nullptr) {
++            continue;
++        }
++        if (lit[i]) {
++            face_buttons[i]->set_background_color(Color{249, 214, 72, 255});
++            face_buttons[i]->set_border_color(Color{255, 244, 214, 255});
++            face_labels[i]->set_color(Color{58, 30, 6, 255});
++        } else {
++            face_buttons[i]->set_background_color(Color{62, 38, 16, 230});
++            face_buttons[i]->set_border_color(Color{168, 128, 72, 255});
++            face_labels[i]->set_color(Color{232, 213, 168, 255});
++        }
++    }
+ }
++#endif
+ 
+ 
+ } // namespace recompui
+diff --git a/recompui/src/config/ui_config_page_controls.h b/recompui/src/config/ui_config_page_controls.h
+index dd8ff24..b1ca31e 100644
+--- a/recompui/src/config/ui_config_page_controls.h
++++ b/recompui/src/config/ui_config_page_controls.h
+@@ -82,6 +82,15 @@ public:
+             section_label->set_margin_left(GameInputRow::left_padding);
+             section_label->set_margin_bottom(8.0f);
+             section_label->set_color(theme::color::PrimaryL);
++#ifdef __ANDROID__
++            section_label->set_font_family("Luckiest Guy");
++            section_label->set_font_weight(400);
++            section_label->set_font_size(24.0f);
++            section_label->set_letter_spacing(1.0f);
++            section_label->set_text_transform(TextTransform::Uppercase);
++            section_label->set_color(Color{232, 213, 168, 170});
++            section_label->set_margin_top(18.0f);
++#endif
+         }
+     }
+ };
+@@ -152,6 +161,13 @@ protected:
+     std::vector<GameInputRow*> game_input_rows;
+     IconToggle *keyboard_toggle;
+     Element *description_container = nullptr;
++#ifdef __ANDROID__
++    // The face-button picture on the right: top, left, right, bottom.
++    Element *face_buttons[4] = {};
++    Label *face_labels[4] = {};
++    void render_face_buttons(Element *parent);
++    void highlight_face_buttons(recompinput::GameInput input_id);
++#endif
+     on_player_bind_callback on_player_bind;
+     Element *nav_up_element = nullptr;
+     Element *first_nav_element = nullptr;
 diff --git a/recompui/src/config/ui_config_page_options_menu.cpp b/recompui/src/config/ui_config_page_options_menu.cpp
 index 6ba64e2..8922845 100644
 --- a/recompui/src/config/ui_config_page_options_menu.cpp
@@ -1627,6 +2031,42 @@ index 4fdf81f..4834249 100644
              );
  
              config.add_enum_option(
+diff --git a/recompui/src/elements/ui_binding_button.cpp b/recompui/src/elements/ui_binding_button.cpp
+index caa1020..355460f 100644
+--- a/recompui/src/elements/ui_binding_button.cpp
++++ b/recompui/src/elements/ui_binding_button.cpp
+@@ -30,6 +30,19 @@ namespace recompui {
+         disabled_style.set_opacity(0.5f);
+         disabled_style.set_cursor(Cursor::None);
+ 
++#ifdef __ANDROID__
++        // DK look: dark wooden chips; the selected one gets a banana-yellow edge.
++        set_border_color(Color{168, 128, 72, 110});
++        set_background_color(Color{42, 20, 4, 200});
++        set_color(Color{255, 244, 214, 255});
++        set_border_radius(18.0f);
++        hover_style.set_border_color(Color{232, 213, 168, 200});
++        hover_style.set_background_color(Color{70, 42, 18, 230});
++        hover_style.set_color(Color{255, 244, 214, 255});
++        focus_style.set_border_color(Color{249, 214, 72, 255});
++        focus_style.set_background_color(Color{70, 42, 18, 240});
++        focus_style.set_color(Color{249, 214, 72, 255});
++#endif
+         add_style(&hover_style, hover_state);
+         add_style(&focus_style, focus_state);
+         add_style(&disabled_style, disabled_state);
+@@ -202,7 +215,11 @@ namespace recompui {
+                     recording_circle->set_scale_2D(scale, scale);
+                 }
+ 
++#ifdef __ANDROID__
++                if (false) {
++#else
+                 if (is_style_enabled(focus_state)) {
++#endif
+                     recompui::Color pulse_color = recompui::get_pulse_color(750);
+                     focus_style.set_color(pulse_color);
+                     focus_style.set_border_color(pulse_color);
 diff --git a/recompui/src/elements/ui_modal.cpp b/recompui/src/elements/ui_modal.cpp
 index b057f46..da7fecf 100644
 --- a/recompui/src/elements/ui_modal.cpp
