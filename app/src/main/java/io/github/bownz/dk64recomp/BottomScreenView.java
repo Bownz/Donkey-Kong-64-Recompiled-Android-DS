@@ -1128,17 +1128,25 @@ public final class BottomScreenView extends View {
         // the jungle until a save is loaded.
         final boolean started = GameState.frameCount() > 0;
         float shrink = 1f;
+        float duck = 0f;   // 0..1: the Android ducking down behind the logo
         if (started) {
-            if (!titleGone && !titleLeaving) {
+            if (titleGone) {
+                return;
+            }
+            if (!titleLeaving) {
                 titleLeaving = true;
                 startAnim("titleOut");
             }
-            float p = animProgress("titleOut", TITLE_OUT_MS);
+            float p = animProgress("titleOut", DUCK_MS + TITLE_OUT_MS);
             if (p < 0) {
                 titleGone = true;
                 return;
             }
-            shrink = 1f - p * p;   // ease in
+            // First the Android ducks down behind the logo, then the logo shrinks away.
+            final float t = p * (DUCK_MS + TITLE_OUT_MS);
+            duck = Math.min(1f, t / DUCK_MS);
+            final float out = Math.max(0f, (t - DUCK_MS) / TITLE_OUT_MS);
+            shrink = 1f - out * out;   // ease in
         } else {
             titleGone = false;
             titleLeaving = false;
@@ -1171,9 +1179,12 @@ public final class BottomScreenView extends View {
             // The Android robot peeks out from behind the logo's top right: drawn first, so the
             // logo covers its lower half.
             float bob = (float) Math.sin(android.os.SystemClock.uptimeMillis() / 600.0) * lh * 0.02f;
-            if (robotPop > 0f) {
-                // Rises up from behind the logo.
-                float rise = (1f - robotPop) * lh * 0.3f;
+            if (robotPop > 0f && duck < 1f) {
+                // Rises up from behind the logo (and ducks back down when the game starts:
+                // a little hop up, then down out of sight).
+                float hop = duck < 0.25f ? -(float) Math.sin(duck / 0.25f * Math.PI) * lh * 0.04f : 0f;
+                float down = duck > 0.25f ? (duck - 0.25f) / 0.75f : 0f;
+                float rise = (1f - robotPop) * lh * 0.3f + hop + down * down * lh * 0.45f;
                 drawAndroidRobot(c, tmp.right - lw * 0.10f, tmp.top + lh * 0.02f + bob + rise, lh * 0.34f * Math.max(0.01f, robotPop), 20f, alpha);
             }
             bitmapPaint.setAlpha(alpha);
@@ -1195,7 +1206,7 @@ public final class BottomScreenView extends View {
         }
     }
 
-    private static final long TITLE_OUT_MS = 550;
+    private static final long TITLE_OUT_MS = 550, DUCK_MS = 450;
     private long titleShownAt;
 
     /** Ease out with a little overshoot (0..1 -> 0..1). */
