@@ -593,6 +593,42 @@ static void set_control_defaults() {
 
     // R3 -> L | Unused in BK but can be used in mods
     set_default_mapping_for_controller(GameInput::L, { InputField::controller_digital(SDL_GameControllerButton::SDL_CONTROLLER_BUTTON_RIGHTSTICK) });
+
+#if defined(__ANDROID__)
+    // Android (the Classic and Modern presets start from these; Modern then frees the right
+    // stick for the camera). The N64 buttons go to the buttons with the same letters, so the
+    // game's button prompts (see Controller Button Icons) read naturally:
+    //   A -> A (jump), B -> B (attack), Z -> left trigger (crouch / items with C),
+    //   R -> right trigger (centre camera), L -> R3 (unused, for mods), Start -> Start,
+    //   C Up    -> right stick up    + X  (first person; Z + C Up: instrument)
+    //   C Left  -> right stick left  + Y  (Z + C Left: fruit weapon)
+    //   C Down  -> right stick down  + L shoulder (zoom; Z + C Down: fairy camera)
+    //   C Right -> right stick right + R shoulder (Z + C Right: throw an orange)
+    //   D-Pad   -> D-Pad (Tag Anywhere and other mods use it).
+    // Modern drops the right stick from the C buttons, so these buttons are how items are used.
+    set_default_mapping_for_controller(GameInput::A, { InputField::controller_digital(SDL_CONTROLLER_BUTTON_A) });
+    set_default_mapping_for_controller(GameInput::B, { InputField::controller_digital(SDL_CONTROLLER_BUTTON_B) });
+    set_default_mapping_for_controller(GameInput::Z, { InputField::controller_analog(SDL_CONTROLLER_AXIS_TRIGGERLEFT, true) });
+    set_default_mapping_for_controller(GameInput::R, { InputField::controller_analog(SDL_CONTROLLER_AXIS_TRIGGERRIGHT, true) });
+    set_default_mapping_for_controller(GameInput::L, { InputField::controller_digital(SDL_CONTROLLER_BUTTON_RIGHTSTICK) });
+    set_default_mapping_for_controller(GameInput::START, { InputField::controller_digital(SDL_CONTROLLER_BUTTON_START) });
+    set_default_mapping_for_controller(GameInput::C_UP, {
+        InputField::controller_analog(SDL_CONTROLLER_AXIS_RIGHTY, false),
+        InputField::controller_digital(SDL_CONTROLLER_BUTTON_X) });
+    set_default_mapping_for_controller(GameInput::C_LEFT, {
+        InputField::controller_analog(SDL_CONTROLLER_AXIS_RIGHTX, false),
+        InputField::controller_digital(SDL_CONTROLLER_BUTTON_Y) });
+    set_default_mapping_for_controller(GameInput::C_DOWN, {
+        InputField::controller_analog(SDL_CONTROLLER_AXIS_RIGHTY, true),
+        InputField::controller_digital(SDL_CONTROLLER_BUTTON_LEFTSHOULDER) });
+    set_default_mapping_for_controller(GameInput::C_RIGHT, {
+        InputField::controller_analog(SDL_CONTROLLER_AXIS_RIGHTX, true),
+        InputField::controller_digital(SDL_CONTROLLER_BUTTON_RIGHTSHOULDER) });
+    set_default_mapping_for_controller(GameInput::DPAD_UP, { InputField::controller_digital(SDL_CONTROLLER_BUTTON_DPAD_UP) });
+    set_default_mapping_for_controller(GameInput::DPAD_DOWN, { InputField::controller_digital(SDL_CONTROLLER_BUTTON_DPAD_DOWN) });
+    set_default_mapping_for_controller(GameInput::DPAD_LEFT, { InputField::controller_digital(SDL_CONTROLLER_BUTTON_DPAD_LEFT) });
+    set_default_mapping_for_controller(GameInput::DPAD_RIGHT, { InputField::controller_digital(SDL_CONTROLLER_BUTTON_DPAD_RIGHT) });
+#endif
 }
 
 static void set_control_descriptions() {
