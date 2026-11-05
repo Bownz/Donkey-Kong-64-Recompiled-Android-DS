@@ -1156,7 +1156,7 @@ public final class BottomScreenView extends View {
             // The Android robot peeks out from behind the logo's top right: drawn first, so the
             // logo covers its lower half.
             float bob = (float) Math.sin(android.os.SystemClock.uptimeMillis() / 600.0) * lh * 0.02f;
-            drawAndroidRobot(c, tmp.right - lw * 0.17f, tmp.top + lh * 0.16f + bob, lh * 0.36f, 16f, alpha);
+            drawAndroidRobot(c, tmp.right - lw * 0.10f, tmp.top + lh * 0.02f + bob, lh * 0.34f, 20f, alpha);
             bitmapPaint.setAlpha(alpha);
             c.drawBitmap(logo, null, tmp, bitmapPaint);
             bitmapPaint.setAlpha(255);
