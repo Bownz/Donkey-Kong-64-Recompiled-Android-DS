@@ -167,10 +167,11 @@ namespace {
         return "";
     }
 
-    // The icon's pixel at (x, y) of a w x h area, the icon fitted (square, centred) inside it;
+    // The icon's pixel at (x, y) of a w x h area, the icon (square, centred) inside it;
     // a box filter over the source pixels it covers.
     void sample_icon(const std::vector<uint8_t> &icon, int x, int y, int w, int h, uint8_t rgba[4]) {
-        const int side = std::min(w, h);
+        // 70% of the original icon's size (ours have no empty border of their own).
+        const int side = std::max(1, static_cast<int>(std::min(w, h) * 0.7f + 0.5f));
         const int ox = (w - side) / 2, oy = (h - side) / 2;
         rgba[0] = rgba[1] = rgba[2] = rgba[3] = 0;
         if (x < ox || y < oy || x >= ox + side || y >= oy + side) {
