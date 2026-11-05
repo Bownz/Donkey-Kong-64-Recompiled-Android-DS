@@ -899,13 +899,14 @@ public final class BottomScreenView extends View {
         drawContent(canvas);
         if (animating) {
             postInvalidateOnAnimation();
-        } else if (state.inGame() && !state.paused && !state.cutscene) {
+        } else if (titleIdle || (state.inGame() && !state.paused && !state.cutscene)) {
             // The health melons' gentle idle bob: a light 20 FPS redraw, not every display frame.
             postInvalidateDelayed(IDLE_FRAME_MS);
         }
     }
 
     private void drawContent(Canvas canvas) {
+        titleIdle = false;
         drawJungle(canvas, getWidth(), getHeight());
         if (!state.inGame()) {
             drawTitle(canvas, getWidth(), getHeight());
@@ -1123,12 +1124,46 @@ public final class BottomScreenView extends View {
      * the official logo artwork isn't something this app ships.)
      */
     private void drawTitle(Canvas c, int w, int h) {
+        // Once the game has started (Start Game), the logo shrinks away and the screen is just
+        // the jungle until a save is loaded.
+        final boolean started = GameState.frameCount() > 0;
+        float shrink = 1f;
+        if (started) {
+            if (!titleGone && !titleLeaving) {
+                titleLeaving = true;
+                startAnim("titleOut");
+            }
+            float p = animProgress("titleOut", TITLE_OUT_MS);
+            if (p < 0) {
+                titleGone = true;
+                return;
+            }
+            shrink = 1f - p * p;   // ease in
+        } else {
+            titleGone = false;
+            titleLeaving = false;
+            titleIdle = true;   // the Android peeking over the logo bobs gently
+        }
+
         Bitmap logo = logo();
         if (logo != null) {
             float scale = Math.min(w * 0.78f / logo.getWidth(), h * 0.62f / logo.getHeight());
             float lw = logo.getWidth() * scale, lh = logo.getHeight() * scale;
+            int saved = c.save();
+            c.scale(shrink, shrink, w / 2f, h / 2f);
+            int alpha = Math.round(255 * Math.min(1f, shrink * 1.4f));
             tmp.set((w - lw) / 2, (h - lh) / 2, (w + lw) / 2, (h + lh) / 2);
+            // The Android robot peeks out from behind the logo's top right: drawn first, so the
+            // logo covers its lower half.
+            float bob = (float) Math.sin(android.os.SystemClock.uptimeMillis() / 600.0) * lh * 0.02f;
+            drawAndroidRobot(c, tmp.right - lw * 0.17f, tmp.top + lh * 0.16f + bob, lh * 0.36f, 16f, alpha);
+            bitmapPaint.setAlpha(alpha);
             c.drawBitmap(logo, null, tmp, bitmapPaint);
+            bitmapPaint.setAlpha(255);
+            c.restoreToCount(saved);
+        }
+        if (started) {
+            return;
         }
         // Build version, small, for bug reports.
         if (version == null) {
@@ -1139,6 +1174,54 @@ public final class BottomScreenView extends View {
             text.setTextSize(unit * 0.035f);
             outlined(c, "v" + version, w / 2f, h - unit * 0.04f, CREAM);
         }
+    }
+
+    private static final long TITLE_OUT_MS = 550;
+    private boolean titleIdle, titleLeaving, titleGone;
+    private static final int ANDROID_GREEN = Color.rgb(61, 220, 132);
+
+    /**
+     * The Android robot (Google, CC BY 3.0 - see assets/ANDROID-ROBOT-NOTICE.txt), drawn with
+     * its head centred at (cx, cy), head width s, tilted by deg, waving its near arm.
+     */
+    private void drawAndroidRobot(Canvas c, float cx, float cy, float s, float deg, int alpha) {
+        int saved = c.save();
+        c.rotate(deg, cx, cy);
+        paint.setStyle(Paint.Style.FILL);
+        paint.setShader(null);
+        // A dark outline first (slightly bigger shapes), then the green.
+        for (int pass = 0; pass < 2; pass++) {
+            float o = pass == 0 ? s * 0.06f : 0f;
+            paint.setColor(pass == 0 ? OUTLINE : ANDROID_GREEN);
+            paint.setAlpha(alpha);
+            // Head: a half disc.
+            tmp2.set(cx - s / 2 - o, cy - s / 2 - o, cx + s / 2 + o, cy + s / 2 + o);
+            c.drawArc(tmp2, 180, 180, true, paint);
+            // Antennae.
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeCap(Paint.Cap.ROUND);
+            paint.setStrokeWidth(s * 0.07f + o * 2);
+            c.drawLine(cx - s * 0.2f, cy - s * 0.36f, cx - s * 0.32f, cy - s * 0.6f, paint);
+            c.drawLine(cx + s * 0.2f, cy - s * 0.36f, cx + s * 0.32f, cy - s * 0.6f, paint);
+            paint.setStyle(Paint.Style.FILL);
+            // Body.
+            tmp2.set(cx - s / 2 - o, cy + s * 0.06f - o, cx + s / 2 + o, cy + s * 0.9f + o);
+            c.drawRoundRect(tmp2, s * 0.12f, s * 0.12f, paint);
+            // Waving arm (raised, beside the head).
+            float wave = (float) Math.sin(android.os.SystemClock.uptimeMillis() / 220.0) * 12f;
+            int armSaved = c.save();
+            c.rotate(-150 + wave, cx + s * 0.62f, cy + s * 0.14f);
+            tmp2.set(cx + s * 0.52f - o, cy + s * 0.08f - o, cx + s * 0.72f + o, cy + s * 0.62f + o);
+            c.drawRoundRect(tmp2, s * 0.1f, s * 0.1f, paint);
+            c.restoreToCount(armSaved);
+        }
+        // Eyes.
+        paint.setColor(Color.WHITE);
+        paint.setAlpha(alpha);
+        c.drawCircle(cx - s * 0.2f, cy - s * 0.2f, s * 0.05f, paint);
+        c.drawCircle(cx + s * 0.2f, cy - s * 0.2f, s * 0.05f, paint);
+        paint.setAlpha(255);
+        c.restoreToCount(saved);
     }
 
     private String version;
