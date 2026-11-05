@@ -584,6 +584,9 @@ public class DK64Activity extends SDLActivity
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (storage != null && storage.onActivityResult(requestCode, resultCode, data)) {
+            return;   // the data folder picker (first launch)
+        }
         if (requestCode != PICK_REQUEST_CODE) {
             super.onActivityResult(requestCode, resultCode, data);
             return;

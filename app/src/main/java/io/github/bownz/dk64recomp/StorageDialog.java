@@ -96,7 +96,7 @@ final class StorageDialog {
 
         View shared = choice("Shared folder", "Recommended",
             new String[] {
-                "A \"" + StorageAccess.SHARED_FOLDER_NAME + "\" folder on your device",
+                "A folder you pick, new or one you already use",
                 "Easy to add mods from a file manager or PC",
                 "Kept if you uninstall the app",
             },
@@ -132,11 +132,11 @@ final class StorageDialog {
     private void showSettingsPage() {
         LinearLayout page = board();
         page.addView(title("One more step"));
-        page.addView(body("Android will open a settings screen for DK64.", 0, dp(12)));
+        page.addView(body("Android will open a settings screen for DK64, then you'll pick the folder.", 0, dp(12)));
 
         LinearLayout steps = card(false);
         steps.addView(step("1", "Turn on \"Allow access to manage all files\""));
-        steps.addView(step("2", "Press back to return to the game"));
+        steps.addView(step("2", "Press back, then pick a folder for your files"));
         page.addView(steps);
 
         LinearLayout buttons = new LinearLayout(activity);
