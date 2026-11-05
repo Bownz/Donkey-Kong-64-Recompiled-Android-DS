@@ -2,7 +2,6 @@ package io.github.bownz.dk64recomp;
 
 import android.Manifest;
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
@@ -134,13 +133,17 @@ final class StorageAccess {
     }
 
     private void showChoice() {
-        new AlertDialog.Builder(activity)
-            .setTitle(R.string.storage_title)
-            .setMessage(activity.getString(R.string.storage_message, SHARED_FOLDER_NAME))
-            .setCancelable(false)
-            .setPositiveButton(R.string.storage_shared, (d, w) -> requestSharedAccess())
-            .setNegativeButton(R.string.storage_app, (d, w) -> choose(MODE_APP))
-            .show();
+        new StorageDialog(activity, new StorageDialog.Listener() {
+            @Override
+            public void onShared() {
+                requestSharedAccess();
+            }
+
+            @Override
+            public void onApp() {
+                choose(MODE_APP);
+            }
+        }).show();
     }
 
     private void requestSharedAccess() {
@@ -150,8 +153,8 @@ final class StorageAccess {
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            // "All files access" is granted on a Settings screen; we hear back in onResume().
-            Toast.makeText(activity, R.string.storage_settings_hint, Toast.LENGTH_LONG).show();
+            // "All files access" is granted on a Settings screen (the popup has just explained
+            // the switch); we hear back in onResume().
             waitingForSettings = true;
             Intent appScreen = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
                 Uri.parse("package:" + activity.getPackageName()));
