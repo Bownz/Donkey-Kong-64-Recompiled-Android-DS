@@ -329,6 +329,7 @@ static void add_gpu_driver_option(recomp::config::Config &config) {
 #if defined(__ANDROID__)
 // Android: the "Dual Screen" tab (the bottom screen on handhelds with two screens).
 extern "C" void dk64_android_set_touch_controls_mode(int mode);
+extern "C" void dk64_android_set_button_icons(int enabled);
 
 static void add_dual_screen_options(recomp::config::Config &config) {
     using EnumOptionVector = const std::vector<recomp::config::ConfigOptionEnumOption>;
@@ -401,6 +402,30 @@ static void add_dual_screen_options(recomp::config::Config &config) {
     config.add_option_change_callback(touch_kong_swap_option,
         [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
             dk64::android::set_touch_kong_swap(std::get<uint32_t>(cur) == 1u);
+            if (context == recomp::config::OptionChangeContext::Permanent) {
+                recompui::config::get_config("dual_screen").save_config();
+            }
+        });
+
+    // In-game button icons (text boxes, menus) drawn as the controller's own buttons.
+    static const std::string button_icons_option = "android_button_icons";
+    static EnumOptionVector button_icons_options = {
+        {0u, "Off", "Off"},
+        {1u, "On", "On"},
+    };
+    config.add_enum_option(
+        button_icons_option,
+        "Controller Button Icons",
+        "Shows the button icons in the game's text and menus as the buttons on your controller "
+        "that they're set to, instead of the N64's buttons.",
+        button_icons_options,
+        1u
+    );
+    config.add_option_change_callback(button_icons_option,
+        [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
+            if (context != recomp::config::OptionChangeContext::Temporary) {
+                dk64_android_set_button_icons(static_cast<int>(std::get<uint32_t>(cur)));
+            }
             if (context == recomp::config::OptionChangeContext::Permanent) {
                 recompui::config::get_config("dual_screen").save_config();
             }
@@ -634,6 +659,7 @@ void dk64::init_config() {
             option(g, gopts::joystick_deadzone),
             option(g, gopts::rumble_strength),
             option(g, keys::swimming_invert_mode),
+            option(d, "android_button_icons"),
             header("Touch"),
             option(d, "android_touch_controls"),
             option(d, "android_bottom_screen"),
@@ -790,6 +816,7 @@ extern "C" void dk64_android_apply_experience(int modern) {
     recomp::mods::enable_mod("dk64_tag_anywhere", modern != 0);
     recomp::config::Config &dual = recompui::config::get_config("dual_screen");
     dual.update_option_value("android_touch_kong_swap", static_cast<uint32_t>(modern ? 1u : 0u));
+    dual.update_option_value("android_button_icons", static_cast<uint32_t>(modern ? 1u : 0u));
     dual.save_config();
 
     recomp::config::Config &general = recompui::config::get_general_config();
@@ -813,9 +840,9 @@ namespace recompui::config {
             "Experience",
             "Sets several options at once.<br />"
             "<recomp-color primary>Classic</recomp-color>: the N64 as it was. Classic controls (the right stick works the C buttons), "
-            "Free Cam, no gyro, the original resolution and no anti-aliasing.<br />"
+            "Free Cam, no gyro, the original resolution, no anti-aliasing and the N64 button icons.<br />"
             "<recomp-color primary>Modern</recomp-color>: Analog Camera on the right stick, gyro aiming, the device's resolution, "
-            "anti-aliasing, and quick Kong swapping (Tag Anywhere and Touch Kong Swap).<br />"
+            "anti-aliasing, quick Kong swapping (Tag Anywhere and Touch Kong Swap) and button icons that match your controller.<br />"
             "<recomp-color primary>Custom</recomp-color>: keeps whatever you've set yourself.<br />"
             "Each option can still be changed afterwards.",
             experience_options,

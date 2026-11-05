@@ -89,6 +89,12 @@ extern "C" void recomp_report_frame(uint8_t* rdram, recomp_context* ctx) {
 #include <set>
 #include <vector>
 
+#include <atomic>
+static std::atomic<bool> button_icons_enabled{ true };
+extern "C" void dk64_android_set_button_icons(int enabled) {
+    button_icons_enabled = enabled != 0;
+}
+
 namespace {
     constexpr int icon_size = 64;   // assets/button_icons/*.rgba: 64x64 RGBA (android/tools/gen_button_icons.py)
 
@@ -217,7 +223,7 @@ extern "C" void recomp_fill_button_icon(uint8_t* rdram, recomp_context* ctx) {
     const int32_t tiles_y = std::max<int32_t>(1, MEM_W(0x1C, request));
 
     recompinput::GameInput input;
-    if (width <= 0 || height <= 0 || width > 256 || height > 256 || codec < 0 || codec > 3
+    if (!button_icons_enabled || width <= 0 || height <= 0 || width > 256 || height > 256 || codec < 0 || codec > 3
             || !game_input_for_sprite(sprite, input) || recompinput::connected_controller_name().empty()) {
         _return<int32_t>(ctx, 0);
         return;
