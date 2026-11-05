@@ -328,8 +328,34 @@ static void add_gpu_driver_option(recomp::config::Config &config) {
 
 #if defined(__ANDROID__)
 // Android: the "Dual Screen" tab (the bottom screen on handhelds with two screens).
+extern "C" void dk64_android_set_touch_controls_mode(int mode);
+
 static void add_dual_screen_options(recomp::config::Config &config) {
     using EnumOptionVector = const std::vector<recomp::config::ConfigOptionEnumOption>;
+    // On-screen touch buttons on the game screen: Auto shows them when no controller is
+    // connected (DK64Activity keeps the setting; this passes it on).
+    static const std::string touch_controls_option = "android_touch_controls";
+    static EnumOptionVector touch_controls_options = {
+        {0u, "Auto", "Auto"},
+        {1u, "On", "On"},
+        {2u, "Off", "Off"},
+    };
+    config.add_enum_option(
+        touch_controls_option,
+        "Touch Controls",
+        "On-screen buttons over the game. <b>Auto</b> shows them only when no controller is connected.",
+        touch_controls_options,
+        0u
+    );
+    config.add_option_change_callback(touch_controls_option,
+        [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
+            if (context != recomp::config::OptionChangeContext::Temporary) {
+                dk64_android_set_touch_controls_mode(static_cast<int>(std::get<uint32_t>(cur)));
+            }
+            if (context == recomp::config::OptionChangeContext::Permanent) {
+                recompui::config::get_config("dual_screen").save_config();
+            }
+        });
     static const std::string bottom_screen_option = "android_bottom_screen";
     static EnumOptionVector bottom_screen_options = {
         {0u, "Off", "Off"},
@@ -577,6 +603,77 @@ void dk64::init_config() {
     general_options.has_gyro_sensitivity = true;
     general_options.has_mouse_sensitivity = true;
 
+#if defined(__ANDROID__)
+    // Android: four tabs - Video, Input, Audio, Gameplay. The General and Dual Screen configs
+    // still exist (and keep their files) but their options are shown on the Input and
+    // Gameplay tabs instead; the controller setup opens from Input > Configure Inputs.
+    general_options.has_mouse_sensitivity = false;
+    auto &general_config = recompui::config::create_general_tab(general_options);
+    add_general_options(general_config);
+    recompui::config::set_tab_visible(recompui::config::general::id, false);
+
+    auto &graphics_config = recompui::config::create_graphics_tab("Video");
+    add_graphics_options(graphics_config);
+
+    {
+        using Entry = recompui::config::LayoutEntry;
+        using Kind = Entry::Kind;
+        const std::string g = recompui::config::general::id;
+        const std::string d = "dual_screen";
+        namespace keys = dk64::configkeys::general;
+        namespace gopts = recompui::config::general::options;
+        auto header = [](const std::string &text) { Entry e; e.kind = Kind::Header; e.text = text; return e; };
+        auto option = [](const std::string &cfg, const std::string &id) { Entry e; e.kind = Kind::Option; e.config_id = cfg; e.option_id = id; return e; };
+        Entry configure; configure.kind = Kind::Button; configure.text = "Configure Inputs";
+        configure.description = "Choose which button does what on your controller, or pick the Classic or Modern layout.";
+        configure.on_press = []() { recompui::config::set_tab(recompui::config::controls::id); };
+
+        recompui::config::create_layout_tab("Input", "input", {
+            header("Inputs"),
+            configure,
+            option(g, gopts::joystick_deadzone),
+            option(g, gopts::rumble_strength),
+            option(g, keys::swimming_invert_mode),
+            header("Touch"),
+            option(d, "android_touch_controls"),
+            option(d, "android_touch_kong_swap"),
+            option(d, "android_touch_feedback"),
+            option(d, "android_touch_feedback_strength"),
+            header("Dual Screen"),
+            option(d, "android_bottom_screen"),
+            header("Camera"),
+            option(g, keys::camera_type),
+            option(g, keys::analog_camera_sensitivity),
+            option(g, keys::third_person_camera_invert_mode),
+            option(g, keys::first_person_invert_mode),
+            header("Gyro"),
+            option(g, gopts::gyro_sensitivity),
+            option(g, keys::gyro_invert_mode),
+        }, { g, d });
+
+        auto &sound_config = recompui::config::create_sound_tab("Audio");
+        add_sound_options(sound_config);
+
+        recompui::config::create_layout_tab("Gameplay", "gameplay", {
+            option(g, "android_experience"),
+            option(g, keys::story_skip),
+            option(g, keys::lightning_flashes),
+            option(g, keys::skip_launcher),
+        }, { g });
+    }
+
+    set_control_defaults();
+    set_control_descriptions();
+    recompui::config::create_controls_tab("Configure Inputs");
+
+    auto &dual_screen_config = recompui::config::create_config_tab("Dual Screen", "dual_screen", false);
+    add_dual_screen_options(dual_screen_config);
+    recompui::config::set_tab_visible("dual_screen", false);
+
+    recompui::config::create_mods_tab();
+    auto &technical_config = recompui::config::create_config_tab("Extras", "technical", false);
+    add_technical_options(technical_config);
+#else
     auto &general_config = recompui::config::create_general_tab(general_options);
     add_general_options(general_config);
 
@@ -590,16 +687,6 @@ void dk64::init_config() {
     auto &sound_config = recompui::config::create_sound_tab();
     add_sound_options(sound_config);
 
-#if defined(__ANDROID__)
-    auto &dual_screen_config = recompui::config::create_config_tab("Dual Screen", "dual_screen", false);
-    add_dual_screen_options(dual_screen_config);
-#endif
-
-#if defined(__ANDROID__)
-    recompui::config::create_mods_tab();
-    auto &technical_config = recompui::config::create_config_tab("Extras", "technical", false);
-    add_technical_options(technical_config);
-#else
     auto &technical_config = recompui::config::create_config_tab("Technical", "technical", true);
     add_technical_options(technical_config);
 

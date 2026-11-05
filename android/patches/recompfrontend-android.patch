@@ -124,6 +124,45 @@ index c89956e..c62e059 100644
          }
  
          *buttons_out = cur_buttons;
+diff --git a/recompui/include/recompui/config.h b/recompui/include/recompui/config.h
+index fd04cb3..710c0e3 100644
+--- a/recompui/include/recompui/config.h
++++ b/recompui/include/recompui/config.h
+@@ -2,6 +2,8 @@
+ #define _RECOMP_UI_CONFIG_H_
+ 
+ #include <vector>
++#include <functional>
++#include <memory>
+ 
+ #include "librecomp/config.hpp"
+ #include "elements/ui_modal.h"
+@@ -131,6 +133,25 @@ namespace recompui {
+         recomp::config::Config &create_sound_tab(const std::string &name = config::sound::tab_name);
+         void create_mods_tab(const std::string &name = config::mods::tab_name);
+ 
++        // A tab that lists options from any of the configs, in a chosen order, with section
++        // headings and buttons between them. The configs must not need confirmation; the
++        // configs named in save_config_ids are saved when the tab closes.
++        struct LayoutEntry {
++            enum class Kind { Header, Option, Button };
++            Kind kind = Kind::Header;
++            std::string text;        // Header / Button: the text shown
++            std::string config_id;   // Option: which config
++            std::string option_id;   // Option: which option
++            std::string description; // Button: shown when it's focused
++            std::function<void()> on_press; // Button
++        };
++        void create_layout_tab(
++            const std::string &name,
++            const std::string &id,
++            std::vector<LayoutEntry> entries,
++            std::vector<std::string> save_config_ids
++        );
++
+         // Must be called after all tabs have been created.
+         // This loads all of the user's config files from disk.
+         void finalize();
 diff --git a/recompui/include/recompui/recompui.h b/recompui/include/recompui/recompui.h
 index 30c463b..4cbcf09 100644
 --- a/recompui/include/recompui/recompui.h
@@ -267,13 +306,13 @@ index 277a421..b33343d 100644
  
 diff --git a/recompui/src/composites/ui_menu_bar.cpp b/recompui/src/composites/ui_menu_bar.cpp
 new file mode 100644
-index 0000000..29a4523
+index 0000000..937133d
 --- /dev/null
 +++ b/recompui/src/composites/ui_menu_bar.cpp
-@@ -0,0 +1,233 @@
+@@ -0,0 +1,232 @@
 +// Android: the in-game menu bar. The menu button opens a slim bar across the top of the
 +// screen (in the bottom screen's DK style) instead of the full settings window; the bar opens
-+// Settings, Controls or Mods in the settings window, or quits. Like the Dusklight port's.
++// Settings or Mods in the settings window, or quits. Like the Dusklight port's.
 +#ifdef __ANDROID__
 +
 +#include <chrono>
@@ -471,7 +510,6 @@ index 0000000..29a4523
 +    menu_bar_root = root;
 +
 +    MenuBarItem *settings = context.create_element<MenuBarItem>(bar, "SETTINGS", []() { open_settings_tab(config::general::id); });
-+    context.create_element<MenuBarItem>(bar, "CONTROLS", []() { open_settings_tab(config::controls::id); });
 +    context.create_element<MenuBarItem>(bar, "MODS", []() { open_settings_tab(config::mods::id); });
 +    context.create_element<MenuBarItem>(bar, "QUIT", []() {
 +        menu_bar_root->hide_now();
@@ -505,10 +543,39 @@ index 0000000..29a4523
 +
 +#endif
 diff --git a/recompui/src/config/ui_config.cpp b/recompui/src/config/ui_config.cpp
-index 6c84c05..6e328e7 100644
+index 6c84c05..928fc28 100644
 --- a/recompui/src/config/ui_config.cpp
 +++ b/recompui/src/config/ui_config.cpp
-@@ -121,7 +121,51 @@ namespace recompui {
+@@ -107,6 +107,28 @@ namespace recompui {
+         return new_config;
+     }
+ 
++    void config::create_layout_tab(
++        const std::string &name,
++        const std::string &id,
++        std::vector<LayoutEntry> entries,
++        std::vector<std::string> save_config_ids
++    ) {
++        auto layout = std::make_shared<std::vector<LayoutEntry>>(std::move(entries));
++        config::create_tab(
++            name,
++            id,
++            [layout](recompui::ContextId context, Element* parent) {
++                context.create_element<ConfigPageOptionsMenu>(parent, layout.get());
++            },
++            nullptr,
++            [save_config_ids](TabCloseContext) {
++                for (const auto &config_id : save_config_ids) {
++                    config::get_config(config_id).save_config();
++                }
++            }
++        );
++    }
++
+     void config::finalize() {
+         if (loaded_configs) {
+             throw std::runtime_error("Configurations have already been loaded.");
+@@ -121,7 +143,66 @@ namespace recompui {
          loaded_configs = true;
      }
  
@@ -517,7 +584,7 @@ index 6c84c05..6e328e7 100644
 +    // shows the general tabs, CONTROLS shows Controls and Dual Screen, and MODS shows the mod
 +    // tabs. Opening any tab shows only the tabs of its group.
 +    static int tab_group(const std::string &id) {
-+        if (id == config::controls::id || id == "dual_screen") {
++        if (id == config::controls::id) {
 +            return 1;
 +        }
 +        if (id == config::mods::id || id == config::mod_discovery::id || id == "technical") {
@@ -536,7 +603,22 @@ index 6c84c05..6e328e7 100644
 +                config_modal->set_tab_visible(tab.id, true);
 +            }
 +        }
-+        config_modal->set_selected_tab(id);
++        // A hidden tab (e.g. General, whose options are on other tabs) opens the group's first.
++        std::string target = id;
++        for (auto &tab : pending_tabs) {
++            if (tab.id == id && tab.hidden) {
++                target.clear();
++            }
++        }
++        if (target.empty()) {
++            for (auto &tab : pending_tabs) {
++                if (!tab.hidden && tab_group(tab.id) == group) {
++                    target = tab.id;
++                    break;
++                }
++            }
++        }
++        config_modal->set_selected_tab(target);
 +        for (auto &tab : pending_tabs) {
 +            if (tab.hidden || tab_group(tab.id) != group) {
 +                config_modal->set_tab_visible(tab.id, false);
@@ -560,7 +642,7 @@ index 6c84c05..6e328e7 100644
          if (config_modal == nullptr) {
              for (auto &tab : pending_tabs) {
                  if (tab.id == id) {
-@@ -153,8 +197,14 @@ namespace recompui {
+@@ -153,8 +234,14 @@ namespace recompui {
              }
          }
          config_modal->set_selected_tab(0);
@@ -575,7 +657,7 @@ index 6c84c05..6e328e7 100644
          quit_button->add_pressed_callback([]() {
              if (ultramodern::is_game_started()) {
                  recompui::open_quit_game_prompt();
-@@ -182,7 +232,11 @@ namespace recompui {
+@@ -182,7 +269,11 @@ namespace recompui {
              throw std::runtime_error("No tab with ID '" + id + "' has been added to the config modal.");
          }
  
@@ -587,6 +669,24 @@ index 6c84c05..6e328e7 100644
      }
  
      void config::open() {
+@@ -197,6 +288,17 @@ namespace recompui {
+         if (config_modal == nullptr) {
+             throw std::runtime_error("Config modal has not been initialized.");
+         }
++#ifdef __ANDROID__
++        // The controller setup (opened from Input > Configure Inputs) goes back to Input.
++        if (current_group == 1 && config_modal->is_open_now()) {
++            for (auto &tab : pending_tabs) {
++                if (tab.id == "input") {
++                    show_tab_group("input");
++                    return false;
++                }
++            }
++        }
++#endif
+ 
+         return config_modal->close();
+     }
 diff --git a/recompui/src/config/ui_config_option.cpp b/recompui/src/config/ui_config_option.cpp
 index 86428c9..88e6c39 100644
 --- a/recompui/src/config/ui_config_option.cpp
@@ -936,10 +1036,10 @@ index 0561657..06088b1 100644
  
      std::string_view get_type_name() override { return "ConfigOptionEnum"; }
 diff --git a/recompui/src/config/ui_config_page_controls.cpp b/recompui/src/config/ui_config_page_controls.cpp
-index f379a6f..4a06985 100644
+index f379a6f..175cbb4 100644
 --- a/recompui/src/config/ui_config_page_controls.cpp
 +++ b/recompui/src/config/ui_config_page_controls.cpp
-@@ -460,6 +460,14 @@ void ConfigPageControls::on_edit_player_profile(int player_index) {
+@@ -460,6 +460,12 @@ void ConfigPageControls::on_edit_player_profile(int player_index) {
      }
  }
  
@@ -947,20 +1047,18 @@ index f379a6f..4a06985 100644
 +// Implemented in the game (src/game/config.cpp, android/jni/gpu_driver.cpp).
 +extern "C" int dk64_android_control_preset() __attribute__((weak));
 +extern "C" void dk64_android_apply_control_preset(int modern) __attribute__((weak));
-+extern "C" int dk64_android_touch_controls_mode() __attribute__((weak));
-+extern "C" void dk64_android_set_touch_controls_mode(int mode) __attribute__((weak));
 +#endif
 +
  void ConfigPageControls::render_footer() {
      if (multiplayer_enabled && !multiplayer_view_mappings) {
          hide_footer();
-@@ -473,7 +481,43 @@ void ConfigPageControls::render_footer() {
+@@ -473,7 +479,31 @@ void ConfigPageControls::render_footer() {
      {
          auto footer_left = footer->get_left();
          footer_left->clear_children();
 +#ifdef __ANDROID__
 +        // Android: no keyboard mappings (always the controller's). Instead: the Classic and
-+        // Modern presets (bindings, camera type and gyro together) and the touch controls.
++        // Modern presets (bindings, camera type and gyro together).
 +        if (!multiplayer_enabled) {
 +            single_player_show_keyboard_mappings = false;
 +            footer_left->set_gap(12.0f);
@@ -978,18 +1076,6 @@ index f379a6f..4a06985 100644
 +            };
 +            classic->add_pressed_callback([apply]() { apply(0); });
 +            modern->add_pressed_callback([apply]() { apply(1); });
-+            if (dk64_android_touch_controls_mode != nullptr) {
-+                static const char *names[] = { "Touch Controls: Auto", "Touch Controls: On", "Touch Controls: Off" };
-+                const int mode = dk64_android_touch_controls_mode();
-+                auto touch = context.create_element<Button>(footer_left, names[(mode >= 0 && mode < 3) ? mode : 0], ButtonStyle::Tertiary);
-+                touch->add_pressed_callback([touch]() {
-+                    const int next = (dk64_android_touch_controls_mode() + 1) % 3;
-+                    if (dk64_android_set_touch_controls_mode != nullptr) {
-+                        dk64_android_set_touch_controls_mode(next);
-+                    }
-+                    touch->set_text(names[next]);
-+                });
-+            }
 +        }
 +        if (false) {
 +#else
@@ -999,10 +1085,16 @@ index f379a6f..4a06985 100644
              keyboard_toggle->set_checked(single_player_show_keyboard_mappings);
              keyboard_toggle->add_checked_callback([this](bool checked) {
 diff --git a/recompui/src/config/ui_config_page_options_menu.cpp b/recompui/src/config/ui_config_page_options_menu.cpp
-index 6ba64e2..41e46a1 100644
+index 6ba64e2..8922845 100644
 --- a/recompui/src/config/ui_config_page_options_menu.cpp
 +++ b/recompui/src/config/ui_config_page_options_menu.cpp
-@@ -20,6 +20,12 @@ ConfigPageOptionsMenu::ConfigPageOptionsMenu(
+@@ -1,4 +1,5 @@
+ #include "ui_config_page_options_menu.h"
++#include <algorithm>
+ 
+ 
+ namespace recompui {
+@@ -20,6 +21,12 @@ ConfigPageOptionsMenu::ConfigPageOptionsMenu(
      description_container->set_typography(theme::Typography::Body);
      description_container->set_line_height(28.0f);
      description_container->set_padding(8.0f);
@@ -1015,6 +1107,352 @@ index 6ba64e2..41e46a1 100644
      set_description_text("");
  
      if (config->requires_confirmation) {
+@@ -28,6 +35,41 @@ ConfigPageOptionsMenu::ConfigPageOptionsMenu(
+     }
+ }
+ 
++static recomp::config::Config *first_layout_config(const std::vector<recompui::config::LayoutEntry> *layout) {
++    for (const auto &entry : *layout) {
++        if (entry.kind == recompui::config::LayoutEntry::Kind::Option) {
++            return &recompui::config::get_config(entry.config_id);
++        }
++    }
++    return &recompui::config::get_general_config();
++}
++
++ConfigPageOptionsMenu::ConfigPageOptionsMenu(
++    ResourceId rid,
++    Element *parent,
++    const std::vector<recompui::config::LayoutEntry> *layout
++) : ConfigPage(rid, parent, Events(EventType::Hover, EventType::Update, EventType::MenuAction)),
++    config(first_layout_config(layout)),
++    is_internal(true),
++    layout(layout)
++{
++    ContextId context = recompui::get_current_context();
++    set_as_navigation_container(NavigationType::Vertical);
++
++    render_layout_options();
++    description_container = context.create_element<Element>(body->get_right(), 0, "p", true);
++    description_container->set_typography(theme::Typography::Body);
++    description_container->set_line_height(28.0f);
++    description_container->set_padding(8.0f);
++#ifdef __ANDROID__
++    description_container->set_color(Color{232, 213, 168, 255});
++    description_container->set_font_size(22.0f);
++    description_container->set_line_height(30.0f);
++    description_container->set_padding(18.0f);
++#endif
++    set_description_text("");
++}
++
+ void ConfigPageOptionsMenu::set_description_text(const std::string &text) {
+     if (description_container) {
+         if (is_internal) {
+@@ -38,6 +80,15 @@ void ConfigPageOptionsMenu::set_description_text(const std::string &text) {
+     }
+ }
+ 
++ConfigOptionElement* ConfigPageOptionsMenu::get_element_from_option_id(recomp::config::Config *cfg, const std::string &option_id) {
++    for (size_t i = 0; i < config_option_elements.size(); i++) {
++        if (element_configs[i] == cfg && config_option_elements[i]->get_option_id() == option_id) {
++            return config_option_elements[i];
++        }
++    }
++    return nullptr;
++}
++
+ ConfigOptionElement* ConfigPageOptionsMenu::get_element_from_option_id(const std::string &option_id) {
+     for (auto *element : config_option_elements) {
+         if (element->get_option_id() == option_id) {
+@@ -51,13 +102,17 @@ void ConfigPageOptionsMenu::perform_option_render_updates() {
+     using ConfigOptionUpdateType = recomp::config::ConfigOptionUpdateType;
+     queue_update();
+ 
++    std::vector<recomp::config::Config*> configs = used_configs;
++    if (configs.empty()) {
++        configs.push_back(config);
++    }
++    for (recomp::config::Config *config : configs) {
+     auto options_updates = config->get_config_option_updates();
+-    bool has_updates = !options_updates.empty();
+     for (auto &option_update : options_updates) {
+         size_t option_index = option_update.option_index;
+         auto schema = config->get_config_schema();
+         std::string &option_id = schema.options[option_index].id;
+-        ConfigOptionElement* element = get_element_from_option_id(option_id);
++        ConfigOptionElement* element = get_element_from_option_id(config, option_id);
+         if (element == nullptr) {
+             printf("Failed to update conf option: '%s'\n", option_id.c_str());
+             continue;
+@@ -87,7 +142,8 @@ void ConfigPageOptionsMenu::perform_option_render_updates() {
+                     break;
+                 }
+                 case ConfigOptionUpdateType::Description: {
+-                    if (description_container && description_option_id == option_id) {
++                    if (description_container && description_option_id == option_id
++                            && (description_config == nullptr || description_config == config)) {
+                         set_description_text(config->get_option(option_index).description);
+                     }
+                     break;
+@@ -97,6 +153,7 @@ void ConfigPageOptionsMenu::perform_option_render_updates() {
+     }
+ 
+     config->clear_config_option_updates();
++    }
+ }
+ 
+ void ConfigPageOptionsMenu::process_event(const Event &e) {
+@@ -174,6 +231,7 @@ void ConfigPageOptionsMenu::render_config_options() {
+         body_left_scroll->set_as_navigation_container(NavigationType::Vertical);
+ 
+         config_option_elements.clear();
++        element_configs.clear();
+         bound_on_option_hover = [this](const std::string &option_id) {
+             this->on_option_hover(option_id);
+         };
+@@ -236,6 +294,7 @@ void ConfigPageOptionsMenu::render_config_options() {
+             element->update_disabled();
+             element->update_hidden();
+             config_option_elements.push_back(element);
++            element_configs.push_back(config);
+         }
+     }
+ }
+@@ -243,8 +302,182 @@ void ConfigPageOptionsMenu::render_config_options() {
+ void ConfigPageOptionsMenu::on_option_hover(const std::string &option_id) {
+     if (description_container) {
+         description_option_id = option_id;
++        description_config = config;
+         set_description_text(config->get_option(option_id).description);
+     }
+ }
+ 
++namespace {
++    // A whole-row button on a layout page (e.g. "Configure Inputs  ›").
++    class LayoutButtonRow : public Element {
++    private:
++        std::function<void()> on_press;
++        std::function<void()> on_focus;
++        Style hover_style;
++        Style focus_style;
++    protected:
++        void process_event(const Event &e) override {
++            switch (e.type) {
++            case EventType::Click:
++                if (on_press) {
++                    on_press();
++                }
++                break;
++            case EventType::Hover:
++                set_style_enabled(hover_state, std::get<EventHover>(e.variant).active);
++                if (std::get<EventHover>(e.variant).active && on_focus) {
++                    on_focus();
++                }
++                break;
++            case EventType::Focus:
++                set_style_enabled(focus_state, std::get<EventFocus>(e.variant).active);
++                if (std::get<EventFocus>(e.variant).active) {
++                    scroll_into_view();
++                    if (on_focus) {
++                        on_focus();
++                    }
++                }
++                break;
++            default:
++                break;
++            }
++        }
++        std::string_view get_type_name() override { return "LayoutButtonRow"; }
++    public:
++        LayoutButtonRow(ResourceId rid, Element *parent, const std::string &text,
++                std::function<void()> press, std::function<void()> focus) :
++            Element(rid, parent, Events(EventType::Click, EventType::Hover, EventType::Focus), "button", false),
++            on_press(std::move(press)), on_focus(std::move(focus))
++        {
++#ifdef __ANDROID__
++            style_dk_option_row(this);
++            hover_style.set_background_color(Color{96, 62, 28, 230});
++            focus_style.set_background_color(Color{96, 62, 28, 230});
++            focus_style.set_border_color(Color{249, 214, 72, 255});
++#else
++            set_padding(16.0f);
++#endif
++            set_cursor(Cursor::Pointer);
++            set_focusable(true);
++            set_tab_index_auto();
++            add_style(&hover_style, { hover_state });
++            add_style(&focus_style, { focus_state });
++            ContextId context = get_current_context();
++            Label *name = context.create_element<Label>(this, text, theme::Typography::LabelMD);
++            name->set_text_transform(TextTransform::Uppercase);
++            name->set_font_weight(700);
++            name->set_color(Color{255, 244, 214, 255});
++            Label *arrow = context.create_element<Label>(this, "\u203A", theme::Typography::LabelMD);
++            arrow->set_font_weight(700);
++            arrow->set_color(Color{249, 214, 72, 255});
++        }
++    };
++}
++
++void ConfigPageOptionsMenu::render_layout_options() {
++    ContextId context = recompui::get_current_context();
++    Element *body_left = get_body()->get_left();
++    body_left->clear_children();
++    body_left->set_padding(0.0f);
++    body_left->set_display(Display::Block);
++    body_left->set_position(Position::Relative);
++    body_left->set_height(100.0f, Unit::Percent);
++
++    auto scroll = context.create_element<Element>(body_left, 0, "div", false);
++    scroll->set_display(Display::Block);
++    scroll->set_width(100.0f, Unit::Percent);
++    scroll->set_min_height(100.0f, Unit::Percent);
++    scroll->set_max_height(100.0f, Unit::Percent);
++    scroll->set_padding(16.0f);
++    scroll->set_overflow_y(Overflow::Auto);
++    scroll->set_as_navigation_container(NavigationType::Vertical);
++
++    config_option_elements.clear();
++    element_configs.clear();
++    used_configs.clear();
++
++    bool first_header = true;
++    for (const auto &entry : *layout) {
++        switch (entry.kind) {
++        case recompui::config::LayoutEntry::Kind::Header: {
++            Label *header = context.create_element<Label>(scroll, entry.text, theme::Typography::Header3);
++            header->set_text_transform(TextTransform::Uppercase);
++#ifdef __ANDROID__
++            header->set_font_family("Luckiest Guy");
++            header->set_font_weight(400);
++            header->set_font_size(24.0f);
++            header->set_letter_spacing(1.0f);
++            header->set_color(Color{232, 213, 168, 170});
++#endif
++            header->set_display(Display::Block);
++            header->set_margin_top(first_header ? 4.0f : 22.0f);
++            header->set_margin_bottom(10.0f);
++            header->set_padding_left(10.0f);
++            first_header = false;
++            break;
++        }
++        case recompui::config::LayoutEntry::Kind::Button: {
++            const std::string description = entry.description;
++            context.create_element<LayoutButtonRow>(scroll, entry.text, entry.on_press, [this, description]() {
++                description_option_id.clear();
++                description_config = nullptr;
++                set_description_text(description);
++            });
++            break;
++        }
++        case recompui::config::LayoutEntry::Kind::Option: {
++            recomp::config::Config *cfg = &recompui::config::get_config(entry.config_id);
++            if (!cfg->has_option(entry.option_id)) {
++                break;
++            }
++            const auto &schema = cfg->get_config_schema();
++            size_t index = 0;
++            while (index < schema.options.size() && schema.options[index].id != entry.option_id) {
++                index++;
++            }
++            if (index >= schema.options.size()) {
++                break;
++            }
++            if (std::find(used_configs.begin(), used_configs.end(), cfg) == used_configs.end()) {
++                used_configs.push_back(cfg);
++            }
++            set_option_value_t set_value = [cfg](const std::string &option_id, recomp::config::ConfigValueVariant value) {
++                cfg->set_option_value(option_id, value);
++            };
++            on_option_hover_t hover = [this, cfg](const std::string &option_id) {
++                if (description_container) {
++                    description_option_id = option_id;
++                    description_config = cfg;
++                    set_description_text(cfg->get_option(option_id).description);
++                }
++            };
++            ConfigOptionElement *element = nullptr;
++            switch (schema.options[index].type) {
++            case recomp::config::ConfigOptionType::Enum:
++                element = context.create_element<ConfigOptionEnum>(scroll, entry.option_id, index, cfg, set_value, hover);
++                break;
++            case recomp::config::ConfigOptionType::Number:
++                element = context.create_element<ConfigOptionNumber>(scroll, entry.option_id, index, cfg, set_value, hover);
++                break;
++            case recomp::config::ConfigOptionType::String:
++                element = context.create_element<ConfigOptionString>(scroll, entry.option_id, index, cfg, set_value, hover);
++                break;
++            case recomp::config::ConfigOptionType::Bool:
++                element = context.create_element<ConfigOptionBool>(scroll, entry.option_id, index, cfg, set_value, hover);
++                break;
++            default:
++                break;
++            }
++            if (element != nullptr) {
++                element->update_disabled();
++                element->update_hidden();
++                config_option_elements.push_back(element);
++                element_configs.push_back(cfg);
++            }
++            break;
++        }
++        }
++    }
++}
++
+ } // namespace recompui
+diff --git a/recompui/src/config/ui_config_page_options_menu.h b/recompui/src/config/ui_config_page_options_menu.h
+index 49e05db..31f5815 100644
+--- a/recompui/src/config/ui_config_page_options_menu.h
++++ b/recompui/src/config/ui_config_page_options_menu.h
+@@ -6,6 +6,7 @@
+ #include "elements/ui_button.h"
+ #include "librecomp/config.hpp"
+ #include "librecomp/mods.hpp"
++#include "recompui/config.h"
+ 
+ namespace recompui {
+     class ConfigPageOptionsMenu : public ConfigPage {
+@@ -14,6 +15,12 @@ namespace recompui {
+         bool is_internal = false;
+ 
+         std::vector<ConfigOptionElement*> config_option_elements;
++        // Which config each element belongs to (a layout page mixes configs).
++        std::vector<recomp::config::Config*> element_configs;
++        std::vector<recomp::config::Config*> used_configs;
++        const std::vector<recompui::config::LayoutEntry> *layout = nullptr;
++        recomp::config::Config *description_config = nullptr;
++        std::vector<std::function<void()>> button_descriptions;
+         Element *description_container = nullptr;
+         std::string description_option_id = "";
+         Button *apply_button = nullptr;
+@@ -25,10 +32,12 @@ namespace recompui {
+         set_option_value_t bound_set_option_value;
+ 
+         void render_config_options();
++        void render_layout_options();
+         void render_confirmation_footer();
+         void on_option_hover(const std::string &option_id);
+         void on_set_option_value(const std::string &option_id, recomp::config::ConfigValueVariant value);
+         ConfigOptionElement* get_element_from_option_id(const std::string &option_id);
++        ConfigOptionElement* get_element_from_option_id(recomp::config::Config *cfg, const std::string &option_id);
+         void perform_option_render_updates();
+         void set_description_text(const std::string &text);
+     public:
+@@ -38,6 +47,12 @@ namespace recompui {
+             recomp::config::Config *config,
+             bool is_internal = false
+         );
++        // A page laid out from a list of entries (config::create_layout_tab).
++        ConfigPageOptionsMenu(
++            ResourceId rid,
++            Element *parent,
++            const std::vector<recompui::config::LayoutEntry> *layout
++        );
+         virtual ~ConfigPageOptionsMenu() = default;
+     };
+ } // namespace recompui
 diff --git a/recompui/src/config/ui_config_tab_general.cpp b/recompui/src/config/ui_config_tab_general.cpp
 index 296ce0e..a6df4df 100644
 --- a/recompui/src/config/ui_config_tab_general.cpp
