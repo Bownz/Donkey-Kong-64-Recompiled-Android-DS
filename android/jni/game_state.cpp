@@ -19,6 +19,8 @@
 namespace {
     std::atomic<uint8_t*> g_rdram{nullptr};
     std::atomic<bool> g_touch_kong_swap{false};
+    std::atomic<bool> g_touch_feedback{true};
+    std::atomic<int> g_touch_feedback_strength{2};
     // patches/android_hooks.c reports each input-handler set the game runs; a frame can run
     // several (e.g. a mode's own set plus shared ones). They're collected per frame.
     std::atomic<uint64_t> g_sets_building[2]{};
@@ -368,6 +370,20 @@ Java_io_github_bownz_dk64recomp_GameState_nativeReadFlags(JNIEnv* env, jclass, j
 
 void dk64::android::set_touch_kong_swap(bool enabled) {
     g_touch_kong_swap.store(enabled);
+}
+
+void dk64::android::set_touch_feedback(bool enabled) {
+    g_touch_feedback.store(enabled);
+}
+
+void dk64::android::set_touch_feedback_strength(int strength) {
+    g_touch_feedback_strength.store(strength < 1 ? 1 : strength > 3 ? 3 : strength);
+}
+
+// Touch button vibration from the Dual Screen settings: 0 off, 1 light, 2 medium, 3 strong.
+extern "C" JNIEXPORT jint JNICALL
+Java_io_github_bownz_dk64recomp_GameState_nativeTouchFeedback(JNIEnv*, jclass) {
+    return g_touch_feedback.load() ? g_touch_feedback_strength.load() : 0;
 }
 
 // Touch Kong swap (bottom screen + the Tag Anywhere mod), as bits:

@@ -359,6 +359,47 @@ static void add_dual_screen_options(recomp::config::Config &config) {
                 recompui::config::get_config("dual_screen").save_config();
             }
         });
+
+    // A little vibration when a touch button is pressed, and how strong it is.
+    static const std::string touch_feedback_option = "android_touch_feedback";
+    static EnumOptionVector touch_feedback_options = {
+        {0u, "Off", "Off"},
+        {1u, "On", "On"},
+    };
+    config.add_enum_option(
+        touch_feedback_option,
+        "Touch Feedback",
+        "A short vibration when you press a touch button.",
+        touch_feedback_options,
+        1u
+    );
+    config.add_option_change_callback(touch_feedback_option,
+        [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
+            dk64::android::set_touch_feedback(std::get<uint32_t>(cur) == 1u);
+            if (context == recomp::config::OptionChangeContext::Permanent) {
+                recompui::config::get_config("dual_screen").save_config();
+            }
+        });
+    static const std::string touch_feedback_strength_option = "android_touch_feedback_strength";
+    static EnumOptionVector touch_feedback_strength_options = {
+        {1u, "Light", "Light"},
+        {2u, "Medium", "Medium"},
+        {3u, "Strong", "Strong"},
+    };
+    config.add_enum_option(
+        touch_feedback_strength_option,
+        "Feedback Strength",
+        "How strong the touch button vibration is.",
+        touch_feedback_strength_options,
+        2u
+    );
+    config.add_option_change_callback(touch_feedback_strength_option,
+        [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
+            dk64::android::set_touch_feedback_strength(static_cast<int>(std::get<uint32_t>(cur)));
+            if (context == recomp::config::OptionChangeContext::Permanent) {
+                recompui::config::get_config("dual_screen").save_config();
+            }
+        });
 }
 #endif
 

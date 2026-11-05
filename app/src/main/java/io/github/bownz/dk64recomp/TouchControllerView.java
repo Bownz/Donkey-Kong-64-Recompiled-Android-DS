@@ -375,7 +375,7 @@ public final class TouchControllerView extends View {
             }
         }
         if (newPress) {
-            performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+            Haptics.tap(this);
         }
     }
 

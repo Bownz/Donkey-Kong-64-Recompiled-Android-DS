@@ -189,7 +189,7 @@ public final class BottomScreenView extends View {
             return; // One move at a time; a sequence takes ~0.3 s.
         }
         running = move;
-        performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+        Haptics.tap(this);
         startAnim("squash" + move);
         startAnim("wiggle" + move);
         invalidate();
@@ -329,7 +329,7 @@ public final class BottomScreenView extends View {
         // The game counts only the chosen Kong as freed while this runs, so one step of
         // Tag Anywhere lands straight on them.
         GameState.setTagTarget(k);
-        performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+        Haptics.tap(this);
         swapPress();
         handler.postDelayed(swapTick, SWAP_TICK_MS);
         invalidate();
@@ -421,7 +421,7 @@ public final class BottomScreenView extends View {
         if (orangstandBusy || running != null || state.paused) {
             return;
         }
-        performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+        Haptics.tap(this);
         if (orangstand) {
             // Letting go of Z puts Lanky back on his feet.
             stopOrangstand();
@@ -486,7 +486,7 @@ public final class BottomScreenView extends View {
         if (zbBusy || running != null || !zbMoveUsable() || !state.canZMoves) {
             return;
         }
-        performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+        Haptics.tap(this);
         zbBusy = true;
         invalidate();
         final int z = TouchInput.N64_Z, b = TouchInput.N64_B;
@@ -552,7 +552,7 @@ public final class BottomScreenView extends View {
         if (cancelBusy || running != null || state.paused) {
             return;
         }
-        performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+        Haptics.tap(this);
         cancelBusy = true;
         invalidate();
         final int z = TouchInput.N64_Z, c = TouchInput.N64_C_LEFT;
@@ -904,7 +904,7 @@ public final class BottomScreenView extends View {
                 break;
             }
         }
-        performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+        Haptics.tap(this);
         invalidate();
     }
 
@@ -1930,7 +1930,7 @@ public final class BottomScreenView extends View {
                 // Tapping the Kong you're playing (or the one already shown) goes back to
                 // following whoever you play as.
                 selectedKong = (current || i == selectedKong) ? -1 : i;
-                performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+                Haptics.tap(this);
                 invalidate();
                 return true;
             }

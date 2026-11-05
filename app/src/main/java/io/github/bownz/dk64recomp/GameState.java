@@ -132,6 +132,16 @@ final class GameState {
     private static native int nativeArea();
     private static native int nativeOverlay();
     private static native boolean nativeFontMetrics(byte[] out);
+    private static native int nativeTouchFeedback();
+
+    /** Touch button vibration setting: 0 off, 1 light, 2 medium, 3 strong. */
+    static int touchFeedback() {
+        try {
+            return nativeTouchFeedback();
+        } catch (UnsatisfiedLinkError e) {
+            return 2;
+        }
+    }
 
     /** The pause-screen font's metrics from the game (see GameFont), or null if not readable yet. */
     static byte[] fontMetrics() {
