@@ -605,7 +605,7 @@ static void set_control_defaults() {
     //   C Down  -> right stick down  + L shoulder (zoom; Z + C Down: fairy camera)
     //   C Right -> right stick right + R shoulder (Z + C Right: throw an orange)
     //   D-Pad   -> D-Pad (Tag Anywhere and other mods use it).
-    // Modern drops the right stick from the C buttons, so these buttons are how items are used.
+    // Modern takes C Up off the right stick (the stick turns the camera); X is C Up then.
     set_default_mapping_for_controller(GameInput::A, { InputField::controller_digital(SDL_CONTROLLER_BUTTON_A) });
     set_default_mapping_for_controller(GameInput::B, { InputField::controller_digital(SDL_CONTROLLER_BUTTON_B) });
     set_default_mapping_for_controller(GameInput::Z, { InputField::controller_analog(SDL_CONTROLLER_AXIS_TRIGGERLEFT, true) });
@@ -766,8 +766,8 @@ void dk64::init_config() {
 // ---- Control presets (Android) -----------------------------------------------------------
 //
 // Classic: the N64 way. The right stick works the C buttons, the Free camera, no gyro.
-// Modern:  the right stick turns the camera (Analog Camera) instead of pressing the C buttons
-//          (they stay on the shoulder and face buttons), gyro aiming on.
+// Modern:  the right stick turns the camera (Analog Camera); it still presses C Down/Left/Right,
+//          C Up moves to X only. Gyro aiming on, first person and gyro not inverted.
 // Chosen on first launch (main.cpp) and from the Controls page's footer (RecompFrontend patch).
 
 static std::filesystem::path control_preset_marker() {
@@ -789,7 +789,9 @@ extern "C" void dk64_android_apply_control_preset(int modern) {
     if (profile >= 0) {
         profiles::reset_profile_bindings(profile, InputDevice::Controller);
         if (modern) {
-            for (GameInput input : { GameInput::C_UP, GameInput::C_DOWN, GameInput::C_LEFT, GameInput::C_RIGHT }) {
+            // The right stick keeps C Down / Left / Right; only C Up (first person) comes off it,
+            // so pushing the camera up doesn't drop into first person. C Up stays on X.
+            for (GameInput input : { GameInput::C_UP }) {
                 for (size_t b = 0; b < num_bindings_per_input; b++) {
                     if (profiles::get_input_binding(profile, input, b).input_type == InputType::ControllerAnalog) {
                         profiles::set_input_binding(profile, input, b, InputField{});
@@ -803,6 +805,15 @@ extern "C" void dk64_android_apply_control_preset(int modern) {
     recomp::config::Config &general = recompui::config::get_general_config();
     general.update_option_value(dk64::configkeys::general::camera_type,
         static_cast<uint32_t>(modern ? dk64::CameraTypeMode::Analog : dk64::CameraTypeMode::Free));
+    // Aiming: Modern looks up when you push (or tilt) up, like most games now; Classic keeps
+    // the N64's (up looks down). The third person camera isn't inverted in either; swimming
+    // stays as the original game.
+    general.update_option_value(dk64::configkeys::general::third_person_camera_invert_mode,
+        static_cast<uint32_t>(dk64::CameraInvertMode::InvertNone));
+    general.update_option_value(dk64::configkeys::general::first_person_invert_mode,
+        static_cast<uint32_t>(modern ? dk64::CameraInvertMode::InvertNone : dk64::CameraInvertMode::InvertY));
+    general.update_option_value(dk64::configkeys::general::gyro_invert_mode,
+        static_cast<uint32_t>(modern ? dk64::CameraInvertMode::InvertNone : dk64::CameraInvertMode::InvertY));
     if (general.has_option(recompui::config::general::options::gyro_sensitivity)) {
         general.update_option_value(recompui::config::general::options::gyro_sensitivity, modern ? 25.0 : 0.0);
     }
