@@ -882,7 +882,7 @@ index c312734..2917814 100644
  
          ~CurlSession()
 diff --git a/recompui/src/config/ui_config.cpp b/recompui/src/config/ui_config.cpp
-index 6c84c05..928fc28 100644
+index 6c84c05..f5dc0b4 100644
 --- a/recompui/src/config/ui_config.cpp
 +++ b/recompui/src/config/ui_config.cpp
 @@ -107,6 +107,28 @@ namespace recompui {
@@ -914,7 +914,7 @@ index 6c84c05..928fc28 100644
      void config::finalize() {
          if (loaded_configs) {
              throw std::runtime_error("Configurations have already been loaded.");
-@@ -121,7 +143,66 @@ namespace recompui {
+@@ -121,7 +143,72 @@ namespace recompui {
          loaded_configs = true;
      }
  
@@ -934,24 +934,30 @@ index 6c84c05..928fc28 100644
 +
 +    static int current_group = 0;
 +
++    // Find Mods (downloading and installing) only before the game starts: installing a mod
++    // turns it on, and loading a mod into the running game crashed it.
++    static bool tab_unavailable(const PendingTab &tab) {
++        return tab.hidden || (tab.id == config::mod_discovery::id && ultramodern::is_game_started());
++    }
++
 +    static void show_tab_group(const std::string &id) {
 +        const int group = tab_group(id);
 +        current_group = group;
 +        for (auto &tab : pending_tabs) {
-+            if (!tab.hidden && tab_group(tab.id) == group) {
++            if (!tab_unavailable(tab) && tab_group(tab.id) == group) {
 +                config_modal->set_tab_visible(tab.id, true);
 +            }
 +        }
 +        // A hidden tab (e.g. General, whose options are on other tabs) opens the group's first.
 +        std::string target = id;
 +        for (auto &tab : pending_tabs) {
-+            if (tab.id == id && tab.hidden) {
++            if (tab.id == id && tab_unavailable(tab)) {
 +                target.clear();
 +            }
 +        }
 +        if (target.empty()) {
 +            for (auto &tab : pending_tabs) {
-+                if (!tab.hidden && tab_group(tab.id) == group) {
++                if (!tab_unavailable(tab) && tab_group(tab.id) == group) {
 +                    target = tab.id;
 +                    break;
 +                }
@@ -959,7 +965,7 @@ index 6c84c05..928fc28 100644
 +        }
 +        config_modal->set_selected_tab(target);
 +        for (auto &tab : pending_tabs) {
-+            if (tab.hidden || tab_group(tab.id) != group) {
++            if (tab_unavailable(tab) || tab_group(tab.id) != group) {
 +                config_modal->set_tab_visible(tab.id, false);
 +            }
 +        }
@@ -981,7 +987,7 @@ index 6c84c05..928fc28 100644
          if (config_modal == nullptr) {
              for (auto &tab : pending_tabs) {
                  if (tab.id == id) {
-@@ -153,8 +234,14 @@ namespace recompui {
+@@ -153,8 +240,14 @@ namespace recompui {
              }
          }
          config_modal->set_selected_tab(0);
@@ -996,7 +1002,7 @@ index 6c84c05..928fc28 100644
          quit_button->add_pressed_callback([]() {
              if (ultramodern::is_game_started()) {
                  recompui::open_quit_game_prompt();
-@@ -182,7 +269,11 @@ namespace recompui {
+@@ -182,7 +275,11 @@ namespace recompui {
              throw std::runtime_error("No tab with ID '" + id + "' has been added to the config modal.");
          }
  
@@ -1008,7 +1014,7 @@ index 6c84c05..928fc28 100644
      }
  
      void config::open() {
-@@ -197,6 +288,17 @@ namespace recompui {
+@@ -197,6 +294,17 @@ namespace recompui {
          if (config_modal == nullptr) {
              throw std::runtime_error("Config modal has not been initialized.");
          }
