@@ -820,12 +820,29 @@ extern "C" void dk64_android_apply_control_preset(int modern) {
         profiles::reset_profile_bindings(profile, InputDevice::Controller);
         if (modern) {
             // The right stick keeps C Down / Left / Right; only C Up (first person) comes off it,
-            // so pushing the camera up doesn't drop into first person. C Up is X and R3.
+            // so pushing the camera up doesn't drop into first person. C Up is R3.
             for (GameInput input : { GameInput::C_UP }) {
                 for (size_t b = 0; b < num_bindings_per_input; b++) {
                     if (profiles::get_input_binding(profile, input, b).input_type == InputType::ControllerAnalog) {
                         // Pressing the right stick in is C Up instead (X still is too).
                         profiles::set_input_binding(profile, input, b, InputField::controller_digital(SDL_CONTROLLER_BUTTON_RIGHTSTICK));
+                    }
+                }
+            }
+        }
+        if (modern) {
+            // Modern leaves X and Y free: C Up is R3, C Left is the right stick.
+            const InputField x = InputField::controller_digital(SDL_CONTROLLER_BUTTON_X);
+            const InputField y = InputField::controller_digital(SDL_CONTROLLER_BUTTON_Y);
+            for (int i = 0; i < static_cast<int>(GameInput::COUNT); i++) {
+                const GameInput input = static_cast<GameInput>(i);
+                if (get_game_input_is_menu(input)) {
+                    continue;
+                }
+                for (size_t b = 0; b < num_bindings_per_input; b++) {
+                    const InputField field = profiles::get_input_binding(profile, input, b);
+                    if (field == x || field == y) {
+                        profiles::set_input_binding(profile, input, b, InputField{});
                     }
                 }
             }
