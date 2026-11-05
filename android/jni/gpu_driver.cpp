@@ -220,3 +220,26 @@ extern "C" void dk64_android_watch_quit() {
     SDL_AddEventWatch(on_sdl_event, nullptr);
 }
 
+
+// RecompFrontend's launcher calls this once a ROM has been supplied and stored: the activity
+// restarts the app, since the first game started in that same run crashes (see the patch).
+extern "C" void dk64_android_rom_imported() {
+    JNIEnv* env = static_cast<JNIEnv*>(SDL_AndroidGetJNIEnv());
+    jobject activity = static_cast<jobject>(SDL_AndroidGetActivity());
+    if (env == nullptr || activity == nullptr) {
+        return;
+    }
+    jclass activity_class = env->GetObjectClass(activity);
+    jmethodID method = env->GetMethodID(activity_class, "restartAfterRomImport", "()V");
+    if (method == nullptr) {
+        env->ExceptionClear();
+    } else {
+        env->CallVoidMethod(activity, method);
+        if (env->ExceptionCheck()) {
+            env->ExceptionDescribe();
+            env->ExceptionClear();
+        }
+    }
+    env->DeleteLocalRef(activity_class);
+    env->DeleteLocalRef(activity);
+}

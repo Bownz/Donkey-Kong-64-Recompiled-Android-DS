@@ -92,6 +92,16 @@
             android:excludeFromRecents="true"
             android:theme="@android:style/Theme.DeviceDefault.Dialog.NoActionBar" />
 
+        <!-- Restarts the game's process after a ROM is supplied (its own process, no UI). -->
+        <activity
+            android:name=".RestartActivity"
+            android:exported="false"
+            android:process=":settings"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
         <!-- Also in the app drawer, for launchers without long-press shortcuts (e.g. the AYN
              Thor's). -->
         <activity-alias

@@ -582,6 +582,21 @@ public class DK64Activity extends SDLActivity
         }
     }
 
+    /**
+     * Called from native code (RecompFrontend's launcher) once a ROM has been supplied: the
+     * first game started in that same run crashes, a fresh start never does, so start over.
+     * The launcher comes back with Start Game ready.
+     */
+    @SuppressWarnings("unused")
+    public void restartAfterRomImport() {
+        Log.i(TAG, "ROM supplied: restarting the app for a clean first start");
+        Diagnostics.markLeaving(this);
+        runOnUiThread(() -> {
+            startActivity(new Intent(this, RestartActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            overridePendingTransition(0, 0);
+        });
+    }
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         if (storage != null && storage.onActivityResult(requestCode, resultCode, data)) {

@@ -124,6 +124,36 @@ index c89956e..c62e059 100644
          }
  
          *buttons_out = cur_buttons;
+diff --git a/recompui/src/base/ui_launcher.cpp b/recompui/src/base/ui_launcher.cpp
+index 6de7a94..15301ba 100644
+--- a/recompui/src/base/ui_launcher.cpp
++++ b/recompui/src/base/ui_launcher.cpp
+@@ -407,12 +407,25 @@ namespace recompui {
+         }
+     }
+ 
++#ifdef __ANDROID__
++    // Android: restarts the app after a ROM is first supplied (see select_rom).
++    extern "C" void dk64_android_rom_imported() __attribute__((weak));
++#endif
++
+     void GameOptionsMenu::select_rom(std::function<void(bool)> callback) {
+         recompui::file::open_file_dialog([this, callback](bool success, const std::filesystem::path& path) {
+             if (success) {
+                 recomp::RomValidationError rom_error = recomp::select_rom(path, this->game_id);
+                 switch (rom_error) {
+                     case recomp::RomValidationError::Good:
++#ifdef __ANDROID__
++                        // The first game started in the same run as supplying the ROM crashes
++                        // (game memory ends up corrupted; a fresh start is always fine), so
++                        // restart the app once the ROM is stored.
++                        if (dk64_android_rom_imported != nullptr) {
++                            dk64_android_rom_imported();
++                        }
++#endif
+                         callback(true);
+                         return;
+                     case recomp::RomValidationError::FailedToOpen:
 diff --git a/recompui/src/config/ui_config_option.cpp b/recompui/src/config/ui_config_option.cpp
 index 86428c9..fb1b915 100644
 --- a/recompui/src/config/ui_config_option.cpp
