@@ -301,6 +301,9 @@ Java_io_github_bownz_dk64recomp_GameState_nativeRead(JNIEnv* env, jclass, jintAr
                 bits |= 128;
             }
         }
+        if (read_u8(rdram, kCutsceneActive) != 0) {
+            bits |= 1 << 26;        // a cutscene is playing
+        }
         if (player >= 0x80000000u && player < 0x80800000u - 0x300) {
             if (read_u8(rdram, player + kPlayerGunOut) != 0) {
                 bits |= 1;

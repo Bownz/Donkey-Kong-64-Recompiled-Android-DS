@@ -232,6 +232,8 @@ final class GameState {
     boolean climbing;
     /** The pause menu is open. */
     boolean paused;
+    /** A cutscene is playing (the game's is_cutscene_active). */
+    boolean cutscene;
     /** A Kong barrel ability is on (Mini Monkey, Hunky Chunky, Strong Kong, Rocketbarrel...). */
     boolean transformed;
     /** The player's control state (DK64's own numbering). */
@@ -324,6 +326,7 @@ final class GameState {
         inputSet = (raw[COUNT - 1] >> 16) & 0xFF;
         onFeet = (raw[COUNT - 1] & (1 << 24)) != 0;
         camera = (raw[COUNT - 1] & (1 << 25)) != 0;
+        cutscene = (raw[COUNT - 1] & (1 << 26)) != 0;
         for (int k = 0; k < KONG_COUNT; k++) {
             for (int l = 0; l < LEVELS; l++) {
                 int base = 8 + KONG_COUNT * 6 + 2 + (k * LEVELS + l) * 2;

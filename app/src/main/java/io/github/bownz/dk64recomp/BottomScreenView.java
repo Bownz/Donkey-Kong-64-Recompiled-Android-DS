@@ -557,6 +557,81 @@ public final class BottomScreenView extends View {
         return state.inGame() && (state.transformed || android.os.SystemClock.uptimeMillis() - crystalsDrainedAt < 1500);
     }
 
+    // ---- Cutscene skip -----------------------------------------------------------------
+
+    private final RectF skipRect = new RectF();
+    private boolean skipBusy;
+
+    private void drawSkipButton(Canvas c) {
+        float w = getWidth(), h = getHeight();
+        float bw = Math.min(w * 0.5f, unit * 0.42f), bh = Math.min(h * 0.16f, unit * 0.13f);
+        skipRect.set(w / 2 - bw / 2, h * 0.5f - bh / 2, w / 2 + bw / 2, h * 0.5f + bh / 2);
+        float squash = animProgress("squashskip", SQUASH_MS);
+        int saved = c.save();
+        if (squash >= 0) {
+            float k = 1f - 0.08f * (float) Math.sin(Math.PI * squash);
+            c.scale(k, k, skipRect.centerX(), skipRect.centerY());
+        }
+        float r = bh / 2;
+        paint.setStyle(Paint.Style.FILL);
+        paint.setShader(null);
+        paint.setColor(Color.argb(140, 0, 0, 0));
+        tmp.set(skipRect.left, skipRect.top + bh * 0.08f, skipRect.right, skipRect.bottom + bh * 0.08f);
+        c.drawRoundRect(tmp, r, r, paint);
+        paint.setShader(new android.graphics.LinearGradient(0, skipRect.top, 0, skipRect.bottom,
+            Color.rgb(255, 214, 90), Color.rgb(214, 132, 24), android.graphics.Shader.TileMode.CLAMP));
+        paint.setAlpha(skipBusy ? 150 : 255);
+        c.drawRoundRect(skipRect, r, r, paint);
+        paint.setShader(null);
+        paint.setAlpha(255);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(Math.max(2f, bh * 0.06f));
+        paint.setColor(OUTLINE);
+        c.drawRoundRect(skipRect, r, r, paint);
+        paint.setStyle(Paint.Style.FILL);
+        // Label, then a "skip" arrow pair to its right.
+        String label = "Skip";
+        text.setTextAlign(Paint.Align.CENTER);
+        text.setTextSize(fitText(label, bw * 0.5f, bh * 0.5f));
+        float labelX = skipRect.centerX() - bh * 0.32f;
+        outlined(c, label, labelX, skipRect.centerY() + text.getTextSize() * 0.36f, CREAM);
+        float ax = labelX + textWidth(label) / 2 + bh * 0.22f, ay = skipRect.centerY(), as = bh * 0.2f;
+        android.graphics.Path arrows = new android.graphics.Path();
+        for (int i = 0; i < 2; i++) {
+            float x0 = ax + i * as * 0.95f;
+            arrows.moveTo(x0, ay - as);
+            arrows.lineTo(x0 + as, ay);
+            arrows.lineTo(x0, ay + as);
+            arrows.close();
+        }
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeJoin(Paint.Join.ROUND);
+        paint.setStrokeWidth(Math.max(2f, bh * 0.08f));
+        paint.setColor(OUTLINE);
+        c.drawPath(arrows, paint);
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(CREAM);
+        c.drawPath(arrows, paint);
+        c.restoreToCount(saved);
+    }
+
+    /** Presses Start for a moment, the game's own cutscene skip. */
+    private void skipCutscene() {
+        if (skipBusy) {
+            return;
+        }
+        Haptics.tap(this);
+        startAnim("squashskip");
+        skipBusy = true;
+        TouchInput.setN64Buttons(TouchInput.N64_START);
+        handler.postDelayed(() -> TouchInput.setN64Buttons(0), 120);
+        handler.postDelayed(() -> {
+            skipBusy = false;
+            invalidate();
+        }, 600);
+        invalidate();
+    }
+
     private void cancelAbility() {
         if (cancelBusy || running != null || state.paused) {
             return;
@@ -823,7 +898,7 @@ public final class BottomScreenView extends View {
         drawContent(canvas);
         if (animating) {
             postInvalidateOnAnimation();
-        } else if (state.inGame() && !state.paused) {
+        } else if (state.inGame() && !state.paused && !state.cutscene) {
             // The health melons' gentle idle bob: a light 20 FPS redraw, not every display frame.
             postInvalidateDelayed(IDLE_FRAME_MS);
         }
@@ -837,6 +912,12 @@ public final class BottomScreenView extends View {
         }
         if (state.paused) {
             drawPauseProgress(canvas);
+            return;
+        }
+        if (state.cutscene) {
+            // Cutscenes: just the jungle and a Skip button (Start, which skips the ones the
+            // game lets you skip and does nothing in the others).
+            drawSkipButton(canvas);
             return;
         }
         watch("kong", state.currentKong, "tab" + state.currentKong);
@@ -1894,6 +1975,13 @@ public final class BottomScreenView extends View {
                 stepPauseLevel(-1);
             } else if (pauseNextRect.contains(x, y)) {
                 stepPauseLevel(1);
+            }
+            return true;
+        }
+
+        if (state.cutscene) {
+            if (skipRect.contains(x, y)) {
+                skipCutscene();
             }
             return true;
         }
