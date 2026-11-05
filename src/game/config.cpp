@@ -607,7 +607,7 @@ void dk64::init_config() {
     // Android: four tabs - Video, Input, Audio, Gameplay. The General and Dual Screen configs
     // still exist (and keep their files) but their options are shown on the Input and
     // Gameplay tabs instead; the controller setup opens from Input > Configure Inputs.
-    general_options.has_mouse_sensitivity = false;
+    // Mouse Sensitivity stays (input code reads it every frame), it just isn't listed.
     auto &general_config = recompui::config::create_general_tab(general_options);
     add_general_options(general_config);
     recompui::config::set_tab_visible(recompui::config::general::id, false);
