@@ -564,8 +564,9 @@ public final class BottomScreenView extends View {
 
     private void drawSkipButton(Canvas c) {
         float w = getWidth(), h = getHeight();
-        float bw = Math.min(w * 0.5f, unit * 0.42f), bh = Math.min(h * 0.16f, unit * 0.13f);
-        skipRect.set(w / 2 - bw / 2, h * 0.5f - bh / 2, w / 2 + bw / 2, h * 0.5f + bh / 2);
+        float bw = Math.min(w * 0.42f, unit * 0.36f), bh = Math.min(h * 0.14f, unit * 0.115f);
+        float margin = unit * 0.04f;   // bottom-right corner
+        skipRect.set(w - margin - bw, h - margin - bh, w - margin, h - margin);
         float squash = animProgress("squashskip", SQUASH_MS);
         int saved = c.save();
         if (squash >= 0) {
