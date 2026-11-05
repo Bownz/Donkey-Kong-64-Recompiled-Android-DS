@@ -133,6 +133,16 @@ final class GameState {
     private static native int nativeOverlay();
     private static native boolean nativeFontMetrics(byte[] out);
     private static native int nativeTouchFeedback();
+    private static native int nativeDisplayFrameCount();
+
+    /** Frames shown on screen (with the Framerate setting's in-between frames), or -1. */
+    static int displayFrameCount() {
+        try {
+            return nativeDisplayFrameCount();
+        } catch (UnsatisfiedLinkError e) {
+            return -1;
+        }
+    }
 
     /** Touch button vibration setting: 0 off, 1 light, 2 medium, 3 strong. */
     static int touchFeedback() {

@@ -534,6 +534,18 @@ Java_io_github_bownz_dk64recomp_GameState_nativeFrameCount(JNIEnv*, jclass) {
     return (g_show_fps.load() || g_show_area.load()) ? static_cast<jint>(g_frames.load(std::memory_order_relaxed) & 0x7FFFFFFF) : -1;
 }
 
+// Frames shown on screen by RT64, counting the in-between frames a higher Framerate setting
+// adds (the count above is the game's own frames, which stay at its normal 30).
+extern "C" uint32_t rt64_android_presented_frames() __attribute__((weak));
+
+extern "C" JNIEXPORT jint JNICALL
+Java_io_github_bownz_dk64recomp_GameState_nativeDisplayFrameCount(JNIEnv*, jclass) {
+    if (!(g_show_fps.load() || g_show_area.load()) || rt64_android_presented_frames == nullptr) {
+        return -1;
+    }
+    return static_cast<jint>(rt64_android_presented_frames() & 0x7FFFFFFF);
+}
+
 // Which corner readouts are on: 1 FPS, 2 area.
 extern "C" JNIEXPORT jint JNICALL
 Java_io_github_bownz_dk64recomp_GameState_nativeOverlay(JNIEnv*, jclass) {

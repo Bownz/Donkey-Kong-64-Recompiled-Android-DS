@@ -250,10 +250,27 @@ index 08f83e5..104cf49 100755
          XWindowAttributes attributes;
          XGetWindowAttributes(windowHandle.display, windowHandle.window, &attributes);
 diff --git a/src/hle/rt64_present_queue.cpp b/src/hle/rt64_present_queue.cpp
-index 7de5b69..c45fe76 100644
+index 7de5b69..99c1807 100644
 --- a/src/hle/rt64_present_queue.cpp
 +++ b/src/hle/rt64_present_queue.cpp
-@@ -257,8 +257,9 @@ namespace RT64 {
+@@ -4,6 +4,16 @@
+ 
+ #include "rt64_present_queue.h"
+ 
++#if defined(__ANDROID__)
++#   include <atomic>
++// Frames actually shown on screen (including the in-between frames made for a higher
++// Framerate setting), for the game's Show FPS counter.
++static std::atomic<uint32_t> androidPresentedFrames{ 0 };
++extern "C" uint32_t rt64_android_presented_frames() {
++    return androidPresentedFrames.load(std::memory_order_relaxed);
++}
++#endif
++
+ #include "common/rt64_thread.h"
+ #include "rhi/rt64_render_hooks.h"
+ 
+@@ -257,8 +267,9 @@ namespace RT64 {
              }
          }
  
@@ -265,7 +282,17 @@ index 7de5b69..c45fe76 100644
              uint32_t textureCount = ext.swapChain->getTextureCount();
              swapChainFramebuffers.resize(textureCount);
              for (uint32_t i = 0; i < textureCount; i++) {
-@@ -433,6 +434,7 @@ namespace RT64 {
+@@ -403,6 +414,9 @@ namespace RT64 {
+                 presentTimestamp = Timer::current();
+                 swapChainValid = ext.swapChain->present(swapChainIndex, &waitSemaphore, 1);
+                 presentProfiler.logAndRestart();
++#           if defined(__ANDROID__)
++                androidPresentedFrames.fetch_add(1, std::memory_order_relaxed);
++#           endif
+             }
+         }
+     }
+@@ -433,6 +447,7 @@ namespace RT64 {
  
      void PresentQueue::threadLoop() {
          Thread::setCurrentThreadName("RT64 Present");
