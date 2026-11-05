@@ -480,61 +480,8 @@ int dk64::get_draw_distance() {
 }
 
 static void add_technical_options(recomp::config::Config &config) {
-#if defined(__ANDROID__)
-    // Android: share a log report for bug reports (Diagnostics.java), and show the version.
-    static const std::string share_log_option = "android_share_log";
-    static std::vector<recomp::config::ConfigOptionEnumOption> share_options = {
-        {0u, "idle", "-"},
-        {1u, "share", "Share now"},
-    };
-    config.add_enum_option(
-        share_log_option,
-        "Share Log",
-        "Choose Share now and apply to send a log report (for bug reports) through any app: "
-        "Files, Drive, Discord, email... App version: " + dk64::android::app_version() + ".",
-        share_options,
-        0u
-    );
-    config.add_option_change_callback(share_log_option,
-        [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
-            const uint32_t value = std::get<uint32_t>(cur);
-            if (context == recomp::config::OptionChangeContext::Load) {
-                if (value != 0) {
-                    recompui::config::get_config("technical").set_option_value(share_log_option, 0u);
-                    recompui::config::get_config("technical").apply_option_value(share_log_option);
-                    recompui::config::get_config("technical").modified_options.clear();
-                }
-                return;
-            }
-            if (context == recomp::config::OptionChangeContext::Permanent && value == 1) {
-                dk64::android::share_log();
-            }
-        });
-#endif
-
-#if defined(__ANDROID__)
-    // Android: show the current area (map-chunk) in the corner, for reporting slow spots.
-    static const std::string show_area_option = "android_show_area";
-    static std::vector<recomp::config::ConfigOptionEnumOption> show_area_options = {
-        {0u, "Off", "Off"},
-        {1u, "On", "On"},
-    };
-    config.add_enum_option(
-        show_area_option,
-        "Show Area",
-        "Shows which part of the level you're in (map-chunk, e.g. 26-7) in the top corner. "
-        "Useful for reporting places where the game slows down.",
-        show_area_options,
-        0u
-    );
-    config.add_option_change_callback(show_area_option,
-        [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
-            if (context != recomp::config::OptionChangeContext::Temporary) {
-                dk64::android::set_show_area(std::get<uint32_t>(cur) == 1u);
-            }
-        });
-#endif
-
+    // Android: no Share Log / Show Area here (the crash prompt still offers the log), and
+    // this tab is "Extras", next to the mod tabs.
     using EnumOptionVector = const std::vector<recomp::config::ConfigOptionEnumOption>;
     // Multiplayer
     static EnumOptionVector multiplayer_options = {
@@ -648,10 +595,16 @@ void dk64::init_config() {
     add_dual_screen_options(dual_screen_config);
 #endif
 
+#if defined(__ANDROID__)
+    recompui::config::create_mods_tab();
+    auto &technical_config = recompui::config::create_config_tab("Extras", "technical", false);
+    add_technical_options(technical_config);
+#else
     auto &technical_config = recompui::config::create_config_tab("Technical", "technical", true);
     add_technical_options(technical_config);
 
     recompui::config::create_mods_tab();
+#endif
 
     recompui::config::finalize();
 

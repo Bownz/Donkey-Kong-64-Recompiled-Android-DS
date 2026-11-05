@@ -435,7 +435,7 @@ index 0000000..4a91bb5
 +
 +#endif
 diff --git a/recompui/src/config/ui_config.cpp b/recompui/src/config/ui_config.cpp
-index 6c84c05..6008522 100644
+index 6c84c05..6e328e7 100644
 --- a/recompui/src/config/ui_config.cpp
 +++ b/recompui/src/config/ui_config.cpp
 @@ -121,7 +121,51 @@ namespace recompui {
@@ -450,7 +450,7 @@ index 6c84c05..6008522 100644
 +        if (id == config::controls::id || id == "dual_screen") {
 +            return 1;
 +        }
-+        if (id == config::mods::id || id == config::mod_discovery::id) {
++        if (id == config::mods::id || id == config::mod_discovery::id || id == "technical") {
 +            return 2;
 +        }
 +        return 0;
@@ -1111,7 +1111,7 @@ index b057f46..a20366a 100644
      body = context.create_element<Element>(modal_element);
      body->set_display(Display::Flex);
 diff --git a/recompui/src/elements/ui_tab_set.cpp b/recompui/src/elements/ui_tab_set.cpp
-index 2c5dc52..93dcd49 100644
+index 2c5dc52..6487add 100644
 --- a/recompui/src/elements/ui_tab_set.cpp
 +++ b/recompui/src/elements/ui_tab_set.cpp
 @@ -43,6 +43,35 @@ Tab::Tab(ResourceId rid, Element *parent, int tab_index, std::string_view text,
@@ -1150,6 +1150,19 @@ index 2c5dc52..93dcd49 100644
      add_style(&hover_style, { hover_state });
      add_style(&checked_style, { checked_state });
      add_style(&pulsing_style, { focus_state });
+@@ -82,6 +111,12 @@ void Tab::process_event(const Event &e) {
+             set_style_enabled(focus_state, active);
+             if (active) {
+                 queue_update();
++#ifdef __ANDROID__
++                // Moving onto a tab (d-pad, shoulder buttons) opens it; no press needed.
++                if (!is_selected && visible) {
++                    on_select_tab(tab_index);
++                }
++#endif
+             }
+         }
+         break;
 diff --git a/recompui/src/renderer/rt64_render_context.cpp b/recompui/src/renderer/rt64_render_context.cpp
 index a7954c7..dec1073 100644
 --- a/recompui/src/renderer/rt64_render_context.cpp
