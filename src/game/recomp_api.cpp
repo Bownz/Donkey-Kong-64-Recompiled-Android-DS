@@ -204,8 +204,8 @@ namespace {
 
 extern "C" void recomp_fill_button_icon(uint8_t* rdram, recomp_context* ctx) {
 #if defined(__ANDROID__)
-    gpr request = _arg<0, gpr>(rdram, ctx);
-    gpr out = _arg<1, gpr>(rdram, ctx);
+    PTR(u8) request = _arg<0, PTR(u8)>(rdram, ctx);
+    PTR(u8) out = _arg<1, PTR(u8)>(rdram, ctx);
     const int32_t sprite = MEM_W(0x00, request);
     const int32_t width = MEM_W(0x04, request);
     const int32_t height = MEM_W(0x08, request);
