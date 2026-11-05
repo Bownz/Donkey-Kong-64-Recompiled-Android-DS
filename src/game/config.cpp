@@ -842,8 +842,10 @@ extern "C" void dk64_android_apply_control_preset(int modern) {
         static_cast<uint32_t>(dk64::CameraInvertMode::InvertNone));
     general.update_option_value(dk64::configkeys::general::first_person_invert_mode,
         static_cast<uint32_t>(modern ? dk64::CameraInvertMode::InvertNone : dk64::CameraInvertMode::InvertY));
+    // Gyro's left/right comes out reversed without Invert X (turning the device right looked
+    // left), so both presets invert X; Classic also keeps the N64's up/down.
     general.update_option_value(dk64::configkeys::general::gyro_invert_mode,
-        static_cast<uint32_t>(modern ? dk64::CameraInvertMode::InvertNone : dk64::CameraInvertMode::InvertY));
+        static_cast<uint32_t>(modern ? dk64::CameraInvertMode::InvertX : dk64::CameraInvertMode::InvertBoth));
     general.update_option_value(dk64::configkeys::general::swimming_invert_mode,
         static_cast<uint32_t>(modern ? dk64::CameraInvertMode::InvertNone : dk64::CameraInvertMode::InvertY));
     if (general.has_option(recompui::config::general::options::gyro_sensitivity)) {
