@@ -124,6 +124,22 @@ index c89956e..c62e059 100644
          }
  
          *buttons_out = cur_buttons;
+diff --git a/recompui/include/recompui/recompui.h b/recompui/include/recompui/recompui.h
+index 30c463b..4cbcf09 100644
+--- a/recompui/include/recompui/recompui.h
++++ b/recompui/include/recompui/recompui.h
+@@ -65,6 +65,11 @@ namespace recompui {
+ 
+     void init_styling(const std::filesystem::path& rcss_file);
+     void init_prompt_context();
++#ifdef __ANDROID__
++    // The in-game menu bar (composites/ui_menu_bar.cpp).
++    void init_menu_bar_context();
++    bool open_menu_bar();
++#endif
+     void open_choice_prompt(
+         const std::string& header_text,
+         const std::string& content_text,
 diff --git a/recompui/src/base/ui_launcher.cpp b/recompui/src/base/ui_launcher.cpp
 index 6de7a94..15301ba 100644
 --- a/recompui/src/base/ui_launcher.cpp
@@ -155,10 +171,20 @@ index 6de7a94..15301ba 100644
                          return;
                      case recomp::RomValidationError::FailedToOpen:
 diff --git a/recompui/src/base/ui_state.cpp b/recompui/src/base/ui_state.cpp
-index 277a421..4f2df63 100644
+index 277a421..b33343d 100644
 --- a/recompui/src/base/ui_state.cpp
 +++ b/recompui/src/base/ui_state.cpp
-@@ -694,6 +694,52 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
+@@ -278,6 +278,9 @@ public:
+         recompui::init_styling(recompui::file::get_asset_path("recomp.rcss"));
+         recompui::init_launcher_menu();
+         recompui::init_prompt_context();
++#ifdef __ANDROID__
++        recompui::init_menu_bar_context();
++#endif
+         recompui::AssignPlayersModal::init();
+         recompui::config::init_modal();
+     }
+@@ -694,6 +697,52 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
              }
          }
  
@@ -181,14 +207,14 @@ index 277a421..4f2df63 100644
 +                const float y = float(cur_event.motion.y);
 +                if (!touch_dragging) {
 +                    const float dx = float(cur_event.motion.x) - touch_start_x, dy = y - touch_start_y;
-+                    if (dx * dx + dy * dy > (24.0f * dp) * (24.0f * dp)) {
++                    if (dx * dx + dy * dy > (32.0f * dp) * (32.0f * dp)) {
 +                        touch_dragging = true;
 +                        touch_last_y = y;
 +                    }
 +                }
 +                if (touch_dragging) {
 +                    // RmlUi scrolls by "lines" of the element under the cursor.
-+                    const float lines = (touch_last_y - y) / (28.0f * dp);
++                    const float lines = (touch_last_y - y) / (90.0f * dp);
 +                    touch_last_y = y;
 +                    if (lines != 0.0f) {
 +                        ui_state->context->ProcessMouseWheel(Rml::Vector2f(0.0f, lines), 0);
@@ -211,7 +237,22 @@ index 277a421..4f2df63 100644
          if (!all_input_is_disabled) {
              bool is_mouse_input = false;
              // Implement some additional behavior for specific events on top of what RmlUi normally does with them.
-@@ -870,7 +916,12 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
+@@ -838,7 +887,14 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
+             }
+ 
+             if (open_config) {
++#ifdef __ANDROID__
++                // The menu bar first; it opens the settings window.
++                if (!recompui::open_menu_bar()) {
++                    recompui::config::open();
++                }
++#else
+                 recompui::config::open();
++#endif
+             }
+         }
+     } // end dequeue event loop
+@@ -870,7 +926,12 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
          int height = swap_chain_framebuffer->getHeight();
  
          // Scale the UI based on the window size with 1080 vertical resolution as the reference point.
@@ -224,8 +265,191 @@ index 277a421..4f2df63 100644
  
          ui_state->render_interface.start(command_list, width, height);
  
+diff --git a/recompui/src/composites/ui_menu_bar.cpp b/recompui/src/composites/ui_menu_bar.cpp
+new file mode 100644
+index 0000000..4a91bb5
+--- /dev/null
++++ b/recompui/src/composites/ui_menu_bar.cpp
+@@ -0,0 +1,163 @@
++// Android: the in-game menu bar. The menu button opens a slim bar across the top of the
++// screen (in the bottom screen's DK style) instead of the full settings window; the bar opens
++// Settings, Controls or Mods in the settings window, or quits. Like the Dusklight port's.
++#ifdef __ANDROID__
++
++#include "recompui.h"
++#include "recompui/config.h"
++#include "elements/ui_element.h"
++#include "elements/ui_label.h"
++
++namespace recompui {
++
++namespace {
++    const Color wood{122, 78, 38, 255};
++    const Color wood_edge{58, 30, 6, 255};
++    const Color tan{232, 213, 168, 255};
++    const Color cream{255, 244, 214, 255};
++    const Color banana{249, 214, 72, 255};
++
++    ContextId menu_bar_context{};
++    bool menu_bar_ready = false;
++
++    // One entry on the bar: chunky capitals, banana yellow in a rounded outline when focused.
++    class MenuBarItem : public Element {
++    private:
++        std::function<void()> on_press;
++        Style hover_style;
++        Style focus_style;
++    protected:
++        void process_event(const Event &e) override {
++            switch (e.type) {
++            case EventType::Click:
++                if (on_press) {
++                    on_press();
++                }
++                break;
++            case EventType::Hover:
++                set_style_enabled(hover_state, std::get<EventHover>(e.variant).active);
++                break;
++            case EventType::Focus:
++                set_style_enabled(focus_state, std::get<EventFocus>(e.variant).active);
++                break;
++            default:
++                break;
++            }
++        }
++        std::string_view get_type_name() override { return "MenuBarItem"; }
++    public:
++        MenuBarItem(ResourceId rid, Element *parent, const std::string &text, std::function<void()> press) :
++            Element(rid, parent, Events(EventType::Click, EventType::Hover, EventType::Focus), "button", false),
++            on_press(std::move(press))
++        {
++            set_cursor(Cursor::Pointer);
++            set_focusable(true);
++            set_tab_index_auto();
++            set_padding_top(12.0f);
++            set_padding_bottom(8.0f);
++            set_padding_left(22.0f);
++            set_padding_right(22.0f);
++            set_border_width(3.0f);
++            set_border_radius(16.0f);
++            set_border_color(Color{0, 0, 0, 0});
++            set_color(tan);
++            hover_style.set_color(cream);
++            focus_style.set_color(banana);
++            focus_style.set_border_color(banana);
++            focus_style.set_background_color(Color{42, 20, 4, 140});
++            add_style(&hover_style, { hover_state });
++            add_style(&focus_style, { focus_state });
++
++            ContextId context = get_current_context();
++            Label *label = context.create_element<Label>(this, text, theme::Typography::Header3);
++            label->set_font_family("Luckiest Guy");
++            label->set_font_weight(400);
++            label->set_font_size(30.0f);
++            label->set_letter_spacing(1.0f);
++        }
++    };
++
++    // The bar's root: closes on Back / the menu button.
++    class MenuBarRoot : public Element {
++    protected:
++        void process_event(const Event &e) override {
++            if (e.type == EventType::MenuAction) {
++                MenuAction action = std::get<EventMenuAction>(e.variant).action;
++                if (action == MenuAction::Back || action == MenuAction::Toggle) {
++                    recompui::hide_context(menu_bar_context);
++                }
++            }
++        }
++        std::string_view get_type_name() override { return "MenuBarRoot"; }
++    public:
++        MenuBarRoot(ResourceId rid, Element *parent) :
++            Element(rid, parent, Events(EventType::MenuAction), "div", false) {}
++    };
++
++    void open_settings_tab(const std::string &tab) {
++        recompui::hide_context(menu_bar_context);
++        recompui::config::set_tab(tab);
++        recompui::config::open();
++    }
++}
++
++void init_menu_bar_context() {
++    ContextId context = create_context();
++    context.open();
++    menu_bar_context = context;
++
++    MenuBarRoot *root = context.create_element<MenuBarRoot>(context.get_root_element());
++    root->set_position(Position::Absolute);
++    root->set_top(0);
++    root->set_left(0);
++    root->set_right(0);
++    root->set_bottom(0);
++    root->set_background_color(Color{0, 0, 0, 90});
++
++    Element *bar = context.create_element<Element>(root);
++    bar->set_position(Position::Absolute);
++    bar->set_top(0);
++    bar->set_left(0);
++    bar->set_right(0);
++    bar->set_display(Display::Flex);
++    bar->set_flex_direction(FlexDirection::Row);
++    bar->set_align_items(AlignItems::Center);
++    bar->set_gap(6.0f);
++    bar->set_padding_top(10.0f);
++    bar->set_padding_bottom(10.0f);
++    bar->set_padding_left(24.0f);
++    bar->set_padding_right(24.0f);
++    bar->set_background_color(wood);
++    bar->set_border_bottom_width(4.0f);
++    bar->set_border_bottom_color(wood_edge);
++    bar->set_as_navigation_container(NavigationType::Horizontal);
++
++    MenuBarItem *settings = context.create_element<MenuBarItem>(bar, "SETTINGS", []() { open_settings_tab(config::general::id); });
++    context.create_element<MenuBarItem>(bar, "CONTROLS", []() { open_settings_tab(config::controls::id); });
++    context.create_element<MenuBarItem>(bar, "MODS", []() { open_settings_tab(config::mods::id); });
++    context.create_element<MenuBarItem>(bar, "QUIT", []() {
++        recompui::hide_context(menu_bar_context);
++        recompui::open_quit_game_prompt();
++    });
++    Element *spacer = context.create_element<Element>(bar);
++    spacer->set_flex_grow(1.0f);
++    context.create_element<MenuBarItem>(bar, "X", []() { recompui::hide_context(menu_bar_context); });
++
++    context.set_autofocus_element(settings);
++    context.close();
++    menu_bar_ready = true;
++}
++
++bool open_menu_bar() {
++    if (!menu_bar_ready) {
++        return false;
++    }
++    if (!recompui::is_context_shown(menu_bar_context)) {
++        recompui::show_context(menu_bar_context, "");
++    }
++    return true;
++}
++
++} // namespace recompui
++
++#endif
+diff --git a/recompui/src/config/ui_config.cpp b/recompui/src/config/ui_config.cpp
+index 6c84c05..4154512 100644
+--- a/recompui/src/config/ui_config.cpp
++++ b/recompui/src/config/ui_config.cpp
+@@ -155,6 +155,9 @@ namespace recompui {
+         config_modal->set_selected_tab(0);
+         auto header_right = config_modal->get_header()->get_right();
+         auto quit_button = config_modal->modal_root_context.create_element<IconButton>(header_right, "icons/Quit.svg", ButtonStyle::Basic);
++#ifdef __ANDROID__
++        quit_button->set_display(Display::None);   // Quit is on the in-game menu bar instead
++#endif
+         quit_button->add_pressed_callback([]() {
+             if (ultramodern::is_game_started()) {
+                 recompui::open_quit_game_prompt();
 diff --git a/recompui/src/config/ui_config_option.cpp b/recompui/src/config/ui_config_option.cpp
-index 86428c9..fb1b915 100644
+index 86428c9..c59c427 100644
 --- a/recompui/src/config/ui_config_option.cpp
 +++ b/recompui/src/config/ui_config_option.cpp
 @@ -2,6 +2,122 @@
@@ -396,7 +620,7 @@ index 86428c9..fb1b915 100644
      Element *wrapper = context.create_element<Element>(this, 0, "div", false);
      wrapper->set_display(Display::Flex);
      wrapper->set_flex_direction(FlexDirection::Row);
-@@ -146,11 +293,53 @@ ConfigOptionEnum::ConfigOptionEnum(
+@@ -146,11 +293,55 @@ ConfigOptionEnum::ConfigOptionEnum(
      update_enum_disabled();
  };
  
@@ -423,6 +647,8 @@ index 86428c9..fb1b915 100644
 +        index = (index + direction + count) % count;
 +        if (!config->get_enum_option_disabled(option_index, uint32_t(index))) {
 +            set_option_value(option_id, enum_opt.options[index].value);
++            update_value();   // show the new value (nothing redraws the stepper otherwise)
++            update_enum_details();
 +            return;
 +        }
 +    }
@@ -450,7 +676,7 @@ index 86428c9..fb1b915 100644
      for (uint32_t i = 0; i < enum_opt.options.size(); i++) {
          if (enum_opt.options[i].value == option_value) {
              radio->set_index(i);
-@@ -167,6 +356,12 @@ void ConfigOptionEnum::update_disabled() {
+@@ -167,6 +358,12 @@ void ConfigOptionEnum::update_disabled() {
  
  void ConfigOptionEnum::update_enum_details() {
      const std::string &enum_details = config->get_enum_option_details(option_index);
@@ -463,7 +689,7 @@ index 86428c9..fb1b915 100644
      if (enum_details.empty()) {
          details_label->set_text("");
      } else {
-@@ -176,6 +371,12 @@ void ConfigOptionEnum::update_enum_details() {
+@@ -176,6 +373,12 @@ void ConfigOptionEnum::update_enum_details() {
  
  void ConfigOptionEnum::update_enum_disabled() {
      bool all_disabled = get_disabled();
@@ -476,7 +702,7 @@ index 86428c9..fb1b915 100644
      auto &enum_opt = config->get_option_config<recomp::config::ConfigOptionEnum>(option_index);
      for (uint32_t i = 0; i < enum_opt.options.size(); i++) {
          bool enum_disabled = all_disabled || config->get_enum_option_disabled(option_index, i);
-@@ -199,8 +400,12 @@ ConfigOptionNumber::ConfigOptionNumber(
+@@ -199,8 +402,12 @@ ConfigOptionNumber::ConfigOptionNumber(
      auto &num_opt = config->get_option_config<recomp::config::ConfigOptionNumber>(option_index);
  
      slider = context.create_element<Slider>(this, num_opt.percent ? SliderType::Percent : SliderType::Double);
@@ -489,7 +715,7 @@ index 86428c9..fb1b915 100644
  
      slider->set_min_value(num_opt.min);
      slider->set_max_value(num_opt.max);
-@@ -245,8 +450,12 @@ ConfigOptionString::ConfigOptionString(
+@@ -245,8 +452,12 @@ ConfigOptionString::ConfigOptionString(
  
      ContextId context = recompui::get_current_context();
      text_input = context.create_element<TextInput>(this);
@@ -816,7 +1042,7 @@ index b057f46..a20366a 100644
      body = context.create_element<Element>(modal_element);
      body->set_display(Display::Flex);
 diff --git a/recompui/src/elements/ui_tab_set.cpp b/recompui/src/elements/ui_tab_set.cpp
-index 2c5dc52..6983622 100644
+index 2c5dc52..93dcd49 100644
 --- a/recompui/src/elements/ui_tab_set.cpp
 +++ b/recompui/src/elements/ui_tab_set.cpp
 @@ -43,6 +43,35 @@ Tab::Tab(ResourceId rid, Element *parent, int tab_index, std::string_view text,
@@ -830,15 +1056,15 @@ index 2c5dc52..6983622 100644
 +        const Color tan{232, 213, 168, 255}, banana{249, 214, 72, 255}, cream{255, 244, 214, 255};
 +        label->set_font_family("Luckiest Guy");
 +        label->set_font_weight(400);
-+        label->set_font_size(26.0f);
++        label->set_font_size(22.0f);
 +        label->set_letter_spacing(1.0f);
 +        label->set_text_transform(TextTransform::Uppercase);
-+        set_margin_top(14.0f);
-+        set_margin_bottom(14.0f);
++        set_margin_top(10.0f);
++        set_margin_bottom(10.0f);
 +        set_padding_top(10.0f);
 +        set_padding_bottom(6.0f);
-+        set_padding_left(18.0f);
-+        set_padding_right(18.0f);
++        set_padding_left(12.0f);
++        set_padding_right(12.0f);
 +        set_border_width(3.0f);
 +        set_border_radius(16.0f);
 +        set_border_color(Color{0, 0, 0, 0});
