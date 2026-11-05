@@ -742,25 +742,24 @@ void on_launcher_init(recompui::LauncherMenu *menu) {
 // The launcher's first update: with "Skip Launcher" on (and a ROM loaded, and no mod game
 // modes to choose from), start the game as the Start Game option would.
 #ifdef __ANDROID__
-extern "C" int dk64_android_control_preset();
-extern "C" void dk64_android_apply_control_preset(int modern);
+extern "C" int dk64_android_experience_chosen();
+extern "C" void dk64_android_apply_experience(int modern);
 
-// First launch: Classic (N64) or Modern controls? Changeable later in Settings > Controls.
-static bool ask_for_control_preset() {
-    if (dk64_android_control_preset() >= 0) {
+// First launch: a Classic or Modern experience? (Settings > General > Experience later.)
+static bool ask_for_experience() {
+    if (dk64_android_experience_chosen()) {
         return false;
     }
     recompui::open_choice_prompt(
-        "Choose your controls",
-        "Modern: the right stick moves the camera freely (Analog Camera), the C buttons stay on "
-        "the shoulder and face buttons, and gyro aiming is on. "
-        "Classic: the N64 way. The right stick works the C buttons, the camera turns in steps, "
-        "and gyro is off. "
-        "You can switch any time in Settings > Controls.",
+        "How do you want to play?",
+        "Modern: Analog Camera on the right stick, gyro aiming, sharp full-resolution graphics "
+        "with anti-aliasing, and quick Kong swapping. "
+        "Classic: the N64 as it was, with the original controls, camera and resolution. "
+        "You can change this, or any single option, in Settings > General.",
         "Modern",
         "Classic",
-        []() { dk64_android_apply_control_preset(1); },
-        []() { dk64_android_apply_control_preset(0); },
+        []() { dk64_android_apply_experience(1); },
+        []() { dk64_android_apply_experience(0); },
         recompui::ButtonStyle::Primary,
         recompui::ButtonStyle::Secondary,
         false
@@ -774,7 +773,7 @@ static void on_launcher_update(recompui::LauncherMenu *menu) {
     if (!skip_checked) {
         skip_checked = true;
 #ifdef __ANDROID__
-        if (ask_for_control_preset()) {
+        if (ask_for_experience()) {
             dk64::launcher_animation_update(menu);
             return;   // first launch: no Skip Launcher this time
         }

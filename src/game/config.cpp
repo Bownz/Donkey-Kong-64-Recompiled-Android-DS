@@ -660,6 +660,7 @@ void dk64::init_config() {
 #ifdef __ANDROID__
 #include "recompinput/profiles.h"
 #include "librecomp/game.hpp"
+#include "librecomp/mods.hpp"
 
 // ---- Control presets (Android) -----------------------------------------------------------
 //
@@ -708,5 +709,86 @@ extern "C" void dk64_android_apply_control_preset(int modern) {
 
     std::ofstream out{ control_preset_marker() };
     out << (modern ? "modern" : "classic") << "\n";
+}
+#endif
+
+#ifdef __ANDROID__
+// ---- Experience (Android) -------------------------------------------------------------------
+//
+// One choice that sets several things at once (General tab, top; also asked on first launch):
+//   Classic: the N64 as it was - Classic controls (right stick = C buttons, Free camera, no
+//            gyro), the original 240p resolution, no anti-aliasing, no quick Kong swap.
+//   Modern:  Modern controls (Analog Camera, gyro aiming), the device's resolution, 2x MSAA,
+//            and quick Kong swapping (the Tag Anywhere mod + Touch Kong Swap).
+//   Custom:  whatever has been set by hand (nothing is changed).
+
+static const std::string experience_option = "android_experience";
+static bool applying_experience = false;
+
+static std::filesystem::path experience_marker() {
+    return recomp::get_config_path() / "experience.txt";
+}
+
+extern "C" int dk64_android_experience_chosen() {
+    return std::filesystem::exists(experience_marker()) ? 1 : 0;
+}
+
+extern "C" void dk64_android_apply_experience(int modern) {
+    if (applying_experience) {
+        return;
+    }
+    applying_experience = true;
+
+    dk64_android_apply_control_preset(modern);
+
+    recomp::config::Config &graphics = recompui::config::get_graphics_config();
+    graphics.update_option_value(recompui::config::graphics::options::res_option,
+        static_cast<uint32_t>(modern ? ultramodern::renderer::Resolution::Auto : ultramodern::renderer::Resolution::Original));
+    graphics.update_option_value(recompui::config::graphics::options::msaa_option,
+        static_cast<uint32_t>(modern ? ultramodern::renderer::Antialiasing::MSAA2X : ultramodern::renderer::Antialiasing::None));
+    graphics.save_config();
+
+    recomp::mods::enable_mod("dk64_tag_anywhere", modern != 0);
+    recomp::config::Config &dual = recompui::config::get_config("dual_screen");
+    dual.update_option_value("android_touch_kong_swap", static_cast<uint32_t>(modern ? 1u : 0u));
+    dual.save_config();
+
+    recomp::config::Config &general = recompui::config::get_general_config();
+    general.update_option_value(experience_option, static_cast<uint32_t>(modern ? 1u : 0u));
+    general.save_config();
+
+    std::ofstream out{ experience_marker() };
+    out << (modern ? "modern" : "classic") << "\n";
+    applying_experience = false;
+}
+
+namespace recompui::config {
+    void dk64_android_add_experience_option(recomp::config::Config &config) {
+        static const std::vector<recomp::config::ConfigOptionEnumOption> experience_options = {
+            {0u, "Classic", "Classic"},
+            {1u, "Modern", "Modern"},
+            {2u, "Custom", "Custom"},
+        };
+        config.add_enum_option(
+            experience_option,
+            "Experience",
+            "Sets several options at once.<br />"
+            "<recomp-color primary>Classic</recomp-color>: the N64 as it was. Classic controls (the right stick works the C buttons), "
+            "Free Cam, no gyro, the original resolution and no anti-aliasing.<br />"
+            "<recomp-color primary>Modern</recomp-color>: Analog Camera on the right stick, gyro aiming, the device's resolution, "
+            "anti-aliasing, and quick Kong swapping (Tag Anywhere and Touch Kong Swap).<br />"
+            "<recomp-color primary>Custom</recomp-color>: keeps whatever you've set yourself.<br />"
+            "Each option can still be changed afterwards.",
+            experience_options,
+            2u
+        );
+        config.add_option_change_callback(experience_option,
+            [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
+                const uint32_t value = std::get<uint32_t>(cur);
+                if (context == recomp::config::OptionChangeContext::Permanent && !applying_experience && value < 2u) {
+                    dk64_android_apply_experience(int(value));
+                }
+            });
+    }
 }
 #endif

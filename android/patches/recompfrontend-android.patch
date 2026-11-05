@@ -154,6 +154,76 @@ index 6de7a94..15301ba 100644
                          callback(true);
                          return;
                      case recomp::RomValidationError::FailedToOpen:
+diff --git a/recompui/src/base/ui_state.cpp b/recompui/src/base/ui_state.cpp
+index 277a421..4f2df63 100644
+--- a/recompui/src/base/ui_state.cpp
++++ b/recompui/src/base/ui_state.cpp
+@@ -694,6 +694,52 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
+             }
+         }
+ 
++#ifdef __ANDROID__
++        // Touch: drag anywhere to scroll (like a phone), not only on the scroll bar. A press
++        // that moves more than a little turns into a scroll, and is then not a tap.
++        if (!all_input_is_disabled && recompui::is_context_capturing_mouse()) {
++            static bool touch_down = false, touch_dragging = false;
++            static float touch_last_y = 0.0f, touch_start_x = 0.0f, touch_start_y = 0.0f;
++            int win_w = 0, win_h = 1080;
++            recompui::get_window_size(win_w, win_h);
++            const float dp = win_h > 0 ? win_h / 1080.0f : 1.0f;
++            if (cur_event.type == SDL_EventType::SDL_MOUSEBUTTONDOWN && cur_event.button.which == SDL_TOUCH_MOUSEID) {
++                touch_down = true;
++                touch_dragging = false;
++                touch_start_x = float(cur_event.button.x);
++                touch_start_y = touch_last_y = float(cur_event.button.y);
++            }
++            else if (cur_event.type == SDL_EventType::SDL_MOUSEMOTION && cur_event.motion.which == SDL_TOUCH_MOUSEID && touch_down) {
++                const float y = float(cur_event.motion.y);
++                if (!touch_dragging) {
++                    const float dx = float(cur_event.motion.x) - touch_start_x, dy = y - touch_start_y;
++                    if (dx * dx + dy * dy > (24.0f * dp) * (24.0f * dp)) {
++                        touch_dragging = true;
++                        touch_last_y = y;
++                    }
++                }
++                if (touch_dragging) {
++                    // RmlUi scrolls by "lines" of the element under the cursor.
++                    const float lines = (touch_last_y - y) / (28.0f * dp);
++                    touch_last_y = y;
++                    if (lines != 0.0f) {
++                        ui_state->context->ProcessMouseWheel(Rml::Vector2f(0.0f, lines), 0);
++                    }
++                    continue;
++                }
++            }
++            else if (cur_event.type == SDL_EventType::SDL_MOUSEBUTTONUP && cur_event.button.which == SDL_TOUCH_MOUSEID) {
++                touch_down = false;
++                if (touch_dragging) {
++                    touch_dragging = false;
++                    // Release away from everything so the drag doesn't count as a click.
++                    ui_state->context->ProcessMouseMove(-10000, -10000, 0);
++                    ui_state->context->ProcessMouseButtonUp(0, 0);
++                    continue;
++                }
++            }
++        }
++#endif
+         if (!all_input_is_disabled) {
+             bool is_mouse_input = false;
+             // Implement some additional behavior for specific events on top of what RmlUi normally does with them.
+@@ -870,7 +916,12 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
+         int height = swap_chain_framebuffer->getHeight();
+ 
+         // Scale the UI based on the window size with 1080 vertical resolution as the reference point.
++#ifdef __ANDROID__
++        // Bigger on a handheld's small screen (like the Dusklight port's menus).
++        ui_state->context->SetDensityIndependentPixelRatio((height) / 1080.0f * 1.35f);
++#else
+         ui_state->context->SetDensityIndependentPixelRatio((height) / 1080.0f);
++#endif
+ 
+         ui_state->render_interface.start(command_list, width, height);
+ 
 diff --git a/recompui/src/config/ui_config_option.cpp b/recompui/src/config/ui_config_option.cpp
 index 86428c9..fb1b915 100644
 --- a/recompui/src/config/ui_config_option.cpp
@@ -560,10 +630,30 @@ index 6ba64e2..41e46a1 100644
  
      if (config->requires_confirmation) {
 diff --git a/recompui/src/config/ui_config_tab_general.cpp b/recompui/src/config/ui_config_tab_general.cpp
-index 296ce0e..59aeb48 100644
+index 296ce0e..a6df4df 100644
 --- a/recompui/src/config/ui_config_tab_general.cpp
 +++ b/recompui/src/config/ui_config_tab_general.cpp
-@@ -137,6 +137,9 @@ namespace config {
+@@ -75,9 +75,19 @@ namespace config {
+         return get_general_config_bool_value(general::options::debug_mode);
+     }
+ 
++#ifdef __ANDROID__
++    void dk64_android_add_experience_option(recomp::config::Config &config) __attribute__((weak));
++#endif
++
+     recomp::config::Config &create_general_tab(const GeneralTabOptions& options, const std::string &name) {
+         created_general_config = true;
+         recomp::config::Config &config = recompui::config::create_config_tab(name, general::id, false);
++#ifdef __ANDROID__
++        // Android: the game's Experience preset first (implemented in src/game/config.cpp).
++        if (dk64_android_add_experience_option != nullptr) {
++            dk64_android_add_experience_option(config);
++        }
++#endif
+ 
+         config.add_bool_option(
+             general::options::debug_mode,
+@@ -137,6 +147,9 @@ namespace config {
              "<b>This setting does not affect keyboard input.</b>",
              background_input_options,
              BackgroundInputMode::On
