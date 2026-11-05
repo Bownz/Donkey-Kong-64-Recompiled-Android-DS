@@ -124,6 +124,348 @@ index c89956e..c62e059 100644
          }
  
          *buttons_out = cur_buttons;
+diff --git a/recompui/src/config/ui_config_option.cpp b/recompui/src/config/ui_config_option.cpp
+index 86428c9..fb1b915 100644
+--- a/recompui/src/config/ui_config_option.cpp
++++ b/recompui/src/config/ui_config_option.cpp
+@@ -2,6 +2,122 @@
+ 
+ namespace recompui {
+ 
++#ifdef __ANDROID__
++// Colours of the bottom screen's DK look.
++static const Color dk_wood{122, 78, 38, 255};
++static const Color dk_wood_light{170, 118, 62, 255};
++static const Color dk_wood_edge{58, 30, 6, 255};
++static const Color dk_banana{249, 214, 72, 255};
++static const Color dk_cream{255, 244, 214, 255};
++static const Color dk_tan{232, 213, 168, 255};
++
++void style_dk_option_row(Element *row) {
++    row->set_display(Display::Flex);
++    row->set_flex_direction(FlexDirection::Row);
++    row->set_align_items(AlignItems::Center);
++    row->set_justify_content(JustifyContent::SpaceBetween);
++    row->set_width(100.0f, Unit::Percent);
++    row->set_min_height(60.0f);
++    row->set_padding_top(8.0f);
++    row->set_padding_bottom(8.0f);
++    row->set_padding_left(26.0f);
++    row->set_padding_right(22.0f);
++    row->set_border_radius(30.0f);
++    row->set_border_width(3.0f);
++    row->set_border_color(dk_wood_edge);
++    row->set_background_color(dk_wood);
++    row->set_gap(16.0f);
++}
++
++ConfigEnumStepper::ConfigEnumStepper(ResourceId rid, Element *parent, const std::string &name_text) :
++    Element(rid, parent, Events(EventType::Click, EventType::Hover, EventType::Focus, EventType::Navigate, EventType::Enable), "button", false)
++{
++    style_dk_option_row(this);
++    set_cursor(Cursor::Pointer);
++    set_focusable(true);
++    set_tab_index_auto();
++    enable_focus();
++    set_nav_none(NavDirection::Left);
++    set_nav_none(NavDirection::Right);
++
++    hover_style.set_background_color(dk_wood_light);
++    focus_style.set_background_color(dk_wood_light);
++    focus_style.set_border_color(dk_banana);
++    disabled_style.set_opacity(0.45f);
++    disabled_style.set_cursor(Cursor::None);
++    add_style(&hover_style, { hover_state });
++    add_style(&focus_style, { focus_state });
++    add_style(&disabled_style, { disabled_state });
++
++    ContextId context = get_current_context();
++    Element *left = context.create_element<Element>(this, 0, "div", false);
++    left->set_display(Display::Flex);
++    left->set_flex_direction(FlexDirection::Column);
++    left->set_flex(1.0f, 1.0f);
++    name = context.create_element<Label>(left, name_text, theme::Typography::LabelMD);
++    name->set_text_transform(TextTransform::Uppercase);
++    name->set_font_weight(700);
++    name->set_color(dk_cream);
++    details = context.create_element<Label>(left, "", theme::Typography::LabelXS);
++    details->set_color(dk_tan);
++    details->set_display(Display::None);
++
++    value = context.create_element<Label>(this, "", theme::Typography::LabelMD);
++    value->set_font_weight(700);
++    value->set_color(dk_banana);
++    value->set_white_space(WhiteSpace::Nowrap);
++}
++
++void ConfigEnumStepper::set_value_text(const std::string &text) {
++    value->set_text("\u2039  " + text + "  \u203A");
++}
++
++void ConfigEnumStepper::set_details_text(const std::string &text) {
++    details->set_text(text);
++    details->set_display(text.empty() ? Display::None : Display::Block);
++}
++
++void ConfigEnumStepper::process_event(const Event &e) {
++    switch (e.type) {
++    case EventType::Click:
++        if (is_enabled() && step_callback) {
++            step_callback(1);
++        }
++        break;
++    case EventType::Hover:
++        set_style_enabled(hover_state, std::get<EventHover>(e.variant).active);
++        break;
++    case EventType::Focus: {
++        bool active = std::get<EventFocus>(e.variant).active;
++        set_style_enabled(focus_state, active);
++        if (active) {
++            scroll_into_view();
++        }
++        if (focus_callback) {
++            focus_callback(active);
++        }
++        break;
++    }
++    case EventType::Navigate: {
++        NavDirection dir = std::get<EventNavigate>(e.variant).direction;
++        if (is_enabled() && step_callback) {
++            if (dir == NavDirection::Left) {
++                step_callback(-1);
++            } else if (dir == NavDirection::Right) {
++                step_callback(1);
++            }
++        }
++        break;
++    }
++    case EventType::Enable:
++        set_style_enabled(disabled_state, !std::get<EventEnable>(e.variant).active);
++        break;
++    default:
++        break;
++    }
++}
++#endif
++
+ constexpr float config_option_element_margin_vertical = 12.0f;
+ ConfigOptionElement::ConfigOptionElement(
+     ResourceId rid,
+@@ -44,6 +160,21 @@ ConfigOptionElement::ConfigOptionElement(
+         set_padding_top(0.0f);
+     }
+ 
++#ifdef __ANDROID__
++    // Rows sit 6dp apart; the row itself (or the enum stepper inside it) is the wooden pill.
++    set_padding_top(6.0f);
++    set_padding_bottom(6.0f);
++    set_padding_left(0.0f);
++    set_padding_right(0.0f);
++    if (option.type != recomp::config::ConfigOptionType::Enum) {
++        style_dk_option_row(this);
++        name_label->set_margin_bottom(0.0f);
++        name_label->set_text_transform(TextTransform::Uppercase);
++        name_label->set_font_weight(700);
++        name_label->set_color(dk_cream);
++    }
++#endif
++
+     update_hidden();
+ }
+ 
+@@ -109,6 +240,22 @@ ConfigOptionEnum::ConfigOptionEnum(
+ ) : ConfigOptionElement(rid, parent, option_id, option_index, config, set_option_value, on_hover)
+ {
+     ContextId context = recompui::get_current_context();
++#ifdef __ANDROID__
++    {
++        name_label->set_display(Display::None);
++        stepper = context.create_element<ConfigEnumStepper>(this, config->get_option(option_index).name);
++        stepper->set_focus_callback([this](bool active) {
++            if (active) {
++                this->on_hover(this->option_id);
++            }
++        });
++        stepper->set_step_callback([this](int direction) { step(direction); });
++        update_value();
++        update_enum_details();
++        update_enum_disabled();
++        return;
++    }
++#endif
+     Element *wrapper = context.create_element<Element>(this, 0, "div", false);
+     wrapper->set_display(Display::Flex);
+     wrapper->set_flex_direction(FlexDirection::Row);
+@@ -146,11 +293,53 @@ ConfigOptionEnum::ConfigOptionEnum(
+     update_enum_disabled();
+ };
+ 
++#ifdef __ANDROID__
++void ConfigOptionEnum::step(int direction) {
++    if (get_disabled()) {
++        return;
++    }
++    auto &enum_opt = config->get_option_config<recomp::config::ConfigOptionEnum>(option_index);
++    const int count = int(enum_opt.options.size());
++    if (count == 0) {
++        return;
++    }
++    const uint32_t current = std::get<uint32_t>(get_value());
++    int index = 0;
++    for (int i = 0; i < count; i++) {
++        if (enum_opt.options[i].value == current) {
++            index = i;
++            break;
++        }
++    }
++    // The next choice that isn't disabled, wrapping round.
++    for (int tries = 0; tries < count; tries++) {
++        index = (index + direction + count) % count;
++        if (!config->get_enum_option_disabled(option_index, uint32_t(index))) {
++            set_option_value(option_id, enum_opt.options[index].value);
++            return;
++        }
++    }
++}
++#endif
++
+ void ConfigOptionEnum::update_value() {
+     recomp::config::ConfigValueVariant value_variant = get_value();
+     uint32_t option_value = std::get<uint32_t>(value_variant);
+ 
+     auto &enum_opt = config->get_option_config<recomp::config::ConfigOptionEnum>(this->option_index);
++#ifdef __ANDROID__
++    if (stepper != nullptr) {
++        std::string text = "-";
++        for (uint32_t i = 0; i < enum_opt.options.size(); i++) {
++            if (enum_opt.options[i].value == option_value) {
++                text = enum_opt.options[i].name;
++                break;
++            }
++        }
++        stepper->set_value_text(text);
++        return;
++    }
++#endif
+     for (uint32_t i = 0; i < enum_opt.options.size(); i++) {
+         if (enum_opt.options[i].value == option_value) {
+             radio->set_index(i);
+@@ -167,6 +356,12 @@ void ConfigOptionEnum::update_disabled() {
+ 
+ void ConfigOptionEnum::update_enum_details() {
+     const std::string &enum_details = config->get_enum_option_details(option_index);
++#ifdef __ANDROID__
++    if (stepper != nullptr) {
++        stepper->set_details_text(enum_details);
++        return;
++    }
++#endif
+     if (enum_details.empty()) {
+         details_label->set_text("");
+     } else {
+@@ -176,6 +371,12 @@ void ConfigOptionEnum::update_enum_details() {
+ 
+ void ConfigOptionEnum::update_enum_disabled() {
+     bool all_disabled = get_disabled();
++#ifdef __ANDROID__
++    if (stepper != nullptr) {
++        stepper->set_enabled(!all_disabled);
++        return;
++    }
++#endif
+     auto &enum_opt = config->get_option_config<recomp::config::ConfigOptionEnum>(option_index);
+     for (uint32_t i = 0; i < enum_opt.options.size(); i++) {
+         bool enum_disabled = all_disabled || config->get_enum_option_disabled(option_index, i);
+@@ -199,8 +400,12 @@ ConfigOptionNumber::ConfigOptionNumber(
+     auto &num_opt = config->get_option_config<recomp::config::ConfigOptionNumber>(option_index);
+ 
+     slider = context.create_element<Slider>(this, num_opt.percent ? SliderType::Percent : SliderType::Double);
++#ifdef __ANDROID__
++    slider->set_width(48.0f, Unit::Percent);   // on the right of the row, beside the name
++#else
+     slider->set_width(100.0f, Unit::Percent);
+     slider->set_max_width(512.0f, Unit::Dp);
++#endif
+ 
+     slider->set_min_value(num_opt.min);
+     slider->set_max_value(num_opt.max);
+@@ -245,8 +450,12 @@ ConfigOptionString::ConfigOptionString(
+ 
+     ContextId context = recompui::get_current_context();
+     text_input = context.create_element<TextInput>(this);
++#ifdef __ANDROID__
++    text_input->set_width(55.0f, Unit::Percent);
++#else
+     text_input->set_width(100.0f, Unit::Percent);
+     text_input->set_max_width(100.0f, Unit::Percent);
++#endif
+     update_value();
+     text_input->add_text_changed_callback([this](const std::string &text){
+         this->set_option_value(this->option_id, text);
+diff --git a/recompui/src/config/ui_config_option.h b/recompui/src/config/ui_config_option.h
+index 0561657..5ecaaca 100644
+--- a/recompui/src/config/ui_config_option.h
++++ b/recompui/src/config/ui_config_option.h
+@@ -45,9 +45,42 @@ namespace recompui {
+         const std::string &get_option_id() { return option_id; }
+     };
+ 
++#ifdef __ANDROID__
++    // Android: a whole-row "stepper" for choice options, in the bottom screen's DK style (a
++    // wooden pill: the option's name on the left, its value in banana yellow on the right
++    // between arrows). Tap or A steps to the next value; D-pad left/right step either way.
++    class ConfigEnumStepper : public Element {
++    private:
++        Label *name = nullptr;
++        Label *value = nullptr;
++        Label *details = nullptr;
++        Style hover_style;
++        Style focus_style;
++        Style disabled_style;
++        std::function<void(int)> step_callback = nullptr;
++        std::function<void(bool)> focus_callback = nullptr;
++    protected:
++        void process_event(const Event &e) override;
++        std::string_view get_type_name() override { return "ConfigEnumStepper"; }
++    public:
++        ConfigEnumStepper(ResourceId rid, Element *parent, const std::string &name_text);
++        void set_value_text(const std::string &text);
++        void set_details_text(const std::string &text);
++        void set_step_callback(std::function<void(int)> callback) { step_callback = std::move(callback); }
++        void set_focus_callback(std::function<void(bool)> callback) { focus_callback = std::move(callback); }
++    };
++
++    // The wooden pill look shared by every option row on Android.
++    void style_dk_option_row(Element *row);
++#endif
++
+ class ConfigOptionEnum : public ConfigOptionElement {
+ protected:
+     Radio *radio = nullptr;
++#ifdef __ANDROID__
++    ConfigEnumStepper *stepper = nullptr;
++    void step(int direction);
++#endif
+     Label *details_label = nullptr;
+ 
+     std::string_view get_type_name() override { return "ConfigOptionEnum"; }
+diff --git a/recompui/src/config/ui_config_page_options_menu.cpp b/recompui/src/config/ui_config_page_options_menu.cpp
+index 6ba64e2..41e46a1 100644
+--- a/recompui/src/config/ui_config_page_options_menu.cpp
++++ b/recompui/src/config/ui_config_page_options_menu.cpp
+@@ -20,6 +20,12 @@ ConfigPageOptionsMenu::ConfigPageOptionsMenu(
+     description_container->set_typography(theme::Typography::Body);
+     description_container->set_line_height(28.0f);
+     description_container->set_padding(8.0f);
++#ifdef __ANDROID__
++    description_container->set_color(Color{232, 213, 168, 255});
++    description_container->set_font_size(22.0f);
++    description_container->set_line_height(30.0f);
++    description_container->set_padding(18.0f);
++#endif
+     set_description_text("");
+ 
+     if (config->requires_confirmation) {
 diff --git a/recompui/src/config/ui_config_tab_graphics.cpp b/recompui/src/config/ui_config_tab_graphics.cpp
 index 4fdf81f..d889ea6 100644
 --- a/recompui/src/config/ui_config_tab_graphics.cpp
@@ -232,6 +574,80 @@ index 4fdf81f..d889ea6 100644
              );
  
              config.add_enum_option(
+diff --git a/recompui/src/elements/ui_modal.cpp b/recompui/src/elements/ui_modal.cpp
+index b057f46..a20366a 100644
+--- a/recompui/src/elements/ui_modal.cpp
++++ b/recompui/src/elements/ui_modal.cpp
+@@ -88,6 +88,12 @@ Modal::Modal(
+     modal_element->set_as_navigation_container(NavigationType::Vertical);
+     modal_element->set_nav_wrapping(true);
+ 
++#ifdef __ANDROID__
++    // DK look: a gold frame round the jungle-green glass panel.
++    modal_element->set_border_width(4.0f);
++    modal_element->set_border_color(Color{217, 165, 32, 255});
++    modal_element->set_border_radius(26.0f);
++#endif
+     header = context.create_element<ConfigHeaderFooter>(modal_element, true);
+     header->set_padding_top(0.0f);
+     header->set_padding_bottom(0.0f);
+@@ -95,6 +101,16 @@ Modal::Modal(
+     header->set_padding_right(8.0f);
+     header->set_border_top_left_radius(theme::border::radius_lg);
+     header->set_border_top_right_radius(theme::border::radius_lg);
++#ifdef __ANDROID__
++    // The tab bar is a wooden plank, like the bottom screen's panels.
++    header->set_background_color(Color{122, 78, 38, 255});
++    header->set_border_bottom_width(4.0f);
++    header->set_border_bottom_color(Color{58, 30, 6, 255});
++    header->set_border_top_left_radius(22.0f);
++    header->set_border_top_right_radius(22.0f);
++    header->set_padding_left(14.0f);
++    header->set_padding_right(14.0f);
++#endif
+ 
+     body = context.create_element<Element>(modal_element);
+     body->set_display(Display::Flex);
+diff --git a/recompui/src/elements/ui_tab_set.cpp b/recompui/src/elements/ui_tab_set.cpp
+index 2c5dc52..6983622 100644
+--- a/recompui/src/elements/ui_tab_set.cpp
++++ b/recompui/src/elements/ui_tab_set.cpp
+@@ -43,6 +43,35 @@ Tab::Tab(ResourceId rid, Element *parent, int tab_index, std::string_view text,
+     indicator->set_right(0.0f);
+     indicator->set_background_color(theme::color::Transparent);
+ 
++#ifdef __ANDROID__
++    // The bottom screen's DK look: chunky cartoon capitals, tan when idle, banana yellow in a
++    // rounded outline when selected (no underline indicator).
++    {
++        const Color tan{232, 213, 168, 255}, banana{249, 214, 72, 255}, cream{255, 244, 214, 255};
++        label->set_font_family("Luckiest Guy");
++        label->set_font_weight(400);
++        label->set_font_size(26.0f);
++        label->set_letter_spacing(1.0f);
++        label->set_text_transform(TextTransform::Uppercase);
++        set_margin_top(14.0f);
++        set_margin_bottom(14.0f);
++        set_padding_top(10.0f);
++        set_padding_bottom(6.0f);
++        set_padding_left(18.0f);
++        set_padding_right(18.0f);
++        set_border_width(3.0f);
++        set_border_radius(16.0f);
++        set_border_color(Color{0, 0, 0, 0});
++        set_color(tan);
++        hover_style.set_color(cream);
++        checked_style.set_color(banana);
++        checked_style.set_border_color(banana);
++        checked_style.set_background_color(Color{42, 20, 4, 140});
++        pulsing_style.set_color(cream);
++        pulsing_style.set_border_color(cream);
++        indicator->set_display(Display::None);
++    }
++#endif
+     add_style(&hover_style, { hover_state });
+     add_style(&checked_style, { checked_state });
+     add_style(&pulsing_style, { focus_state });
 diff --git a/recompui/src/renderer/rt64_render_context.cpp b/recompui/src/renderer/rt64_render_context.cpp
 index a7954c7..dec1073 100644
 --- a/recompui/src/renderer/rt64_render_context.cpp

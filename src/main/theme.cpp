@@ -87,52 +87,53 @@ void recomptheme::set_custom_theme() {
     theme::set_theme_color(theme::color::BW90, Color{229, 229, 229, 255});
 
 #ifdef __ANDROID__
-    // Android: warm dark smoked panels with an antique-gold accent and cream text, in the
-    // spirit of the Dusklight port's menus (and DK64's own gold), instead of blue on black.
+    // Android: the bottom screen's DK look - jungle-green glass panels (the frame, wooden tab
+    // bar and option rows are set in the RecompFrontend patch), banana-yellow accent, cream text.
     {
-        const Color gold{214, 178, 92, 255}, goldL{240, 222, 170, 255}, goldD{122, 96, 40, 255};
+        const Color banana{249, 214, 72, 255}, bananaL{255, 236, 150, 255}, bananaD{176, 128, 20, 255};
         auto alpha = [](Color c, uint8_t a) { c.a = a; return c; };
-        theme::set_theme_color(theme::color::Background1, Color{16, 14, 10, 255});
-        theme::set_theme_color(theme::color::Background2, Color{26, 23, 17, 255});
-        theme::set_theme_color(theme::color::Background3, Color{36, 32, 24, 255});
-        theme::set_theme_color(theme::color::BGOverlay, Color{214, 190, 130, 22});
-        theme::set_theme_color(theme::color::ModalOverlay, Color{22, 20, 15, 236});
-        theme::set_theme_color(theme::color::BGShadow2, Color{16, 14, 10, 184});
-        theme::set_theme_color(theme::color::Text, Color{238, 231, 212, 255});
-        theme::set_theme_color(theme::color::TextActive, Color{250, 244, 226, 255});
-        theme::set_theme_color(theme::color::TextDim, Color{204, 194, 168, 255});
-        theme::set_theme_color(theme::color::TextInactive, Color{238, 231, 212, 140});
-        theme::set_theme_color(theme::color::TextA5, Color{238, 231, 212, 13});
-        theme::set_theme_color(theme::color::TextA20, Color{238, 231, 212, 51});
-        theme::set_theme_color(theme::color::TextA30, Color{238, 231, 212, 77});
-        theme::set_theme_color(theme::color::TextA50, Color{238, 231, 212, 128});
-        theme::set_theme_color(theme::color::TextA80, Color{238, 231, 212, 204});
-        theme::set_theme_color(theme::color::Primary, gold);
-        theme::set_theme_color(theme::color::PrimaryL, goldL);
-        theme::set_theme_color(theme::color::PrimaryD, goldD);
-        theme::set_theme_color(theme::color::PrimaryA5, alpha(gold, 13));
-        theme::set_theme_color(theme::color::PrimaryA20, alpha(gold, 51));
-        theme::set_theme_color(theme::color::PrimaryA30, alpha(gold, 77));
-        theme::set_theme_color(theme::color::PrimaryA50, alpha(gold, 128));
-        theme::set_theme_color(theme::color::PrimaryA80, alpha(gold, 204));
-        const Color border{214, 190, 130, 255};
-        theme::set_theme_color(theme::color::Border, alpha(border, 64));
-        theme::set_theme_color(theme::color::BorderSoft, alpha(border, 36));
-        theme::set_theme_color(theme::color::BorderHard, alpha(border, 105));
-        theme::set_theme_color(theme::color::BorderSolid, alpha(border, 170));
-        theme::set_theme_color(theme::color::Elevated, alpha(border, 24));
-        theme::set_theme_color(theme::color::ElevatedSoft, alpha(border, 12));
-        theme::set_theme_color(theme::color::ElevatedBorder, alpha(border, 170));
-        theme::set_theme_color(theme::color::ElevatedBorderHard, alpha(border, 235));
-        // The "A" button colour (selection highlights) follows the accent too.
-        theme::set_theme_color(theme::color::A, gold);
-        theme::set_theme_color(theme::color::AL, goldL);
-        theme::set_theme_color(theme::color::AD, goldD);
-        theme::set_theme_color(theme::color::AA5, alpha(gold, 13));
-        theme::set_theme_color(theme::color::AA20, alpha(gold, 51));
-        theme::set_theme_color(theme::color::AA30, alpha(gold, 77));
-        theme::set_theme_color(theme::color::AA50, alpha(gold, 128));
-        theme::set_theme_color(theme::color::AA80, alpha(gold, 204));
+        theme::set_theme_color(theme::color::Background1, Color{8, 20, 5, 255});
+        theme::set_theme_color(theme::color::Background2, Color{19, 40, 14, 255});
+        theme::set_theme_color(theme::color::Background3, Color{30, 58, 22, 255});
+        theme::set_theme_color(theme::color::BGOverlay, Color{0, 0, 0, 90});
+        theme::set_theme_color(theme::color::ModalOverlay, Color{14, 26, 10, 226});
+        theme::set_theme_color(theme::color::BGShadow, Color{42, 20, 4, 110});
+        theme::set_theme_color(theme::color::BGShadow2, Color{8, 20, 5, 184});
+        theme::set_theme_color(theme::color::Text, Color{255, 244, 214, 255});
+        theme::set_theme_color(theme::color::TextActive, Color{255, 250, 232, 255});
+        theme::set_theme_color(theme::color::TextDim, Color{232, 213, 168, 255});
+        theme::set_theme_color(theme::color::TextInactive, Color{232, 213, 168, 170});
+        theme::set_theme_color(theme::color::TextA5, Color{255, 244, 214, 13});
+        theme::set_theme_color(theme::color::TextA20, Color{255, 244, 214, 51});
+        theme::set_theme_color(theme::color::TextA30, Color{255, 244, 214, 77});
+        theme::set_theme_color(theme::color::TextA50, Color{255, 244, 214, 128});
+        theme::set_theme_color(theme::color::TextA80, Color{255, 244, 214, 204});
+        theme::set_theme_color(theme::color::Primary, banana);
+        theme::set_theme_color(theme::color::PrimaryL, bananaL);
+        theme::set_theme_color(theme::color::PrimaryD, bananaD);
+        theme::set_theme_color(theme::color::PrimaryA5, alpha(banana, 13));
+        theme::set_theme_color(theme::color::PrimaryA20, alpha(banana, 51));
+        theme::set_theme_color(theme::color::PrimaryA30, alpha(banana, 77));
+        theme::set_theme_color(theme::color::PrimaryA50, alpha(banana, 128));
+        theme::set_theme_color(theme::color::PrimaryA80, alpha(banana, 204));
+        const Color gold{217, 165, 32, 255};
+        theme::set_theme_color(theme::color::Border, alpha(gold, 90));
+        theme::set_theme_color(theme::color::BorderSoft, alpha(gold, 50));
+        theme::set_theme_color(theme::color::BorderHard, alpha(gold, 140));
+        theme::set_theme_color(theme::color::BorderSolid, alpha(gold, 210));
+        const Color wood{122, 78, 38, 255};
+        theme::set_theme_color(theme::color::Elevated, alpha(wood, 150));
+        theme::set_theme_color(theme::color::ElevatedSoft, alpha(wood, 80));
+        theme::set_theme_color(theme::color::ElevatedBorder, alpha(gold, 170));
+        theme::set_theme_color(theme::color::ElevatedBorderHard, gold);
+        theme::set_theme_color(theme::color::A, banana);
+        theme::set_theme_color(theme::color::AL, bananaL);
+        theme::set_theme_color(theme::color::AD, bananaD);
+        theme::set_theme_color(theme::color::AA5, alpha(banana, 13));
+        theme::set_theme_color(theme::color::AA20, alpha(banana, 51));
+        theme::set_theme_color(theme::color::AA30, alpha(banana, 77));
+        theme::set_theme_color(theme::color::AA50, alpha(banana, 128));
+        theme::set_theme_color(theme::color::AA80, alpha(banana, 204));
     }
 #endif
 

@@ -856,6 +856,8 @@ int main(int argc, char** argv) {
     recompui::register_primary_font("FiraSansCondensed-Regular.ttf", "Fira Sans Condensed");
     recompui::register_extra_font("FiraSansCondensed-Bold.ttf");
     recompui::register_extra_font("InterVariable.ttf");
+    // The bottom screen's chunky title face, for the menu's tabs (Apache 2.0, assets/LuckiestGuy-LICENSE.txt).
+    recompui::register_extra_font("LuckiestGuy-Regular.ttf");
 #else
     recompui::register_primary_font("InterVariable.ttf", "Inter Variable");
 #endif
