@@ -725,6 +725,8 @@ extern s32 *D_global_asm_807FB1A0[];
 extern s32 D_global_asm_807F9678;
 extern u8 D_global_asm_807F967C;
 
+void *button_icons_load(s32 table, u32 file_index);
+
 RECOMP_PATCH void *getPointerTableFile(enum pointertable_e pointerTableIndex, u32 fileIndex, u8 arg2, u8 arg3) {
     s32 temp;
     u32 sp50;
@@ -736,6 +738,13 @@ RECOMP_PATCH void *getPointerTableFile(enum pointertable_e pointerTableIndex, u3
     s32 override_file_size = 0;
     u8 *override_file_copy = NULL;
 
+    // Android: button icons drawn for the player's controller (button_icons.c).
+    {
+        void *icon = button_icons_load(pointerTableIndex, fileIndex);
+        if (icon != NULL) {
+            return icon;
+        }
+    }
     recomp_on_asset_file_load_override(pointerTableIndex, fileIndex, &override_file, &override_file_size);
     if (override_file_size) {
         override_file_copy = _malloc(override_file_size);

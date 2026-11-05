@@ -74,6 +74,219 @@ extern "C" void recomp_report_frame(uint8_t* rdram, recomp_context* ctx) {
 #endif
 }
 
+// patches/button_icons.c: draws an in-game button icon (an N64 button's sprite) as the
+// physical button it's bound to on the player's controller, in the sprite's own size and
+// texture format. Returns 0 to keep the game's own icon (no controller, or not bound to one).
+#if defined(__ANDROID__)
+#include "recompinput/profiles.h"
+#include "util/file.h"
+#include <algorithm>
+#include <cstdlib>
+#include <android/log.h>
+#include <fstream>
+#include <map>
+#include <mutex>
+#include <set>
+#include <vector>
+
+namespace {
+    constexpr int icon_size = 64;   // assets/button_icons/*.rgba: 64x64 RGBA (android/tools/gen_button_icons.py)
+
+    const std::vector<uint8_t> *load_button_icon(const std::string &name) {
+        static std::mutex mutex;
+        static std::map<std::string, std::vector<uint8_t>> cache;
+        std::lock_guard lock{ mutex };
+        auto found = cache.find(name);
+        if (found != cache.end()) {
+            return found->second.empty() ? nullptr : &found->second;
+        }
+        std::vector<uint8_t> pixels;
+        std::ifstream in{ recompui::file::get_asset_path(("button_icons/" + name + ".rgba").c_str()), std::ios::binary };
+        if (in) {
+            pixels.resize(icon_size * icon_size * 4);
+            in.read(reinterpret_cast<char *>(pixels.data()), pixels.size());
+            if (!in) {
+                pixels.clear();
+            }
+        }
+        auto &stored = cache[name] = std::move(pixels);
+        return stored.empty() ? nullptr : &stored;
+    }
+
+    bool game_input_for_sprite(int32_t sprite, recompinput::GameInput &out) {
+        using GI = recompinput::GameInput;
+        switch (sprite) {
+            case 0x6E: out = GI::A; return true;
+            case 0x6F: out = GI::B; return true;
+            case 0x70: out = GI::Z; return true;
+            case 0x71: out = GI::C_DOWN; return true;
+            case 0x72: out = GI::C_UP; return true;
+            case 0x73: out = GI::C_LEFT; return true;
+            case 0x87: out = GI::R; return true;
+            case 0x88: out = GI::L; return true;
+            case 0x91: out = GI::START; return true;
+            default: return false;
+        }
+    }
+
+    std::string icon_name_for(const recompinput::InputField &field, recompinput::FaceButtonStyle style) {
+        using recompinput::FaceButtonStyle;
+        const bool nin = style == FaceButtonStyle::Nintendo;
+        const bool ps = style == FaceButtonStyle::PlayStation;
+        if (field.input_type == recompinput::InputType::ControllerDigital) {
+            switch (static_cast<SDL_GameControllerButton>(field.input_id)) {
+                case SDL_CONTROLLER_BUTTON_A: return ps ? "ps_cross" : nin ? "nin_a" : "xbox_a";
+                case SDL_CONTROLLER_BUTTON_B: return ps ? "ps_circle" : nin ? "nin_b" : "xbox_b";
+                case SDL_CONTROLLER_BUTTON_X: return ps ? "ps_square" : nin ? "nin_x" : "xbox_x";
+                case SDL_CONTROLLER_BUTTON_Y: return ps ? "ps_triangle" : nin ? "nin_y" : "xbox_y";
+                case SDL_CONTROLLER_BUTTON_LEFTSHOULDER: return ps ? "l1" : nin ? "l" : "lb";
+                case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER: return ps ? "r1" : nin ? "r" : "rb";
+                case SDL_CONTROLLER_BUTTON_START: return nin ? "plus" : "start";
+                case SDL_CONTROLLER_BUTTON_BACK: return nin ? "minus" : "back";
+                case SDL_CONTROLLER_BUTTON_LEFTSTICK: return "ls_click";
+                case SDL_CONTROLLER_BUTTON_RIGHTSTICK: return "rs_click";
+                case SDL_CONTROLLER_BUTTON_DPAD_UP: return "dpad_up";
+                case SDL_CONTROLLER_BUTTON_DPAD_DOWN: return "dpad_down";
+                case SDL_CONTROLLER_BUTTON_DPAD_LEFT: return "dpad_left";
+                case SDL_CONTROLLER_BUTTON_DPAD_RIGHT: return "dpad_right";
+                default: return "";
+            }
+        }
+        if (field.input_type == recompinput::InputType::ControllerAnalog) {
+            const bool positive = field.input_id > 0;
+            switch (static_cast<SDL_GameControllerAxis>(std::abs(field.input_id) - 1)) {
+                case SDL_CONTROLLER_AXIS_LEFTX: return positive ? "ls_right" : "ls_left";
+                case SDL_CONTROLLER_AXIS_LEFTY: return positive ? "ls_down" : "ls_up";
+                case SDL_CONTROLLER_AXIS_RIGHTX: return positive ? "rs_right" : "rs_left";
+                case SDL_CONTROLLER_AXIS_RIGHTY: return positive ? "rs_down" : "rs_up";
+                case SDL_CONTROLLER_AXIS_TRIGGERLEFT: return ps ? "l2" : nin ? "zl" : "lt";
+                case SDL_CONTROLLER_AXIS_TRIGGERRIGHT: return ps ? "r2" : nin ? "zr" : "rt";
+                default: return "";
+            }
+        }
+        return "";
+    }
+
+    // The icon's pixel at (x, y) of a w x h area, the icon fitted (square, centred) inside it;
+    // a box filter over the source pixels it covers.
+    void sample_icon(const std::vector<uint8_t> &icon, int x, int y, int w, int h, uint8_t rgba[4]) {
+        const int side = std::min(w, h);
+        const int ox = (w - side) / 2, oy = (h - side) / 2;
+        rgba[0] = rgba[1] = rgba[2] = rgba[3] = 0;
+        if (x < ox || y < oy || x >= ox + side || y >= oy + side) {
+            return;
+        }
+        const float scale = static_cast<float>(icon_size) / side;
+        const int sx0 = static_cast<int>((x - ox) * scale), sx1 = std::max(sx0 + 1, static_cast<int>((x - ox + 1) * scale));
+        const int sy0 = static_cast<int>((y - oy) * scale), sy1 = std::max(sy0 + 1, static_cast<int>((y - oy + 1) * scale));
+        uint32_t sum[4] = {}, alpha_sum = 0, count = 0;
+        for (int sy = sy0; sy < sy1 && sy < icon_size; sy++) {
+            for (int sx = sx0; sx < sx1 && sx < icon_size; sx++) {
+                const uint8_t *p = &icon[(sy * icon_size + sx) * 4];
+                // Colours weighted by alpha, so transparent edges don't darken.
+                sum[0] += p[0] * p[3];
+                sum[1] += p[1] * p[3];
+                sum[2] += p[2] * p[3];
+                alpha_sum += p[3];
+                count++;
+            }
+        }
+        if (count == 0 || alpha_sum == 0) {
+            return;
+        }
+        rgba[0] = static_cast<uint8_t>(sum[0] / alpha_sum);
+        rgba[1] = static_cast<uint8_t>(sum[1] / alpha_sum);
+        rgba[2] = static_cast<uint8_t>(sum[2] / alpha_sum);
+        rgba[3] = static_cast<uint8_t>(alpha_sum / count);
+    }
+}
+#endif
+
+extern "C" void recomp_fill_button_icon(uint8_t* rdram, recomp_context* ctx) {
+#if defined(__ANDROID__)
+    gpr request = _arg<0, gpr>(rdram, ctx);
+    gpr out = _arg<1, gpr>(rdram, ctx);
+    const int32_t sprite = MEM_W(0x00, request);
+    const int32_t width = MEM_W(0x04, request);
+    const int32_t height = MEM_W(0x08, request);
+    const int32_t codec = MEM_W(0x0C, request);
+    const int32_t tile_x = MEM_W(0x10, request);
+    const int32_t tile_y = MEM_W(0x14, request);
+    const int32_t tiles_x = std::max<int32_t>(1, MEM_W(0x18, request));
+    const int32_t tiles_y = std::max<int32_t>(1, MEM_W(0x1C, request));
+
+    recompinput::GameInput input;
+    if (width <= 0 || height <= 0 || width > 256 || height > 256 || codec < 0 || codec > 3
+            || !game_input_for_sprite(sprite, input) || recompinput::connected_controller_name().empty()) {
+        _return<int32_t>(ctx, 0);
+        return;
+    }
+    const int profile = recompinput::profiles::get_sp_controller_profile_index();
+    if (profile < 0) {
+        _return<int32_t>(ctx, 0);
+        return;
+    }
+    const std::string name = icon_name_for(recompinput::profiles::get_input_binding(profile, input, 0),
+        recompinput::get_face_button_style());
+    const std::vector<uint8_t> *icon = name.empty() ? nullptr : load_button_icon(name);
+    {
+        // Once per sprite and icon, for checking what the game asks for.
+        static std::set<std::string> logged;
+        const std::string key = std::to_string(sprite) + ":" + name;
+        if (logged.insert(key).second) {
+            __android_log_print(ANDROID_LOG_INFO, "DK64Icons", "sprite 0x%X %dx%d codec %d tile %d,%d of %dx%d -> %s%s",
+                sprite, width, height, codec, tile_x, tile_y, tiles_x, tiles_y, name.empty() ? "(none)" : name.c_str(),
+                icon == nullptr && !name.empty() ? " (missing)" : "");
+        }
+    }
+    if (icon == nullptr) {
+        _return<int32_t>(ctx, 0);
+        return;
+    }
+
+    const int full_w = width * tiles_x, full_h = height * tiles_y;
+    uint8_t nibble_byte = 0;
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            uint8_t px[4];
+            sample_icon(*icon, tile_x * width + x, tile_y * height + y, full_w, full_h, px);
+            const int i = y * width + x;
+            const uint8_t luma = static_cast<uint8_t>((px[0] * 77 + px[1] * 150 + px[2] * 29) >> 8);
+            switch (codec) {
+                case 3:   // RGBA32
+                    MEM_B(i * 4 + 0, out) = px[0];
+                    MEM_B(i * 4 + 1, out) = px[1];
+                    MEM_B(i * 4 + 2, out) = px[2];
+                    MEM_B(i * 4 + 3, out) = px[3];
+                    break;
+                case 2: { // RGBA16 (5551)
+                    const uint16_t v = static_cast<uint16_t>(((px[0] >> 3) << 11) | ((px[1] >> 3) << 6) | ((px[2] >> 3) << 1) | (px[3] >= 128 ? 1 : 0));
+                    MEM_B(i * 2 + 0, out) = static_cast<uint8_t>(v >> 8);
+                    MEM_B(i * 2 + 1, out) = static_cast<uint8_t>(v & 0xFF);
+                    break;
+                }
+                case 1:   // IA8
+                    MEM_B(i, out) = static_cast<uint8_t>((luma & 0xF0) | (px[3] >> 4));
+                    break;
+                default: { // IA4: two pixels per byte, the first in the high nibble
+                    const uint8_t nibble = static_cast<uint8_t>(((luma >> 5) << 1) | (px[3] >= 128 ? 1 : 0));
+                    if ((i & 1) == 0) {
+                        nibble_byte = static_cast<uint8_t>(nibble << 4);
+                    } else {
+                        MEM_B(i / 2, out) = static_cast<uint8_t>(nibble_byte | nibble);
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    _return<int32_t>(ctx, 1);
+#else
+    (void)rdram;
+    _return<int32_t>(ctx, 0);
+#endif
+}
+
 // patches/android_hooks.c: the Kong a Touch Kong Swap is going to, or -1.
 extern "C" void recomp_get_tag_target(uint8_t* rdram, recomp_context* ctx) {
     (void)rdram;
