@@ -708,6 +708,17 @@ void on_launcher_init(recompui::LauncherMenu *menu) {
         recompui::GameOptionsMenuLayout::Center
     );
 
+#ifdef __ANDROID__
+    // Android: Controls lives in Settings > Input > Configure Inputs. The buttons are styled
+    // in launcher_animation.cpp; Settings and Mods get a "›" (they open another menu).
+    game_options_menu->add_start_game_or_load_rom_option();
+    for (auto option : { game_options_menu->add_settings_option(), game_options_menu->add_mods_option() }) {
+        auto arrow = recompui::get_current_context().create_element<recompui::Label>(option, "\u203A", recompui::theme::Typography::LabelLG);
+        arrow->set_font_size(40.0f);
+    }
+    game_options_menu->add_exit_option();
+    game_options_menu->set_width(30, recompui::Unit::Percent);
+#else
     game_options_menu->add_default_options();
     game_options_menu->set_width(30, recompui::Unit::Percent);
 
@@ -720,6 +731,7 @@ void on_launcher_init(recompui::LauncherMenu *menu) {
             style->set_background_color(recompui::theme::color::Transparent);
         }
     }
+#endif
 
     recompui::Element *menu_container = menu->get_menu_container();
     menu_container->set_width(1440);
