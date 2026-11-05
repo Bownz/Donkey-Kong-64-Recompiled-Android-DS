@@ -831,9 +831,12 @@ extern "C" void dk64_android_apply_control_preset(int modern) {
             }
         }
         if (modern) {
-            // Modern leaves X and Y free: C Up is R3, C Left is the right stick.
+            // Modern leaves X, Y and the shoulder buttons free: the C buttons are on the right
+            // stick (C Up: pressing it in).
             const InputField x = InputField::controller_digital(SDL_CONTROLLER_BUTTON_X);
             const InputField y = InputField::controller_digital(SDL_CONTROLLER_BUTTON_Y);
+            const InputField lb = InputField::controller_digital(SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
+            const InputField rb = InputField::controller_digital(SDL_CONTROLLER_BUTTON_RIGHTSHOULDER);
             for (int i = 0; i < static_cast<int>(GameInput::COUNT); i++) {
                 const GameInput input = static_cast<GameInput>(i);
                 if (get_game_input_is_menu(input)) {
@@ -841,7 +844,7 @@ extern "C" void dk64_android_apply_control_preset(int modern) {
                 }
                 for (size_t b = 0; b < num_bindings_per_input; b++) {
                     const InputField field = profiles::get_input_binding(profile, input, b);
-                    if (field == x || field == y) {
+                    if (field == x || field == y || field == lb || field == rb) {
                         profiles::set_input_binding(profile, input, b, InputField{});
                     }
                 }
