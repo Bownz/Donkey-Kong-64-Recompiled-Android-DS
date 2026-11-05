@@ -1154,7 +1154,7 @@ index b057f46..e7552a7 100644
          menu_actions_wrapper->set_bottom(0);
          menu_actions_wrapper->set_margin_left_auto();
 diff --git a/recompui/src/elements/ui_tab_set.cpp b/recompui/src/elements/ui_tab_set.cpp
-index 2c5dc52..76416e6 100644
+index 2c5dc52..3d04f98 100644
 --- a/recompui/src/elements/ui_tab_set.cpp
 +++ b/recompui/src/elements/ui_tab_set.cpp
 @@ -43,6 +43,31 @@ Tab::Tab(ResourceId rid, Element *parent, int tab_index, std::string_view text,
@@ -1189,19 +1189,23 @@ index 2c5dc52..76416e6 100644
      add_style(&hover_style, { hover_state });
      add_style(&checked_style, { checked_state });
      add_style(&pulsing_style, { focus_state });
-@@ -73,7 +98,11 @@ void Tab::process_event(const Event &e) {
+@@ -73,7 +98,15 @@ void Tab::process_event(const Event &e) {
      case EventType::Enable: {
          bool active = std::get<EventEnable>(e.variant).active;
          set_style_enabled(disabled_state, !active);
 +#ifdef __ANDROID__
-+        indicator->set_background_color(active && is_selected ? Color{249, 214, 72, 255} : theme::color::Transparent);
++        if (active && is_selected) {
++            indicator->set_background_color(Color{249, 214, 72, 255});
++        } else {
++            indicator->set_background_color(theme::color::Transparent);
++        }
 +#else
          indicator->set_background_color(active ? theme::color::BorderSolid : theme::color::Transparent);
 +#endif
          break;
      }
      case EventType::Focus:
-@@ -82,6 +111,12 @@ void Tab::process_event(const Event &e) {
+@@ -82,6 +115,12 @@ void Tab::process_event(const Event &e) {
              set_style_enabled(focus_state, active);
              if (active) {
                  queue_update();
@@ -1214,7 +1218,7 @@ index 2c5dc52..76416e6 100644
              }
          }
          break;
-@@ -90,7 +125,11 @@ void Tab::process_event(const Event &e) {
+@@ -90,7 +129,11 @@ void Tab::process_event(const Event &e) {
              recompui::Color pulse_color = recompui::get_pulse_color(750);
              pulsing_style.set_color(pulse_color);
              if (is_selected) {
@@ -1226,12 +1230,16 @@ index 2c5dc52..76416e6 100644
              } else {
                  indicator->set_background_color(theme::color::Transparent);
              }
-@@ -107,7 +146,11 @@ void Tab::set_selected(bool enable) {
+@@ -107,7 +150,15 @@ void Tab::set_selected(bool enable) {
      is_selected = enable;
      set_as_primary_focus(enable);
      set_style_enabled(checked_state, enable);
 +#ifdef __ANDROID__
-+    indicator->set_background_color(enable ? Color{249, 214, 72, 255} : theme::color::Transparent);
++    if (enable) {
++        indicator->set_background_color(Color{249, 214, 72, 255});
++    } else {
++        indicator->set_background_color(theme::color::Transparent);
++    }
 +#else
      indicator->set_background_color(enable ? theme::color::BorderSolid : theme::color::Transparent);
 +#endif
