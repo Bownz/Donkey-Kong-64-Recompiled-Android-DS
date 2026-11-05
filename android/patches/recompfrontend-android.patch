@@ -306,10 +306,10 @@ index 277a421..b33343d 100644
  
 diff --git a/recompui/src/composites/ui_menu_bar.cpp b/recompui/src/composites/ui_menu_bar.cpp
 new file mode 100644
-index 0000000..7957c97
+index 0000000..14e4f86
 --- /dev/null
 +++ b/recompui/src/composites/ui_menu_bar.cpp
-@@ -0,0 +1,236 @@
+@@ -0,0 +1,230 @@
 +// Android: the in-game menu bar. The menu button opens a slim bar across the top of the
 +// screen (in the bottom screen's DK style) instead of the full settings window; the bar opens
 +// Settings or Mods in the settings window, or quits. Like the Dusklight port's.
@@ -414,7 +414,13 @@ index 0000000..7957c97
 +                if (action == MenuAction::Back || action == MenuAction::Toggle) {
 +                    slide_up();
 +                }
-+            } else if (e.type == EventType::Update && anim != Anim::None) {
++            } else if (e.type == EventType::Update) {
++                // Runs every frame (like the settings window's), so opening the bar never
++                // has to open this UI context from inside another one.
++                queue_update();
++                if (anim == Anim::None) {
++                    return;
++                }
 +                float t = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - anim_start).count() / slide_ms;
 +                if (t > 1.0f) {
 +                    t = 1.0f;
@@ -430,8 +436,6 @@ index 0000000..7957c97
 +                    if (closing) {
 +                        recompui::hide_context(menu_bar_context);
 +                    }
-+                } else {
-+                    queue_update();
 +                }
 +            }
 +        }
@@ -442,12 +446,10 @@ index 0000000..7957c97
 +        MenuBarRoot(ResourceId rid, Element *parent) :
 +            Element(rid, parent, Events(EventType::MenuAction, EventType::Update), "div", false) {}
 +
-+        // Called with the menu bar's context open.
 +        void slide_down() {
 +            anim = Anim::Opening;
 +            anim_start = std::chrono::steady_clock::now();
 +            apply(0.0f);
-+            queue_update();
 +        }
 +
 +        void slide_up() {
@@ -456,7 +458,6 @@ index 0000000..7957c97
 +            }
 +            anim = Anim::Closing;
 +            anim_start = std::chrono::steady_clock::now();
-+            queue_update();
 +        }
 +
 +        // Straight away, e.g. when the settings window opens over it.
@@ -519,6 +520,7 @@ index 0000000..7957c97
 +    spacer->set_flex_grow(1.0f);
 +    context.create_element<MenuBarItem>(bar, "X", []() { menu_bar_root->slide_up(); });
 +
++    root->queue_update();   // starts its every-frame update
 +    context.set_autofocus_element(settings);
 +    context.close();
 +    menu_bar_ready = true;
@@ -529,16 +531,8 @@ index 0000000..7957c97
 +        return false;
 +    }
 +    if (!recompui::is_context_shown(menu_bar_context)) {
++        menu_bar_root->slide_down();
 +        recompui::show_context(menu_bar_context, "");
-+        // Only one UI context can be open at a time: slide in only if ours can be opened.
-+        ContextId current = get_current_context();
-+        if (current == ContextId::null() || current == menu_bar_context) {
-+            bool opened = menu_bar_context.open_if_not_already();
-+            menu_bar_root->slide_down();
-+            if (opened) {
-+                menu_bar_context.close();
-+            }
-+        }
 +    }
 +    return true;
 +}
