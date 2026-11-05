@@ -835,6 +835,9 @@ extern "C" void dk64_android_apply_control_preset(int modern) {
     recomp::config::Config &general = recompui::config::get_general_config();
     general.update_option_value(dk64::configkeys::general::camera_type,
         static_cast<uint32_t>(modern ? dk64::CameraTypeMode::Analog : dk64::CameraTypeMode::Free));
+    // Analog Camera speed: the turn rate scales with this (patches/sound_options_patches.c).
+    // At the default 3 a full circle took about 7 seconds; 8 gives about 2.6, like most games now.
+    general.update_option_value(dk64::configkeys::general::analog_camera_sensitivity, modern ? 8.0 : 3.0);
     // Aiming: Modern looks up when you push (or tilt) up, like most games now; Classic keeps
     // the N64's (up looks down). Swimming follows the same rule (Modern: up swims up). The
     // third person camera isn't inverted in either.
