@@ -9,6 +9,11 @@
 #include "librecomp/files.hpp"
 #include "librecomp/config.hpp"
 #if defined(__ANDROID__)
+#include <fstream>
+#include "recompinput/profiles.h"
+#include "librecomp/game.hpp"
+#endif
+#if defined(__ANDROID__)
 #include "../../android/jni/gpu_driver.h"
 #endif
 #include "util/file.h"
@@ -628,6 +633,9 @@ static void set_control_defaults() {
     set_default_mapping_for_controller(GameInput::DPAD_DOWN, { InputField::controller_digital(SDL_CONTROLLER_BUTTON_DPAD_DOWN) });
     set_default_mapping_for_controller(GameInput::DPAD_LEFT, { InputField::controller_digital(SDL_CONTROLLER_BUTTON_DPAD_LEFT) });
     set_default_mapping_for_controller(GameInput::DPAD_RIGHT, { InputField::controller_digital(SDL_CONTROLLER_BUTTON_DPAD_RIGHT) });
+    // Menus: A selects, B backs out (the library's default for Back is the left face button).
+    set_default_mapping_for_controller(GameInput::ACCEPT_MENU, { InputField::controller_digital(SDL_CONTROLLER_BUTTON_A) });
+    set_default_mapping_for_controller(GameInput::BACK_MENU, { InputField::controller_digital(SDL_CONTROLLER_BUTTON_B) });
 #endif
 }
 
@@ -755,6 +763,28 @@ void dk64::init_config() {
 #endif
 
     recompui::config::finalize();
+
+#if defined(__ANDROID__)
+    // Once: set-ups from before B backed out of menus get Back (Menu) on B.
+    {
+        const std::filesystem::path marker = recomp::get_config_path() / "menu_back_b.txt";
+        if (!std::filesystem::exists(marker)) {
+            using namespace recompinput;
+            const int profile = profiles::get_sp_controller_profile_index();
+            const InputField b = InputField::controller_digital(SDL_CONTROLLER_BUTTON_B);
+            bool has_b = false;
+            for (size_t i = 0; profile >= 0 && i < num_bindings_per_input; i++) {
+                has_b = has_b || profiles::get_input_binding(profile, GameInput::BACK_MENU, i) == b;
+            }
+            if (profile >= 0 && !has_b) {
+                profiles::set_input_binding(profile, GameInput::BACK_MENU, 0, b);
+                profiles::save_controls_config(recomp::get_config_path() / (recompui::config::controls::id + ".json"));
+            }
+            std::ofstream out{ marker };
+            out << "done\n";
+        }
+    }
+#endif
 
 }
 

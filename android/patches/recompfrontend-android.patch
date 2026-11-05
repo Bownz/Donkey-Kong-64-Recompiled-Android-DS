@@ -1237,10 +1237,16 @@ index 0561657..06088b1 100644
  
      std::string_view get_type_name() override { return "ConfigOptionEnum"; }
 diff --git a/recompui/src/config/ui_config_page_controls.cpp b/recompui/src/config/ui_config_page_controls.cpp
-index f379a6f..53e52c7 100644
+index f379a6f..9532b98 100644
 --- a/recompui/src/config/ui_config_page_controls.cpp
 +++ b/recompui/src/config/ui_config_page_controls.cpp
-@@ -8,6 +8,7 @@
+@@ -1,4 +1,5 @@
+ #include "ui_config_page_controls.h"
++#include <cstdlib>
+ #include "composites/ui_assign_players_modal.h"
+ #include "elements/ui_button.h"
+ #include "elements/ui_label.h"
+@@ -8,6 +9,7 @@
  #include "elements/ui_select.h"
  #include "recompinput/profiles.h"
  #include "recompui/config.h"
@@ -1248,7 +1254,7 @@ index f379a6f..53e52c7 100644
  
  namespace recompui {
  
-@@ -114,6 +115,18 @@ GameInputRow::GameInputRow(
+@@ -114,6 +116,18 @@ GameInputRow::GameInputRow(
      }
  
      scroll_buffer = context.create_element<ScrollBuffer>(this, 16.0f);
@@ -1267,7 +1273,7 @@ index f379a6f..53e52c7 100644
  }
  
  GameInputRow::~GameInputRow() {
-@@ -204,6 +217,30 @@ void ConfigPageControls::create_game_input_contexts() {
+@@ -204,6 +218,30 @@ void ConfigPageControls::create_game_input_contexts() {
              recompinput::get_game_input_clearable(input)
          };
  
@@ -1298,7 +1304,17 @@ index f379a6f..53e52c7 100644
          if (recompinput::get_game_input_is_menu(input)) {
              game_input_sections.menu.contexts.push_back(input_ctx);
          } else {
-@@ -357,6 +394,13 @@ void ConfigPageControls::render_body_mappings() {
+@@ -229,6 +267,9 @@ void ConfigPageControls::process_event(const Event &e) {
+             last_update_index = update_index;
+             render_all();
+         }
++#ifdef __ANDROID__
++        update_controller_picture();
++#endif
+         queue_update();
+         break;
+     default:
+@@ -357,6 +398,13 @@ void ConfigPageControls::render_body_mappings() {
          body->get_right()->clear_children();
          description_container = context.create_element<Element>(body->get_right(), 0, "p", true);
          description_container->set_text("");
@@ -1312,7 +1328,7 @@ index f379a6f..53e52c7 100644
      }
  }
  
-@@ -460,6 +504,12 @@ void ConfigPageControls::on_edit_player_profile(int player_index) {
+@@ -460,6 +508,12 @@ void ConfigPageControls::on_edit_player_profile(int player_index) {
      }
  }
  
@@ -1325,7 +1341,7 @@ index f379a6f..53e52c7 100644
  void ConfigPageControls::render_footer() {
      if (multiplayer_enabled && !multiplayer_view_mappings) {
          hide_footer();
-@@ -473,7 +523,17 @@ void ConfigPageControls::render_footer() {
+@@ -473,7 +527,17 @@ void ConfigPageControls::render_footer() {
      {
          auto footer_left = footer->get_left();
          footer_left->clear_children();
@@ -1343,7 +1359,7 @@ index f379a6f..53e52c7 100644
              keyboard_toggle = context.create_element<IconToggle>(footer_left, "icons/Cont.svg", "icons/Keyboard.svg", ToggleSize::Large);
              keyboard_toggle->set_checked(single_player_show_keyboard_mappings);
              keyboard_toggle->add_checked_callback([this](bool checked) {
-@@ -520,6 +580,58 @@ void ConfigPageControls::render_control_mappings() {
+@@ -520,6 +584,58 @@ void ConfigPageControls::render_control_mappings() {
  
          game_input_rows.clear();
  
@@ -1402,7 +1418,7 @@ index f379a6f..53e52c7 100644
          create_game_input_contexts();
          set_current_profile_index();
  
-@@ -669,7 +781,106 @@ void ConfigPageControls::on_option_hover(recompinput::GameInput input_id) {
+@@ -669,7 +785,203 @@ void ConfigPageControls::on_option_hover(recompinput::GameInput input_id) {
              description_container->set_text("");
          }
      }
@@ -1425,83 +1441,180 @@ index f379a6f..53e52c7 100644
 +    }
 +}
 +
++// A picture of a whole controller (Xbox / Nintendo / PlayStation labels). Buttons light up
++// while they're pressed (filled banana yellow), and the buttons bound to the row you're on
++// get a banana outline.
++namespace {
++    const Color pad_body{46, 28, 12, 235};
++    const Color pad_edge{168, 128, 72, 255};
++    const Color part_idle{78, 50, 22, 255};
++    const Color part_edge{120, 86, 44, 255};
++    const Color part_text{232, 213, 168, 255};
++    const Color lit_fill{249, 214, 72, 255};
++    const Color lit_text{58, 30, 6, 255};
++
++    SDL_GameController *first_controller() {
++        for (int i = 0; i < SDL_NumJoysticks(); i++) {
++            if (SDL_IsGameController(i)) {
++                SDL_GameController *c = SDL_GameControllerFromInstanceID(SDL_JoystickGetDeviceInstanceID(i));
++                if (c != nullptr) {
++                    return c;
++                }
++            }
++        }
++        return nullptr;
++    }
++}
++
 +void ConfigPageControls::render_face_buttons(Element *parent) {
 +    recompui::ContextId context = get_current_context();
++    pad_parts.clear();
++    stick_dots[0] = stick_dots[1] = nullptr;
++
++    const recompinput::FaceButtonStyle style = recompinput::get_face_button_style();
++    const bool nin = style == recompinput::FaceButtonStyle::Nintendo;
++    const bool ps = style == recompinput::FaceButtonStyle::PlayStation;
++
 +    Element *pad = context.create_element<Element>(parent, 0, "div", false);
 +    pad->set_position(Position::Relative);
-+    pad->set_width(300.0f);
++    pad->set_width(460.0f);
 +    pad->set_height(300.0f);
-+    pad->set_margin_top(30.0f);
++    pad->set_margin_top(24.0f);
 +    pad->set_margin_left_auto();
 +    pad->set_margin_right_auto();
 +
-+    const recompinput::FaceButtonStyle style = recompinput::get_face_button_style();
-+    const float size = 100.0f;
-+    const float pos[4][2] = { { 100.0f, 0.0f }, { 0.0f, 100.0f }, { 200.0f, 100.0f }, { 100.0f, 200.0f } };
-+    std::string letters[4];
-+    const SDL_GameControllerButton buttons[4] = { SDL_CONTROLLER_BUTTON_A, SDL_CONTROLLER_BUTTON_B, SDL_CONTROLLER_BUTTON_X, SDL_CONTROLLER_BUTTON_Y };
-+    const char *names[4] = { "A", "B", "X", "Y" };
-+    for (int i = 0; i < 4; i++) {
-+        letters[face_position(buttons[i], style)] = names[i];
-+    }
-+    if (style == recompinput::FaceButtonStyle::PlayStation) {
-+        letters[0] = "\u25B3"; letters[1] = "\u25A1"; letters[2] = "\u25CB"; letters[3] = "\u2715";
-+    }
-+    for (int i = 0; i < 4; i++) {
-+        Element *b = context.create_element<Element>(pad, 0, "div", false);
-+        b->set_position(Position::Absolute);
-+        b->set_left(pos[i][0]);
-+        b->set_top(pos[i][1]);
-+        b->set_width(size);
-+        b->set_height(size);
-+        b->set_border_radius(size / 2.0f);
-+        b->set_border_width(3.0f);
-+        b->set_display(Display::Flex);
-+        b->set_align_items(AlignItems::Center);
-+        b->set_justify_content(JustifyContent::Center);
-+        Label *l = context.create_element<Label>(b, letters[i], theme::Typography::Header3);
-+        l->set_font_family(style == recompinput::FaceButtonStyle::PlayStation ? "Fira Sans Condensed" : "Luckiest Guy");
++    auto box = [&](Element *in, float x, float y, float w, float h, float radius) {
++        Element *e = context.create_element<Element>(in, 0, "div", false);
++        e->set_position(Position::Absolute);
++        e->set_left(x);
++        e->set_top(y);
++        e->set_width(w);
++        e->set_height(h);
++        e->set_border_radius(radius);
++        return e;
++    };
++    auto part = [&](float x, float y, float w, float h, float radius, const std::string &text, int type, int id, float font) {
++        Element *e = box(pad, x, y, w, h, radius);
++        e->set_border_width(3.0f);
++        e->set_display(Display::Flex);
++        e->set_align_items(AlignItems::Center);
++        e->set_justify_content(JustifyContent::Center);
++        Label *l = context.create_element<Label>(e, text, theme::Typography::LabelSM);
++        l->set_font_family(ps && type == 0 && id <= SDL_CONTROLLER_BUTTON_Y ? "Fira Sans Condensed" : "Luckiest Guy");
 +        l->set_font_weight(400);
-+        l->set_font_size(44.0f);
-+        l->set_padding_top(style == recompinput::FaceButtonStyle::PlayStation ? 0.0f : 8.0f);
-+        face_buttons[i] = b;
-+        face_labels[i] = l;
++        l->set_font_size(font);
++        l->set_padding_top(ps && type == 0 && id <= SDL_CONTROLLER_BUTTON_Y ? 0.0f : 4.0f);
++        pad_parts.push_back({ e, l, type, id, false, -1 });
++        return e;
++    };
++
++    // Triggers and shoulders above the body.
++    part(40.0f, 0.0f, 100.0f, 30.0f, 12.0f, ps ? "L2" : nin ? "ZL" : "LT", 1, SDL_CONTROLLER_AXIS_TRIGGERLEFT, 18.0f);
++    part(320.0f, 0.0f, 100.0f, 30.0f, 12.0f, ps ? "R2" : nin ? "ZR" : "RT", 1, SDL_CONTROLLER_AXIS_TRIGGERRIGHT, 18.0f);
++    part(30.0f, 36.0f, 120.0f, 30.0f, 14.0f, ps ? "L1" : nin ? "L" : "LB", 0, SDL_CONTROLLER_BUTTON_LEFTSHOULDER, 18.0f);
++    part(310.0f, 36.0f, 120.0f, 30.0f, 14.0f, ps ? "R1" : nin ? "R" : "RB", 0, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER, 18.0f);
++
++    // The body.
++    Element *body_el = box(pad, 0.0f, 72.0f, 460.0f, 228.0f, 90.0f);
++    body_el->set_background_color(pad_body);
++    body_el->set_border_width(3.0f);
++    body_el->set_border_color(pad_edge);
++
++    // Left stick (top left), d-pad (below), right stick (bottom right), face buttons (top right).
++    for (int side = 0; side < 2; side++) {
++        const float x = side == 0 ? 62.0f : 262.0f, y = side == 0 ? 98.0f : 196.0f;
++        Element *ring = part(x, y, 80.0f, 80.0f, 40.0f, "", 2, side, 16.0f);
++        Element *dot = box(ring, 20.0f, 20.0f, 34.0f, 34.0f, 17.0f);
++        dot->set_background_color(part_edge);
++        stick_dots[side] = dot;
++        (void)ring;
 +    }
-+    Label *caption = context.create_element<Label>(parent, "Your controller's face buttons", theme::Typography::LabelMD);
++    part(152.0f, 196.0f, 30.0f, 30.0f, 6.0f, "", 0, SDL_CONTROLLER_BUTTON_DPAD_UP, 14.0f);
++    part(152.0f, 256.0f, 30.0f, 30.0f, 6.0f, "", 0, SDL_CONTROLLER_BUTTON_DPAD_DOWN, 14.0f);
++    part(122.0f, 226.0f, 30.0f, 30.0f, 6.0f, "", 0, SDL_CONTROLLER_BUTTON_DPAD_LEFT, 14.0f);
++    part(182.0f, 226.0f, 30.0f, 30.0f, 6.0f, "", 0, SDL_CONTROLLER_BUTTON_DPAD_RIGHT, 14.0f);
++
++    const SDL_GameControllerButton faces[4] = { SDL_CONTROLLER_BUTTON_A, SDL_CONTROLLER_BUTTON_B, SDL_CONTROLLER_BUTTON_X, SDL_CONTROLLER_BUTTON_Y };
++    const char *letters[4] = { "A", "B", "X", "Y" };
++    const char *shapes[4] = { "✕", "○", "□", "△" };
++    const float fx[4] = { 345.0f, 300.0f, 390.0f, 345.0f };   // top, left, right, bottom
++    const float fy[4] = { 92.0f, 132.0f, 132.0f, 172.0f };
++    for (int i = 0; i < 4; i++) {
++        const int p = face_position(faces[i], style);
++        part(fx[p], fy[p], 44.0f, 44.0f, 22.0f, ps ? shapes[i] : letters[i], 0, faces[i], ps ? 22.0f : 24.0f);
++    }
++    part(176.0f, 118.0f, 44.0f, 24.0f, 12.0f, nin ? "−" : "", 0, SDL_CONTROLLER_BUTTON_BACK, 18.0f);
++    part(240.0f, 118.0f, 44.0f, 24.0f, 12.0f, nin ? "+" : "", 0, SDL_CONTROLLER_BUTTON_START, 18.0f);
++
++    Label *caption = context.create_element<Label>(parent, "Press a button to see it light up", theme::Typography::LabelMD);
 +    caption->set_display(Display::Block);
 +    caption->set_text_align(TextAlign::Center);
-+    caption->set_margin_top(16.0f);
++    caption->set_margin_top(14.0f);
 +    caption->set_font_weight(700);
-+    caption->set_color(Color{232, 213, 168, 255});
++    caption->set_color(Color{232, 213, 168, 200});
 +    highlight_face_buttons(recompinput::GameInput::COUNT);
 +}
 +
 +void ConfigPageControls::highlight_face_buttons(recompinput::GameInput input_id) {
-+    bool lit[4] = { false, false, false, false };
-+    if (input_id != recompinput::GameInput::COUNT && selected_profile_index >= 0) {
-+        const recompinput::FaceButtonStyle style = recompinput::get_face_button_style();
-+        for (int j = 0; j < recompinput::num_bindings_per_input; j++) {
-+            recompinput::InputField field = recompinput::profiles::get_input_binding(selected_profile_index, input_id, j);
-+            if (field.input_type == recompinput::InputType::ControllerDigital) {
-+                int p = face_position(static_cast<SDL_GameControllerButton>(field.input_id), style);
-+                if (p >= 0) {
-+                    lit[p] = true;
++    for (auto &p : pad_parts) {
++        p.bound = false;
++    }
++    if (input_id == recompinput::GameInput::COUNT || selected_profile_index < 0) {
++        return;
++    }
++    for (int j = 0; j < recompinput::num_bindings_per_input; j++) {
++        recompinput::InputField field = recompinput::profiles::get_input_binding(selected_profile_index, input_id, j);
++        for (auto &p : pad_parts) {
++            if (field.input_type == recompinput::InputType::ControllerDigital && p.type == 0 && p.id == field.input_id) {
++                p.bound = true;
++            } else if (field.input_type == recompinput::InputType::ControllerAnalog) {
++                const int axis = std::abs(field.input_id) - 1;
++                if (p.type == 1 && p.id == axis) {
++                    p.bound = true;
++                } else if (p.type == 2 && p.id == (axis <= SDL_CONTROLLER_AXIS_LEFTY ? 0 : 1) && axis <= SDL_CONTROLLER_AXIS_RIGHTY) {
++                    p.bound = true;
 +                }
 +            }
 +        }
 +    }
-+    for (int i = 0; i < 4; i++) {
-+        if (face_buttons[i] == nullptr) {
++}
++
++// Every frame: which parts are pressed, and where the sticks are.
++void ConfigPageControls::update_controller_picture() {
++    if (pad_parts.empty()) {
++        return;
++    }
++    SDL_GameController *c = first_controller();
++    for (auto &p : pad_parts) {
++        bool pressed = false;
++        if (c != nullptr) {
++            if (p.type == 0) {
++                pressed = SDL_GameControllerGetButton(c, static_cast<SDL_GameControllerButton>(p.id)) != 0;
++            } else if (p.type == 1) {
++                pressed = SDL_GameControllerGetAxis(c, static_cast<SDL_GameControllerAxis>(p.id)) > 12000;
++            } else {
++                const SDL_GameControllerAxis ax = p.id == 0 ? SDL_CONTROLLER_AXIS_LEFTX : SDL_CONTROLLER_AXIS_RIGHTX;
++                const SDL_GameControllerAxis ay = p.id == 0 ? SDL_CONTROLLER_AXIS_LEFTY : SDL_CONTROLLER_AXIS_RIGHTY;
++                const float x = SDL_GameControllerGetAxis(c, ax) / 32768.0f;
++                const float y = SDL_GameControllerGetAxis(c, ay) / 32768.0f;
++                pressed = SDL_GameControllerGetButton(c, p.id == 0 ? SDL_CONTROLLER_BUTTON_LEFTSTICK : SDL_CONTROLLER_BUTTON_RIGHTSTICK) != 0
++                    || (x * x + y * y) > 0.25f;
++                if (stick_dots[p.id] != nullptr) {
++                    stick_dots[p.id]->set_left(20.0f + x * 18.0f);
++                    stick_dots[p.id]->set_top(20.0f + y * 18.0f);
++                }
++            }
++        }
++        const int state = (pressed ? 2 : 0) | (p.bound ? 1 : 0);
++        if (state == p.last_state) {
 +            continue;
 +        }
-+        if (lit[i]) {
-+            face_buttons[i]->set_background_color(Color{249, 214, 72, 255});
-+            face_buttons[i]->set_border_color(Color{255, 244, 214, 255});
-+            face_labels[i]->set_color(Color{58, 30, 6, 255});
-+        } else {
-+            face_buttons[i]->set_background_color(Color{62, 38, 16, 230});
-+            face_buttons[i]->set_border_color(Color{168, 128, 72, 255});
-+            face_labels[i]->set_color(Color{232, 213, 168, 255});
++        p.last_state = state;
++        p.el->set_background_color(pressed ? lit_fill : part_idle);
++        p.el->set_border_color(p.bound ? lit_fill : part_edge);
++        p.label->set_color(pressed ? lit_text : (p.bound ? lit_fill : part_text));
++        if (p.type == 2 && stick_dots[p.id] != nullptr) {
++            stick_dots[p.id]->set_background_color(pressed ? lit_text : part_edge);
 +        }
 +    }
  }
@@ -1510,7 +1623,7 @@ index f379a6f..53e52c7 100644
  
  } // namespace recompui
 diff --git a/recompui/src/config/ui_config_page_controls.h b/recompui/src/config/ui_config_page_controls.h
-index dd8ff24..b1ca31e 100644
+index dd8ff24..7ba89cd 100644
 --- a/recompui/src/config/ui_config_page_controls.h
 +++ b/recompui/src/config/ui_config_page_controls.h
 @@ -82,6 +82,15 @@ public:
@@ -1529,16 +1642,25 @@ index dd8ff24..b1ca31e 100644
          }
      }
  };
-@@ -152,6 +161,13 @@ protected:
+@@ -152,6 +161,22 @@ protected:
      std::vector<GameInputRow*> game_input_rows;
      IconToggle *keyboard_toggle;
      Element *description_container = nullptr;
 +#ifdef __ANDROID__
 +    // The face-button picture on the right: top, left, right, bottom.
-+    Element *face_buttons[4] = {};
-+    Label *face_labels[4] = {};
++    struct PadPart {
++        Element *el;
++        Label *label;
++        int type;        // 0 button (SDL button), 1 trigger (SDL axis), 2 stick (0 left, 1 right)
++        int id;
++        bool bound;
++        int last_state;
++    };
++    std::vector<PadPart> pad_parts;
++    Element *stick_dots[2] = {};
 +    void render_face_buttons(Element *parent);
 +    void highlight_face_buttons(recompinput::GameInput input_id);
++    void update_controller_picture();
 +#endif
      on_player_bind_callback on_player_bind;
      Element *nav_up_element = nullptr;
