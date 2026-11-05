@@ -466,8 +466,22 @@ index 6ba64e2..41e46a1 100644
      set_description_text("");
  
      if (config->requires_confirmation) {
+diff --git a/recompui/src/config/ui_config_tab_general.cpp b/recompui/src/config/ui_config_tab_general.cpp
+index 296ce0e..59aeb48 100644
+--- a/recompui/src/config/ui_config_tab_general.cpp
++++ b/recompui/src/config/ui_config_tab_general.cpp
+@@ -137,6 +137,9 @@ namespace config {
+             "<b>This setting does not affect keyboard input.</b>",
+             background_input_options,
+             BackgroundInputMode::On
++#ifdef __ANDROID__
++            , true   // hidden: there's no window to lose focus to on Android
++#endif
+         );
+ 
+         return config;
 diff --git a/recompui/src/config/ui_config_tab_graphics.cpp b/recompui/src/config/ui_config_tab_graphics.cpp
-index 4fdf81f..d889ea6 100644
+index 4fdf81f..4834249 100644
 --- a/recompui/src/config/ui_config_tab_graphics.cpp
 +++ b/recompui/src/config/ui_config_tab_graphics.cpp
 @@ -77,11 +77,19 @@ namespace recompui {
@@ -521,7 +535,17 @@ index 4fdf81f..d889ea6 100644
  
              new_config.ds_option = get_graphics_enum_value<int>(graphics::options::ds_option);
  
-@@ -304,7 +329,15 @@ namespace recompui {
+@@ -297,6 +322,9 @@ namespace recompui {
+                 "Sets whether the game should display <recomp-color primary>Windowed</recomp-color> or <recomp-color primary>Fullscreen</recomp-color>. You can also use <recomp-color primary>F11</recomp-color> or <recomp-color primary>Alt + Enter</recomp-color> to toggle this option.",
+                 window_mode_options,
+                 wm_default()
++#ifdef __ANDROID__
++                , true   // hidden: Android is always full screen
++#endif
+             );
+ 
+             config.add_enum_option(
+@@ -304,7 +332,15 @@ namespace recompui {
                  "Framerate",
                  get_framerate_text(60),
                  refresh_rate_options,
@@ -537,7 +561,7 @@ index 4fdf81f..d889ea6 100644
              );
  
              config.add_number_option(
-@@ -314,12 +347,23 @@ namespace recompui {
+@@ -314,12 +350,23 @@ namespace recompui {
                  20.0, 240.0, 1.0, 0, false, 60.0
              );
              {
@@ -561,7 +585,7 @@ index 4fdf81f..d889ea6 100644
              }
  
              config.add_enum_option(
-@@ -330,7 +374,12 @@ namespace recompui {
+@@ -330,7 +377,12 @@ namespace recompui {
                  "<br />"
                  "<recomp-color primary>Note: This option won't be available if your GPU does not support programmable MSAA sample positions, as it is currently required to avoid rendering glitches.</recomp-color>",
                  antialiasing_options,

@@ -78,6 +78,9 @@ static void add_general_options(recomp::config::Config &config) {
         "Inverts Mouse controls.",
         mouse_invert_mode_options,
         dk64::CameraInvertMode::InvertY
+#ifdef __ANDROID__
+        , true   // hidden: no mouse camera on Android
+#endif
     );
     static EnumOptionVector swimming_invert_options = {
         {dk64::CameraInvertMode::InvertNone, "InvertNone", "None"},
