@@ -85,7 +85,7 @@ jobs:
         # clang/lld/make build the game's MIPS patches; ninja and the toolchain build N64Recomp.
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build clang lld llvm make g++ zlib1g-dev
+          sudo apt-get install -y ninja-build clang lld llvm make g++ zlib1g-dev ccache
 
       - name: Set up JDK
         uses: actions/setup-java@v5
@@ -151,6 +151,28 @@ jobs:
           path: ~/.cache/vcpkg/archives
           key: vcpkg-arm64-android-ndk${{ env.NDK_VERSION }}-${{ hashFiles('vcpkg.json') }}
 
+      - name: Cache compiler output
+        # ccache keeps compiled objects between runs, so a build only recompiles what changed
+        # (app/build.gradle passes ccache as the compiler launcher when CCACHE_DIR is set).
+        # Restored from the newest earlier run; saved under this commit.
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-arm64-ndk${{ env.NDK_VERSION }}-${{ github.sha }}
+          restore-keys: ccache-arm64-ndk${{ env.NDK_VERSION }}-
+
+      - name: Configure ccache
+        run: |
+          {
+            echo "CCACHE_DIR=$HOME/.cache/ccache"
+            echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE"
+            echo "CCACHE_MAXSIZE=4G"
+            echo "CCACHE_COMPRESS=1"
+            echo "CCACHE_SLOPPINESS=time_macros,include_file_mtime,include_file_ctime"
+          } >> "$GITHUB_ENV"
+          mkdir -p "$HOME/.cache/ccache"
+          ccache --zero-stats > /dev/null
+
       - name: Set up release signing
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -188,6 +210,10 @@ jobs:
           annotate "First compiler/CMake errors" "$(grep -n -m 25 -E 'error:|CMake Error|FAILED:|fatal error|undefined (symbol|reference)' "$RUNNER_TEMP/gradle.log")"
           annotate "Log tail" "$(tail -n 40 "$RUNNER_TEMP/gradle.log")"
           exit 1
+
+      - name: Compiler cache stats
+        if: always()
+        run: ccache --show-stats || true
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
