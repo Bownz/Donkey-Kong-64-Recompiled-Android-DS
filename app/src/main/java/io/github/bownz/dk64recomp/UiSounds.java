@@ -37,9 +37,9 @@ final class UiSounds {
             return;
         }
         switch (kind) {
-            case 0: pool.play(move, 0.35f, 0.35f, 1, 0, 1f); break;
-            case 1: pool.play(select, 0.6f, 0.6f, 1, 0, 1f); break;
-            case 2: pool.play(back, 0.5f, 0.5f, 1, 0, 1f); break;
+            case 0: pool.play(move, 0.14f, 0.14f, 1, 0, 1f); break;
+            case 1: pool.play(select, 0.25f, 0.25f, 1, 0, 1f); break;
+            case 2: pool.play(back, 0.2f, 0.2f, 1, 0, 1f); break;
             default: break;
         }
     }
