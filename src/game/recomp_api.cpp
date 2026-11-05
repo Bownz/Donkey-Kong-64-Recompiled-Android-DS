@@ -249,7 +249,8 @@ extern "C" void recomp_fill_button_icon(uint8_t* rdram, recomp_context* ctx) {
     for (int y = 0; y < height; y++) {
         for (int x = 0; x < width; x++) {
             uint8_t px[4];
-            sample_icon(*icon, tile_x * width + x, tile_y * height + y, full_w, full_h, px);
+            // The game's sprite pictures are stored bottom row first, so the icon is drawn flipped.
+            sample_icon(*icon, tile_x * width + x, full_h - 1 - (tile_y * height + y), full_w, full_h, px);
             const int i = y * width + x;
             const uint8_t luma = static_cast<uint8_t>((px[0] * 77 + px[1] * 150 + px[2] * 29) >> 8);
             switch (codec) {
