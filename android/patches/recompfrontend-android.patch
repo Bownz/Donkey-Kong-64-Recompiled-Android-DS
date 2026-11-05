@@ -108,7 +108,7 @@ index c76a1dc..fae66f0 100644
              // Convert rotational velocity to degrees per second.
              constexpr float rad_to_deg = 180.0f / M_PI;
 diff --git a/recompinput/src/input_types.cpp b/recompinput/src/input_types.cpp
-index c6786e6..f6726e7 100644
+index c6786e6..73eda2e 100644
 --- a/recompinput/src/input_types.cpp
 +++ b/recompinput/src/input_types.cpp
 @@ -1,5 +1,6 @@
@@ -118,7 +118,7 @@ index c6786e6..f6726e7 100644
  #include <array>
  #include <unordered_map>
  #include <unordered_set>
-@@ -85,7 +86,97 @@ const std::string& get_game_input_enum_name(GameInput input) {
+@@ -85,7 +86,114 @@ const std::string& get_game_input_enum_name(GameInput input) {
      return game_input_enum_names.at(static_cast<size_t>(input));
  }
  
@@ -129,6 +129,23 @@ index c6786e6..f6726e7 100644
 +    for (int i = 0; i < SDL_NumJoysticks(); i++) {
 +        if (!SDL_IsGameController(i)) {
 +            continue;
++        }
++        // Like SDL3's SDL_GetGamepadButtonLabel: a "face:" field or the button-labels hint
++        // in the controller's mapping wins, then the controller type, then (our addition)
++        // the name.
++        if (char *mapping = SDL_GameControllerMappingForDeviceIndex(i)) {
++            std::string m = mapping;
++            SDL_free(mapping);
++            size_t face = m.find("face:");
++            if (face != std::string::npos) {
++                std::string value = m.substr(face + 5, 4);
++                if (value == "sony") return FaceButtonStyle::PlayStation;
++                if (value == "bayx") return FaceButtonStyle::Nintendo;
++                if (value == "abxy") return FaceButtonStyle::Xbox;
++            }
++            if (m.find("SDL_GAMECONTROLLER_USE_BUTTON_LABELS") != std::string::npos) {
++                return FaceButtonStyle::Nintendo;
++            }
 +        }
 +        switch (SDL_GameControllerTypeForIndex(i)) {
 +        case SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_PRO:
@@ -216,7 +233,7 @@ index c6786e6..f6726e7 100644
      switch (button) {
      case SDL_GameControllerButton::SDL_CONTROLLER_BUTTON_A:
          return PF_GAMEPAD_A;
-@@ -240,8 +331,18 @@ static std::string controller_axis_to_string(int axis) {
+@@ -240,8 +348,18 @@ static std::string controller_axis_to_string(int axis) {
      case SDL_GameControllerAxis::SDL_CONTROLLER_AXIS_RIGHTY:
          return positive ? PF_ANALOG_R_DOWN : PF_ANALOG_R_UP;
      case SDL_GameControllerAxis::SDL_CONTROLLER_AXIS_TRIGGERLEFT:
