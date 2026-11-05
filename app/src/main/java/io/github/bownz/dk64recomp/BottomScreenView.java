@@ -1288,7 +1288,7 @@ public final class BottomScreenView extends View {
     }
 
     /** A DK barrel (front view) filling r: bulging staves, two iron hoops. */
-    private void barrel(Canvas c, RectF r, boolean lit, boolean locked) {
+    private void barrel(Canvas c, RectF r, boolean lit, boolean locked, int litColor) {
         float bulge = r.width() * 0.07f;
         path.reset();
         path.moveTo(r.left + bulge, r.top);
@@ -1322,9 +1322,9 @@ public final class BottomScreenView extends View {
         float h1 = r.top + r.height() * 0.17f, h2 = r.bottom - r.height() * 0.17f;
         c.drawLine(r.left + bulge * 0.2f, h1, r.right - bulge * 0.2f, h1, paint);
         c.drawLine(r.left + bulge * 0.2f, h2, r.right - bulge * 0.2f, h2, paint);
-        // Outline (gold when selected).
+        // Outline (the Kong's colour when selected).
         paint.setStrokeWidth(unit * (lit ? 0.011f : 0.007f));
-        paint.setColor(lit ? BANANA : (locked ? Color.rgb(34, 34, 34) : WOOD_EDGE));
+        paint.setColor(lit ? litColor : (locked ? Color.rgb(34, 34, 34) : WOOD_EDGE));
         c.drawPath(path, paint);
         paint.setStyle(Paint.Style.FILL);
     }
@@ -1492,7 +1492,7 @@ public final class BottomScreenView extends View {
             if (hop >= 0) {
                 c.translate(0, -(float) Math.sin(Math.PI * hop) * r.height() * 0.14f);
             }
-            barrel(c, r, lit, locked);
+            barrel(c, r, lit, locked, i < KONG_COLORS.length ? KONG_COLORS[i] : BANANA);
             if (locked) {
                 c.restoreToCount(tabSaved);
                 continue; // Greyed out, no face or name, until the Kong is freed.
