@@ -497,5 +497,10 @@ void dk64::launcher_animation_update(recompui::LauncherMenu *menu) {
         }
 
         launcher_context.options_enabled = true;
+        // Start Game (or Load ROM) is selected when the menu appears, so a controller can
+        // press A straight away.
+        if (auto start = menu->get_game_options_menu()->get_start_game_option()) {
+            start->focus();
+        }
     }
 }

@@ -817,6 +817,10 @@ static void on_launcher_update(recompui::LauncherMenu *menu) {
 #endif
         skip_pending = dk64::get_skip_launcher() && !crashed_last_run && recomp::is_rom_valid(game.game_id)
             && recomp::mods::game_mode_count(game.mod_game_id, false) == 0;
+        if (skip_pending) {
+            // Skipping: don't show the launcher while waiting to start (just black).
+            menu->set_opacity(0.0f);
+        }
     }
 #ifdef __ANDROID__
     if (launch_pending) {
