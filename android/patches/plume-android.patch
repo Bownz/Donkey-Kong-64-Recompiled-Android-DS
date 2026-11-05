@@ -1,5 +1,5 @@
 diff --git a/plume_vulkan.cpp b/plume_vulkan.cpp
-index f1dd503..bd5d273 100644
+index f1dd503..2479fec 100644
 --- a/plume_vulkan.cpp
 +++ b/plume_vulkan.cpp
 @@ -27,7 +27,18 @@
@@ -151,7 +151,49 @@ index f1dd503..bd5d273 100644
      void VulkanSwapChain::releaseSwapChain() {
          if (vk != VK_NULL_HANDLE) {
              vkDestroySwapchainKHR(commandQueue->device->vk, vk, nullptr);
-@@ -3077,12 +3168,31 @@ namespace plume {
+@@ -2631,6 +2722,41 @@ namespace plume {
+             return;
+         }
+         
++#if defined(__ANDROID__)
++        const uint32_t firstWidth = width, firstHeight = height;
++        // Size the framebuffer to the smallest attachment. RT64 can pair a color target with a
++        // smaller depth buffer (or the reverse); desktop drivers clip to each image, but Adreno
++        // writes the whole render area and faults past the end of the smaller image (a "CCU
++        // write translation fault" that loses the device). Vulkan requires the framebuffer to
++        // fit every attachment anyway.
++        for (uint32_t i = 0; i < desc.colorAttachmentsCount; i++) {
++            const VulkanTexture *t = (desc.colorAttachmentViews && desc.colorAttachmentViews[i])
++                ? static_cast<const VulkanTextureView *>(desc.colorAttachmentViews[i])->texture
++                : static_cast<const VulkanTexture *>(desc.colorAttachments[i]);
++            if (t != nullptr) {
++                width = std::min(width, uint32_t(t->desc.width));
++                height = std::min(height, uint32_t(t->desc.height));
++            }
++        }
++        if (desc.depthAttachment != nullptr || desc.depthAttachmentView != nullptr) {
++            const VulkanTexture *t = desc.depthAttachmentView
++                ? static_cast<const VulkanTextureView *>(desc.depthAttachmentView)->texture
++                : static_cast<const VulkanTexture *>(desc.depthAttachment);
++            if (t != nullptr) {
++                width = std::min(width, uint32_t(t->desc.width));
++                height = std::min(height, uint32_t(t->desc.height));
++            }
++        }
++        if (width != firstWidth || height != firstHeight) {
++            static int logged = 0;
++            if (logged < 20) {
++                logged++;
++                fprintf(stderr, "plume: framebuffer attachments differ in size (%ux%u vs %ux%u); using the smaller\n",
++                    firstWidth, firstHeight, width, height);
++            }
++        }
++#endif
++
+         VkFramebufferCreateInfo fbInfo = {};
+         fbInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+         fbInfo.renderPass = renderPass;
+@@ -3077,12 +3203,36 @@ namespace plume {
      }
  
      void VulkanCommandList::setScissors(const RenderRect *scissorRects, uint32_t count) {
@@ -174,6 +216,11 @@ index f1dd503..bd5d273 100644
 +            return VkRect2D{ VkOffset2D{ rect.left, rect.top }, VkExtent2D{ uint32_t(rect.right - rect.left), uint32_t(rect.bottom - rect.top) } };
 +        };
 +#endif
++#if defined(__ANDROID__)
++        if (scissorRects != androidScissors.data()) {
++            androidScissors.assign(scissorRects, scissorRects + count);
++        }
++#endif
          if (count > 1) {
              thread_local std::vector<VkRect2D> scissorVector;
              scissorVector.clear();
@@ -184,7 +231,7 @@ index f1dd503..bd5d273 100644
              }
  
              if (!scissorVector.empty()) {
-@@ -3091,7 +3201,7 @@ namespace plume {
+@@ -3091,7 +3241,7 @@ namespace plume {
          }
          else {
              // Single element fast path.
@@ -193,7 +240,67 @@ index f1dd503..bd5d273 100644
              vkCmdSetScissor(vk, 0, 1, &scissor);
          }
      }
-@@ -3828,6 +3938,12 @@ namespace plume {
+@@ -3102,6 +3252,12 @@ namespace plume {
+         if (framebuffer != nullptr) {
+             const VulkanFramebuffer *interfaceFramebuffer = static_cast<const VulkanFramebuffer *>(framebuffer);
+             targetFramebuffer = interfaceFramebuffer;
++#if defined(__ANDROID__)
++            // Scissors set before this target was bound were clamped to the old one: redo them.
++            if (!androidScissors.empty()) {
++                setScissors(androidScissors.data(), uint32_t(androidScissors.size()));
++            }
++#endif
+         }
+         else {
+             targetFramebuffer = nullptr;
+@@ -3118,10 +3274,26 @@ namespace plume {
+         if (clearRectsCount > 0) {
+             for (uint32_t i = 0; i < clearRectsCount; i++) {
+                 VkClearRect clearRect;
++#if defined(__ANDROID__)
++                // Clear rects must lie inside the render area; Adreno writes outside it
++                // (past the end of the image) instead of ignoring the excess.
++                const int32_t left = std::clamp(clearRects[i].left, 0, int32_t(width));
++                const int32_t top = std::clamp(clearRects[i].top, 0, int32_t(height));
++                const int32_t right = std::clamp(clearRects[i].right, left, int32_t(width));
++                const int32_t bottom = std::clamp(clearRects[i].bottom, top, int32_t(height));
++                if (right <= left || bottom <= top) {
++                    continue;
++                }
++                clearRect.rect.offset.x = left;
++                clearRect.rect.offset.y = top;
++                clearRect.rect.extent.width = uint32_t(right - left);
++                clearRect.rect.extent.height = uint32_t(bottom - top);
++#else
+                 clearRect.rect.offset.x = clearRects[i].left;
+                 clearRect.rect.offset.y = clearRects[i].top;
+                 clearRect.rect.extent.width = clearRects[i].right - clearRects[i].left;
+                 clearRect.rect.extent.height = clearRects[i].bottom - clearRects[i].top;
++#endif
+                 clearRect.baseArrayLayer = 0;
+                 clearRect.layerCount = 1;
+                 rectVector.emplace_back(clearRect);
+@@ -3157,6 +3329,9 @@ namespace plume {
+         rgba[3] = colorValue.a;
+         attachment.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+         attachment.colorAttachment = attachmentIndex;
++        if (rectVector.empty()) {
++            return;   // every rect was outside the render target
++        }
+         vkCmdClearAttachments(vk, 1, &attachment, uint32_t(rectVector.size()), rectVector.data());
+     }
+ 
+@@ -3180,6 +3355,9 @@ namespace plume {
+             attachment.aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
+         }
+ 
++        if (rectVector.empty()) {
++            return;   // every rect was outside the render target
++        }
+         vkCmdClearAttachments(vk, 1, &attachment, uint32_t(rectVector.size()), rectVector.data());
+     }
+ 
+@@ -3828,6 +4006,12 @@ namespace plume {
  
          // Store properties.
          vkGetPhysicalDeviceProperties(physicalDevice, &physicalDeviceProperties);
@@ -206,7 +313,7 @@ index f1dd503..bd5d273 100644
  
          // Check for supported features.
          void *featuresChain = nullptr;
-@@ -4149,7 +4265,15 @@ namespace plume {
+@@ -4149,7 +4333,15 @@ namespace plume {
  #   endif
  
          // Fill Vulkan-only capabilities.
@@ -222,7 +329,7 @@ index f1dd503..bd5d273 100644
  
          if (!nullDescriptorSupported) {
              nullBuffer = createBuffer(RenderBufferDesc::DefaultBuffer(16, RenderBufferFlag::VERTEX));
-@@ -4464,7 +4588,19 @@ namespace plume {
+@@ -4464,7 +4656,19 @@ namespace plume {
  #else
      VulkanInterface::VulkanInterface() {
  #endif
@@ -243,7 +350,7 @@ index f1dd503..bd5d273 100644
              fprintf(stderr, "volkInitialize failed with error code 0x%X.\n", res);
              return;
 diff --git a/plume_vulkan.h b/plume_vulkan.h
-index 0a1edbe..4601753 100644
+index 0a1edbe..5dbab6d 100644
 --- a/plume_vulkan.h
 +++ b/plume_vulkan.h
 @@ -42,6 +42,14 @@
@@ -271,3 +378,14 @@ index 0a1edbe..4601753 100644
      };
  
      struct VulkanFramebuffer : RenderFramebuffer {
+@@ -298,6 +309,10 @@ namespace plume {
+         VkCommandPool commandPool = VK_NULL_HANDLE;
+         VulkanCommandQueue *queue = nullptr;
+         const VulkanFramebuffer *targetFramebuffer = nullptr;
++#if defined(__ANDROID__)
++        // The last scissors set, re-clamped when the target framebuffer changes (see setScissors).
++        std::vector<RenderRect> androidScissors;
++#endif
+         const VulkanPipelineLayout *activeComputePipelineLayout = nullptr;
+         const VulkanPipelineLayout *activeGraphicsPipelineLayout = nullptr;
+         const VulkanPipelineLayout *activeRaytracingPipelineLayout = nullptr;
