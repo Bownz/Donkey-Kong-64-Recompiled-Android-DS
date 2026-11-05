@@ -435,11 +435,68 @@ index 0000000..4a91bb5
 +
 +#endif
 diff --git a/recompui/src/config/ui_config.cpp b/recompui/src/config/ui_config.cpp
-index 6c84c05..4154512 100644
+index 6c84c05..6008522 100644
 --- a/recompui/src/config/ui_config.cpp
 +++ b/recompui/src/config/ui_config.cpp
-@@ -155,6 +155,9 @@ namespace recompui {
+@@ -121,7 +121,51 @@ namespace recompui {
+         loaded_configs = true;
+     }
+ 
++#ifdef __ANDROID__
++    // Android: the in-game menu bar splits the settings window into three groups. SETTINGS
++    // shows the general tabs, CONTROLS shows Controls and Dual Screen, and MODS shows the mod
++    // tabs. Opening any tab shows only the tabs of its group.
++    static int tab_group(const std::string &id) {
++        if (id == config::controls::id || id == "dual_screen") {
++            return 1;
++        }
++        if (id == config::mods::id || id == config::mod_discovery::id) {
++            return 2;
++        }
++        return 0;
++    }
++
++    static int current_group = 0;
++
++    static void show_tab_group(const std::string &id) {
++        const int group = tab_group(id);
++        current_group = group;
++        for (auto &tab : pending_tabs) {
++            if (!tab.hidden && tab_group(tab.id) == group) {
++                config_modal->set_tab_visible(tab.id, true);
++            }
++        }
++        config_modal->set_selected_tab(id);
++        for (auto &tab : pending_tabs) {
++            if (tab.hidden || tab_group(tab.id) != group) {
++                config_modal->set_tab_visible(tab.id, false);
++            }
++        }
++    }
++#endif
++
+     void config::set_tab_visible(const std::string &id, bool is_visible) {
++#ifdef __ANDROID__
++        for (auto &tab : pending_tabs) {
++            if (tab.id == id) {
++                tab.hidden = !is_visible;
++            }
++        }
++        if (config_modal != nullptr) {
++            config_modal->set_tab_visible(id, is_visible && tab_group(id) == current_group);
++            return;
++        }
++#endif
+         if (config_modal == nullptr) {
+             for (auto &tab : pending_tabs) {
+                 if (tab.id == id) {
+@@ -153,8 +197,14 @@ namespace recompui {
+             }
+         }
          config_modal->set_selected_tab(0);
++#ifdef __ANDROID__
++        show_tab_group(config::general::id);
++#endif
          auto header_right = config_modal->get_header()->get_right();
          auto quit_button = config_modal->modal_root_context.create_element<IconButton>(header_right, "icons/Quit.svg", ButtonStyle::Basic);
 +#ifdef __ANDROID__
@@ -448,6 +505,18 @@ index 6c84c05..4154512 100644
          quit_button->add_pressed_callback([]() {
              if (ultramodern::is_game_started()) {
                  recompui::open_quit_game_prompt();
+@@ -182,7 +232,11 @@ namespace recompui {
+             throw std::runtime_error("No tab with ID '" + id + "' has been added to the config modal.");
+         }
+ 
++#ifdef __ANDROID__
++        show_tab_group(id);
++#else
+         config_modal->set_selected_tab(id);
++#endif
+     }
+ 
+     void config::open() {
 diff --git a/recompui/src/config/ui_config_option.cpp b/recompui/src/config/ui_config_option.cpp
 index 86428c9..c59c427 100644
 --- a/recompui/src/config/ui_config_option.cpp

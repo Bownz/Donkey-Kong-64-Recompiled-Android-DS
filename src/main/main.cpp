@@ -771,27 +771,34 @@ static bool ask_for_experience() {
 
 static void on_launcher_update(recompui::LauncherMenu *menu) {
     static bool skip_checked = false;
+    static bool skip_pending = false;
+    static std::chrono::steady_clock::time_point first_update;
+    const auto &game = supported_games[0];
     if (!skip_checked) {
         skip_checked = true;
+        first_update = std::chrono::steady_clock::now();
 #ifdef __ANDROID__
         if (ask_for_experience()) {
             dk64::launcher_animation_update(menu);
             return;   // first launch: no Skip Launcher this time
         }
 #endif
-        const auto &game = supported_games[0];
         bool crashed_last_run = false;
 #ifdef __ANDROID__
         // After a crash, always show the launcher so the settings can still be reached.
         crashed_last_run = dk64_android_last_run_crashed() != 0;
 #endif
-        if (dk64::get_skip_launcher() && !crashed_last_run && recomp::is_rom_valid(game.game_id)
-                && recomp::mods::game_mode_count(game.mod_game_id, false) == 0) {
-            recompui::update_game_mod_id(game.mod_game_id);
-            recomp::start_game(game.game_id, {});
-            recompui::hide_all_contexts();
-            return;
-        }
+        skip_pending = dk64::get_skip_launcher() && !crashed_last_run && recomp::is_rom_valid(game.game_id)
+            && recomp::mods::game_mode_count(game.mod_game_id, false) == 0;
+    }
+    // Starting the game on the launcher's very first frame crashed it on Android, so the skip
+    // waits until the launcher has been up for a moment (as if Start Game was pressed).
+    if (skip_pending && std::chrono::steady_clock::now() - first_update >= std::chrono::milliseconds(1500)) {
+        skip_pending = false;
+        recompui::update_game_mod_id(game.mod_game_id);
+        recomp::start_game(game.game_id, {});
+        recompui::hide_all_contexts();
+        return;
     }
     dk64::launcher_animation_update(menu);
 }
