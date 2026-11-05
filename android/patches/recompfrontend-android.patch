@@ -483,10 +483,10 @@ index 277a421..25a9a74 100644
  
 diff --git a/recompui/src/composites/ui_menu_bar.cpp b/recompui/src/composites/ui_menu_bar.cpp
 new file mode 100644
-index 0000000..2b5b8c5
+index 0000000..4050818
 --- /dev/null
 +++ b/recompui/src/composites/ui_menu_bar.cpp
-@@ -0,0 +1,240 @@
+@@ -0,0 +1,256 @@
 +// Android: the in-game menu bar. The menu button opens a slim bar across the top of the
 +// screen (in the bottom screen's DK style) instead of the full settings window; the bar opens
 +// Settings or Mods in the settings window, or quits. Like the Dusklight port's.
@@ -511,6 +511,8 @@ index 0000000..2b5b8c5
 +    ContextId menu_bar_context{};
 +    bool menu_bar_ready = false;
 +
++    void close_menu_bar_animated();
++
 +    // One entry on the bar: chunky capitals, banana yellow in a rounded outline when focused.
 +    class MenuBarItem : public Element {
 +    private:
@@ -525,6 +527,14 @@ index 0000000..2b5b8c5
 +                    on_press();
 +                }
 +                break;
++            case EventType::MenuAction: {
++                // B on the bar closes it (the root also listens; closing twice is harmless).
++                MenuAction action = std::get<EventMenuAction>(e.variant).action;
++                if (action == MenuAction::Back || action == MenuAction::Toggle) {
++                    close_menu_bar_animated();
++                }
++                break;
++            }
 +            case EventType::Hover:
 +                set_style_enabled(hover_state, std::get<EventHover>(e.variant).active);
 +                break;
@@ -538,7 +548,7 @@ index 0000000..2b5b8c5
 +        std::string_view get_type_name() override { return "MenuBarItem"; }
 +    public:
 +        MenuBarItem(ResourceId rid, Element *parent, const std::string &text, std::function<void()> press) :
-+            Element(rid, parent, Events(EventType::Click, EventType::Hover, EventType::Focus), "button", false),
++            Element(rid, parent, Events(EventType::Click, EventType::Hover, EventType::Focus, EventType::MenuAction), "button", false),
 +            on_press(std::move(press))
 +        {
 +            set_cursor(Cursor::Pointer);
@@ -656,6 +666,12 @@ index 0000000..2b5b8c5
 +    };
 +
 +    MenuBarRoot *menu_bar_root = nullptr;
++
++    void close_menu_bar_animated() {
++        if (menu_bar_root != nullptr) {
++            menu_bar_root->slide_up();
++        }
++    }
 +
 +    void open_settings_tab(const std::string &tab) {
 +        menu_bar_root->hide_now();
@@ -2101,10 +2117,18 @@ index a60c585..c5f67ab 100644
                      return next_el->nav_children[safe_index];
                  }
 diff --git a/recompui/src/elements/ui_modal.cpp b/recompui/src/elements/ui_modal.cpp
-index b057f46..da7fecf 100644
+index b057f46..010102f 100644
 --- a/recompui/src/elements/ui_modal.cpp
 +++ b/recompui/src/elements/ui_modal.cpp
-@@ -35,7 +35,11 @@ public:
+@@ -2,6 +2,7 @@
+ #include "ui_element.h"
+ #include "ui_document.h"
+ #include "recompinput/recompinput.h"
++#include "recompui/config.h"
+ #include "recompinput/profiles.h"
+ 
+ namespace recompui {
+@@ -35,7 +36,11 @@ public:
      }
  };
  
@@ -2116,7 +2140,7 @@ index b057f46..da7fecf 100644
  constexpr float modal_page_base_height = 1080.0f;
  constexpr float modal_height = modal_page_base_height - (modal_page_padding * 2.0f);
  constexpr float modal_width = modal_page_base_height * 16.0f / 9.0f;
-@@ -88,6 +92,12 @@ Modal::Modal(
+@@ -88,6 +93,12 @@ Modal::Modal(
      modal_element->set_as_navigation_container(NavigationType::Vertical);
      modal_element->set_nav_wrapping(true);
  
@@ -2129,7 +2153,7 @@ index b057f46..da7fecf 100644
      header = context.create_element<ConfigHeaderFooter>(modal_element, true);
      header->set_padding_top(0.0f);
      header->set_padding_bottom(0.0f);
-@@ -95,6 +105,16 @@ Modal::Modal(
+@@ -95,6 +106,16 @@ Modal::Modal(
      header->set_padding_right(8.0f);
      header->set_border_top_left_radius(theme::border::radius_lg);
      header->set_border_top_right_radius(theme::border::radius_lg);
@@ -2146,7 +2170,7 @@ index b057f46..da7fecf 100644
  
      body = context.create_element<Element>(modal_element);
      body->set_display(Display::Flex);
-@@ -120,8 +140,27 @@ void Modal::open() {
+@@ -120,8 +141,27 @@ void Modal::open() {
  
      is_open = true;
      set_display(Display::Block);
@@ -2174,7 +2198,7 @@ index b057f46..da7fecf 100644
  void TabbedModal::open() {
      Modal::open();
  
-@@ -178,6 +217,17 @@ static std::pair<recompinput::InputDevice, int> get_last_input_info() {
+@@ -178,6 +218,17 @@ static std::pair<recompinput::InputDevice, int> get_last_input_info() {
  void Modal::process_event(const Event &e) {
      switch (e.type) {
          case EventType::Update: {
@@ -2192,7 +2216,7 @@ index b057f46..da7fecf 100644
              if (is_open) {
                  bool update_action_labels = false;
                  auto [current_device, current_profile] = get_last_input_info();
-@@ -223,6 +273,9 @@ void Modal::render_menu_actions() {
+@@ -223,6 +274,9 @@ void Modal::render_menu_actions() {
      ContextId context = get_current_context();
      if (menu_actions_wrapper == nullptr) {
          menu_actions_wrapper = context.create_element<Element>(modal_overlay);
@@ -2202,6 +2226,25 @@ index b057f46..da7fecf 100644
          menu_actions_wrapper->set_position(Position::Absolute);
          menu_actions_wrapper->set_bottom(0);
          menu_actions_wrapper->set_margin_left_auto();
+@@ -319,6 +373,18 @@ TabbedModal::TabbedModal(
+ ) : Modal(rid, parent, modal_root_context, modal_type)
+ {
+     set_menu_action_callback(MenuAction::Back, [this]() {
++#ifdef __ANDROID__
++        // Back from inside a page goes to the categories (tabs); Back on a category leaves
++        // the menu (from the controller setup, back to Input).
++        if (this->tabs != nullptr && this->tabs->has_focused_tab()) {
++            if (this == recompui::config::get_config_modal()) {
++                recompui::config::close();
++            } else {
++                this->close();
++            }
++            return;
++        }
++#endif
+         if (this->tabs != nullptr) {
+             this->tabs->focus_on_active_tab();
+         }
 diff --git a/recompui/src/elements/ui_modal.h b/recompui/src/elements/ui_modal.h
 index d065a14..f713162 100644
 --- a/recompui/src/elements/ui_modal.h
@@ -2319,6 +2362,34 @@ index 2c5dc52..3d04f98 100644
  }
  
  TabSet::TabSet(ResourceId rid, Element *parent) :
+diff --git a/recompui/src/elements/ui_tab_set.h b/recompui/src/elements/ui_tab_set.h
+index b8d3783..d136839 100644
+--- a/recompui/src/elements/ui_tab_set.h
++++ b/recompui/src/elements/ui_tab_set.h
+@@ -32,6 +32,7 @@ namespace recompui {
+         void set_selected(bool selected);
+         void set_visible(bool is_visible);
+         bool get_visible() { return visible; }
++        bool is_focused() { return is_style_enabled(focus_state); }
+     };
+ 
+     class TabSet : public Element {
+@@ -47,6 +48,15 @@ namespace recompui {
+         int add_tab(std::string_view text);
+         void set_active_tab(int tab_index, bool report_change = true);
+         void focus_on_active_tab();
++        // Whether one of the tabs (the menu categories) has the focus.
++        bool has_focused_tab() {
++            for (Tab *tab : tabs) {
++                if (tab->is_focused()) {
++                    return true;
++                }
++            }
++            return false;
++        }
+         Element *get_active_tab_element() const { return active_tab >= 0 && active_tab < static_cast<int>(tabs.size()) ? tabs[active_tab] : nullptr; };
+         int get_active_tab() const { return active_tab; }
+         void set_tab_visible(int tab_index, bool is_visible);
 diff --git a/recompui/src/renderer/rt64_render_context.cpp b/recompui/src/renderer/rt64_render_context.cpp
 index a7954c7..dec1073 100644
 --- a/recompui/src/renderer/rt64_render_context.cpp
