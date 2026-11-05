@@ -2084,6 +2084,22 @@ index caa1020..355460f 100644
                      recompui::Color pulse_color = recompui::get_pulse_color(750);
                      focus_style.set_color(pulse_color);
                      focus_style.set_border_color(pulse_color);
+diff --git a/recompui/src/elements/ui_document.cpp b/recompui/src/elements/ui_document.cpp
+index a60c585..c5f67ab 100644
+--- a/recompui/src/elements/ui_document.cpp
++++ b/recompui/src/elements/ui_document.cpp
+@@ -215,6 +215,11 @@ namespace recompui {
+                 // This could be added.
+                 Element *next_el = try_get_element_at_index(cur_element_index + nav_dir_value, nav_parent->nav_children);
+                 if (next_el != nullptr) {
++                    // A single element in the grid (e.g. a row that isn't itself a grid row) has no
++                    // children to pick from: go to it directly (indexing it crashed).
++                    if (next_el->nav_children.empty()) {
++                        return next_el;
++                    }
+                     int safe_index = std::clamp(retained_grid_index, 0, static_cast<int>(next_el->nav_children.size()) - 1);
+                     return next_el->nav_children[safe_index];
+                 }
 diff --git a/recompui/src/elements/ui_modal.cpp b/recompui/src/elements/ui_modal.cpp
 index b057f46..da7fecf 100644
 --- a/recompui/src/elements/ui_modal.cpp
