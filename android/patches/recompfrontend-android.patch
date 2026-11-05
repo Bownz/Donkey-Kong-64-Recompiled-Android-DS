@@ -1237,7 +1237,7 @@ index 0561657..06088b1 100644
  
      std::string_view get_type_name() override { return "ConfigOptionEnum"; }
 diff --git a/recompui/src/config/ui_config_page_controls.cpp b/recompui/src/config/ui_config_page_controls.cpp
-index f379a6f..9532b98 100644
+index f379a6f..926d336 100644
 --- a/recompui/src/config/ui_config_page_controls.cpp
 +++ b/recompui/src/config/ui_config_page_controls.cpp
 @@ -1,4 +1,5 @@
@@ -1314,7 +1314,7 @@ index f379a6f..9532b98 100644
          queue_update();
          break;
      default:
-@@ -357,6 +398,13 @@ void ConfigPageControls::render_body_mappings() {
+@@ -357,6 +398,17 @@ void ConfigPageControls::render_body_mappings() {
          body->get_right()->clear_children();
          description_container = context.create_element<Element>(body->get_right(), 0, "p", true);
          description_container->set_text("");
@@ -1323,12 +1323,16 @@ index f379a6f..9532b98 100644
 +        description_container->set_font_size(22.0f);
 +        description_container->set_line_height(30.0f);
 +        description_container->set_padding(18.0f);
++        // Description on top, the controller picture centred below it.
++        body->get_right()->set_flex_direction(FlexDirection::Column);
++        body->get_right()->set_align_items(AlignItems::Center);
++        description_container->set_width(100.0f, Unit::Percent);
 +        render_face_buttons(body->get_right());
 +#endif
      }
  }
  
-@@ -460,6 +508,12 @@ void ConfigPageControls::on_edit_player_profile(int player_index) {
+@@ -460,6 +512,12 @@ void ConfigPageControls::on_edit_player_profile(int player_index) {
      }
  }
  
@@ -1341,7 +1345,7 @@ index f379a6f..9532b98 100644
  void ConfigPageControls::render_footer() {
      if (multiplayer_enabled && !multiplayer_view_mappings) {
          hide_footer();
-@@ -473,7 +527,17 @@ void ConfigPageControls::render_footer() {
+@@ -473,7 +531,17 @@ void ConfigPageControls::render_footer() {
      {
          auto footer_left = footer->get_left();
          footer_left->clear_children();
@@ -1359,7 +1363,7 @@ index f379a6f..9532b98 100644
              keyboard_toggle = context.create_element<IconToggle>(footer_left, "icons/Cont.svg", "icons/Keyboard.svg", ToggleSize::Large);
              keyboard_toggle->set_checked(single_player_show_keyboard_mappings);
              keyboard_toggle->add_checked_callback([this](bool checked) {
-@@ -520,6 +584,58 @@ void ConfigPageControls::render_control_mappings() {
+@@ -520,6 +588,58 @@ void ConfigPageControls::render_control_mappings() {
  
          game_input_rows.clear();
  
@@ -1418,7 +1422,7 @@ index f379a6f..9532b98 100644
          create_game_input_contexts();
          set_current_profile_index();
  
-@@ -669,7 +785,203 @@ void ConfigPageControls::on_option_hover(recompinput::GameInput input_id) {
+@@ -669,7 +789,204 @@ void ConfigPageControls::on_option_hover(recompinput::GameInput input_id) {
              description_container->set_text("");
          }
      }
@@ -1479,7 +1483,8 @@ index f379a6f..9532b98 100644
 +    pad->set_position(Position::Relative);
 +    pad->set_width(460.0f);
 +    pad->set_height(300.0f);
-+    pad->set_margin_top(24.0f);
++    pad->set_margin_top(8.0f);
++    pad->set_flex_shrink(0.0f);
 +    pad->set_margin_left_auto();
 +    pad->set_margin_right_auto();
 +
