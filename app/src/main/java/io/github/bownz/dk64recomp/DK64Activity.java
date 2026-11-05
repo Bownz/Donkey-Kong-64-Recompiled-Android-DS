@@ -88,11 +88,15 @@ public class DK64Activity extends SDLActivity
         extractAssetsIfNeeded();
         storage = new StorageAccess(this);
         Diagnostics.rotateLogs(this);
+        // Checked before the game starts: after a crash the launcher is always shown, even
+        // with Skip Launcher on, so a setting that makes the game crash can be changed.
+        final String lastCrash = Diagnostics.takeUnreportedCrash(this);
+        crashedLastRun = lastCrash != null;
 
         super.onCreate(savedInstanceState);
 
         configureWindow();
-        offerCrashReport();
+        offerCrashReport(lastCrash);
 
         inputManager = (InputManager) getSystemService(Context.INPUT_SERVICE);
         displayManager = (DisplayManager) getSystemService(Context.DISPLAY_SERVICE);
@@ -330,8 +334,14 @@ public class DK64Activity extends SDLActivity
     }
 
     /** If the game crashed or froze last time, offer to share the log. */
-    private void offerCrashReport() {
-        final String crash = Diagnostics.takeUnreportedCrash(this);
+    private static volatile boolean crashedLastRun;
+
+    /** From native code: "1" if the game crashed or froze last time (skip launcher is ignored). */
+    public String lastRunCrashed() {
+        return crashedLastRun ? "1" : "0";
+    }
+
+    private void offerCrashReport(final String crash) {
         if (crash == null) {
             return;
         }
