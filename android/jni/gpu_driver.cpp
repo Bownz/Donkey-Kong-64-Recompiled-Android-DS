@@ -243,3 +243,16 @@ extern "C" void dk64_android_rom_imported() {
     env->DeleteLocalRef(activity_class);
     env->DeleteLocalRef(activity);
 }
+
+// Touch controls on the main screen (the Controls page's "Touch Controls" button):
+// 0 auto (only without a physical controller), 1 always, 2 never. Kept by the activity.
+extern "C" int dk64_android_touch_controls_mode() {
+    const std::string query;   // empty: just read the mode
+    const std::string value = call_activity("touchControlsMode", "(Ljava/lang/String;)Ljava/lang/String;", &query);
+    return value.empty() ? 0 : (value[0] - '0');
+}
+
+extern "C" void dk64_android_set_touch_controls_mode(int mode) {
+    const std::string arg = std::to_string(mode);
+    call_activity("touchControlsMode", "(Ljava/lang/String;)Ljava/lang/String;", &arg);
+}

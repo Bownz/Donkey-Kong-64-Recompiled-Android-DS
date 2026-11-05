@@ -916,9 +916,8 @@ public final class BottomScreenView extends View {
             return;
         }
         if (state.cutscene) {
-            // Cutscenes: just the jungle and a Skip button (Start, which skips the ones the
-            // game lets you skip and does nothing in the others).
-            drawSkipButton(canvas);
+            // Cutscenes: just the jungle. (DK64 doesn't let Start skip its in-game cutscenes,
+            // so there's no Skip button; drawSkipButton is kept for a real skip later.)
             return;
         }
         watch("kong", state.currentKong, "tab" + state.currentKong);
@@ -1981,10 +1980,7 @@ public final class BottomScreenView extends View {
         }
 
         if (state.cutscene) {
-            if (skipRect.contains(x, y)) {
-                skipCutscene();
-            }
-            return true;
+            return true;   // nothing to tap during a cutscene
         }
 
         float ox = x - osX, oy = y - osY;

@@ -656,3 +656,57 @@ void dk64::init_config() {
     recompui::config::finalize();
 
 }
+
+#ifdef __ANDROID__
+#include "recompinput/profiles.h"
+#include "librecomp/game.hpp"
+
+// ---- Control presets (Android) -----------------------------------------------------------
+//
+// Classic: the N64 way. The right stick works the C buttons, the Free camera, no gyro.
+// Modern:  the right stick turns the camera (Analog Camera) instead of pressing the C buttons
+//          (they stay on the shoulder and face buttons), gyro aiming on.
+// Chosen on first launch (main.cpp) and from the Controls page's footer (RecompFrontend patch).
+
+static std::filesystem::path control_preset_marker() {
+    return recomp::get_config_path() / "controls_preset.txt";
+}
+
+extern "C" int dk64_android_control_preset() {
+    std::ifstream in{ control_preset_marker() };
+    std::string value;
+    if (!(in >> value)) {
+        return -1;   // not chosen yet
+    }
+    return value == "modern" ? 1 : 0;
+}
+
+extern "C" void dk64_android_apply_control_preset(int modern) {
+    using namespace recompinput;
+    const int profile = profiles::get_sp_controller_profile_index();
+    if (profile >= 0) {
+        profiles::reset_profile_bindings(profile, InputDevice::Controller);
+        if (modern) {
+            for (GameInput input : { GameInput::C_UP, GameInput::C_DOWN, GameInput::C_LEFT, GameInput::C_RIGHT }) {
+                for (size_t b = 0; b < num_bindings_per_input; b++) {
+                    if (profiles::get_input_binding(profile, input, b).input_type == InputType::ControllerAnalog) {
+                        profiles::set_input_binding(profile, input, b, InputField{});
+                    }
+                }
+            }
+        }
+        profiles::save_controls_config(recomp::get_config_path() / (recompui::config::controls::id + ".json"));
+    }
+
+    recomp::config::Config &general = recompui::config::get_general_config();
+    general.update_option_value(dk64::configkeys::general::camera_type,
+        static_cast<uint32_t>(modern ? dk64::CameraTypeMode::Analog : dk64::CameraTypeMode::Free));
+    if (general.has_option(recompui::config::general::options::gyro_sensitivity)) {
+        general.update_option_value(recompui::config::general::options::gyro_sensitivity, modern ? 25.0 : 0.0);
+    }
+    general.save_config();
+
+    std::ofstream out{ control_preset_marker() };
+    out << (modern ? "modern" : "classic") << "\n";
+}
+#endif

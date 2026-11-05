@@ -479,6 +479,69 @@ index 0561657..5ecaaca 100644
      Label *details_label = nullptr;
  
      std::string_view get_type_name() override { return "ConfigOptionEnum"; }
+diff --git a/recompui/src/config/ui_config_page_controls.cpp b/recompui/src/config/ui_config_page_controls.cpp
+index f379a6f..4a06985 100644
+--- a/recompui/src/config/ui_config_page_controls.cpp
++++ b/recompui/src/config/ui_config_page_controls.cpp
+@@ -460,6 +460,14 @@ void ConfigPageControls::on_edit_player_profile(int player_index) {
+     }
+ }
+ 
++#ifdef __ANDROID__
++// Implemented in the game (src/game/config.cpp, android/jni/gpu_driver.cpp).
++extern "C" int dk64_android_control_preset() __attribute__((weak));
++extern "C" void dk64_android_apply_control_preset(int modern) __attribute__((weak));
++extern "C" int dk64_android_touch_controls_mode() __attribute__((weak));
++extern "C" void dk64_android_set_touch_controls_mode(int mode) __attribute__((weak));
++#endif
++
+ void ConfigPageControls::render_footer() {
+     if (multiplayer_enabled && !multiplayer_view_mappings) {
+         hide_footer();
+@@ -473,7 +481,43 @@ void ConfigPageControls::render_footer() {
+     {
+         auto footer_left = footer->get_left();
+         footer_left->clear_children();
++#ifdef __ANDROID__
++        // Android: no keyboard mappings (always the controller's). Instead: the Classic and
++        // Modern presets (bindings, camera type and gyro together) and the touch controls.
++        if (!multiplayer_enabled) {
++            single_player_show_keyboard_mappings = false;
++            footer_left->set_gap(12.0f);
++            const int preset = dk64_android_control_preset != nullptr ? dk64_android_control_preset() : -1;
++            // The chosen preset is marked with a dot (buttons update in place).
++            auto classic = context.create_element<Button>(footer_left, preset == 0 ? "\u25CF Classic" : "Classic", ButtonStyle::Secondary);
++            auto modern = context.create_element<Button>(footer_left, preset == 1 ? "\u25CF Modern" : "Modern", ButtonStyle::Secondary);
++            auto apply = [this, classic, modern](int which) {
++                if (dk64_android_apply_control_preset != nullptr) {
++                    dk64_android_apply_control_preset(which);
++                }
++                classic->set_text(which == 0 ? "\u25CF Classic" : "Classic");
++                modern->set_text(which == 1 ? "\u25CF Modern" : "Modern");
++                this->update_control_mappings();
++            };
++            classic->add_pressed_callback([apply]() { apply(0); });
++            modern->add_pressed_callback([apply]() { apply(1); });
++            if (dk64_android_touch_controls_mode != nullptr) {
++                static const char *names[] = { "Touch Controls: Auto", "Touch Controls: On", "Touch Controls: Off" };
++                const int mode = dk64_android_touch_controls_mode();
++                auto touch = context.create_element<Button>(footer_left, names[(mode >= 0 && mode < 3) ? mode : 0], ButtonStyle::Tertiary);
++                touch->add_pressed_callback([touch]() {
++                    const int next = (dk64_android_touch_controls_mode() + 1) % 3;
++                    if (dk64_android_set_touch_controls_mode != nullptr) {
++                        dk64_android_set_touch_controls_mode(next);
++                    }
++                    touch->set_text(names[next]);
++                });
++            }
++        }
++        if (false) {
++#else
+         if (!multiplayer_enabled) {
++#endif
+             keyboard_toggle = context.create_element<IconToggle>(footer_left, "icons/Cont.svg", "icons/Keyboard.svg", ToggleSize::Large);
+             keyboard_toggle->set_checked(single_player_show_keyboard_mappings);
+             keyboard_toggle->add_checked_callback([this](bool checked) {
 diff --git a/recompui/src/config/ui_config_page_options_menu.cpp b/recompui/src/config/ui_config_page_options_menu.cpp
 index 6ba64e2..41e46a1 100644
 --- a/recompui/src/config/ui_config_page_options_menu.cpp

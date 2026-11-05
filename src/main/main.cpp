@@ -741,10 +741,44 @@ void on_launcher_init(recompui::LauncherMenu *menu) {
 
 // The launcher's first update: with "Skip Launcher" on (and a ROM loaded, and no mod game
 // modes to choose from), start the game as the Start Game option would.
+#ifdef __ANDROID__
+extern "C" int dk64_android_control_preset();
+extern "C" void dk64_android_apply_control_preset(int modern);
+
+// First launch: Classic (N64) or Modern controls? Changeable later in Settings > Controls.
+static bool ask_for_control_preset() {
+    if (dk64_android_control_preset() >= 0) {
+        return false;
+    }
+    recompui::open_choice_prompt(
+        "Choose your controls",
+        "Modern: the right stick moves the camera freely (Analog Camera), the C buttons stay on "
+        "the shoulder and face buttons, and gyro aiming is on. "
+        "Classic: the N64 way. The right stick works the C buttons, the camera turns in steps, "
+        "and gyro is off. "
+        "You can switch any time in Settings > Controls.",
+        "Modern",
+        "Classic",
+        []() { dk64_android_apply_control_preset(1); },
+        []() { dk64_android_apply_control_preset(0); },
+        recompui::ButtonStyle::Primary,
+        recompui::ButtonStyle::Secondary,
+        false
+    );
+    return true;
+}
+#endif
+
 static void on_launcher_update(recompui::LauncherMenu *menu) {
     static bool skip_checked = false;
     if (!skip_checked) {
         skip_checked = true;
+#ifdef __ANDROID__
+        if (ask_for_control_preset()) {
+            dk64::launcher_animation_update(menu);
+            return;   // first launch: no Skip Launcher this time
+        }
+#endif
         const auto &game = supported_games[0];
         if (dk64::get_skip_launcher() && recomp::is_rom_valid(game.game_id)
                 && recomp::mods::game_mode_count(game.mod_game_id, false) == 0) {

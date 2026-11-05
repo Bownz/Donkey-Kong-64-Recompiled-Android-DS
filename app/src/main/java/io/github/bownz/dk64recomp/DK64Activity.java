@@ -394,7 +394,8 @@ public class DK64Activity extends SDLActivity
             return;
         }
 
-        overlay.setActive(!hasPhysicalGamepad());
+        int touchMode = touchControlsPref();
+        overlay.setActive(touchMode == 1 || (touchMode == 0 && !hasPhysicalGamepad()));
 
         Display second = started && bottomScreenEnabled() ? findSecondDisplay() : null;
         if (second == null || (presentation != null && presentation.getDisplay().getDisplayId() != second.getDisplayId())) {
@@ -420,6 +421,23 @@ public class DK64Activity extends SDLActivity
         getSharedPreferences(PREFS_DUAL_SCREEN, MODE_PRIVATE).edit().putBoolean("bottom_screen", enabled).apply();
         runOnUiThread(this::updateTouchControls);
         return null;
+    }
+
+    // Settings > Controls > Touch Controls: 0 auto (only without a controller), 1 on, 2 off.
+    private int touchControlsPref() {
+        return getSharedPreferences(PREFS_DUAL_SCREEN, MODE_PRIVATE).getInt("touch_controls", 0);
+    }
+
+    /** Called from the game's Controls page (any thread): "" reads the mode, "0"-"2" sets it. */
+    @SuppressWarnings("unused")
+    public String touchControlsMode(String mode) {
+        if (mode != null && !mode.isEmpty()) {
+            int value = Math.max(0, Math.min(2, mode.charAt(0) - '0'));
+            getSharedPreferences(PREFS_DUAL_SCREEN, MODE_PRIVATE).edit().putInt("touch_controls", value).apply();
+            runOnUiThread(this::updateTouchControls);
+            return String.valueOf(value);
+        }
+        return String.valueOf(touchControlsPref());
     }
 
     private boolean hasPhysicalGamepad() {
