@@ -827,26 +827,54 @@ index 0000000..4050818
 +
 +#endif
 diff --git a/recompui/src/composites/ui_mod_discovery_http.cpp b/recompui/src/composites/ui_mod_discovery_http.cpp
-index c312734..6e02b96 100644
+index c312734..2917814 100644
 --- a/recompui/src/composites/ui_mod_discovery_http.cpp
 +++ b/recompui/src/composites/ui_mod_discovery_http.cpp
-@@ -24,6 +24,22 @@ namespace recompui
+@@ -1,3 +1,5 @@
++#include <fstream>
++#include <iterator>
+ #include "ui_mod_discovery.h"
+ 
+ #include <algorithm>
+@@ -24,6 +26,44 @@ namespace recompui
              curl_easy_setopt(handle, CURLOPT_USERAGENT, "ModDownloader/1.0");
              curl_easy_setopt(handle, CURLOPT_SSL_VERIFYPEER, 1L);
              curl_easy_setopt(handle, CURLOPT_SSL_VERIFYHOST, 2L);
 +#ifdef __ANDROID__
-+            // Android has no CA bundle file for curl's OpenSSL; point it at the system's
-+            // certificate store (hashed PEM files, which OpenSSL reads as a CA path). Android 14+
-+            // keeps the up-to-date store in the Conscrypt APEX.
++            // Android has no CA bundle file for curl's OpenSSL. Its certificate store is a
++            // folder of PEM files, but named by OpenSSL's old hash, which newer OpenSSL can't
++            // look up as a CA path - so all of them are read into one in-memory bundle instead.
 +            {
-+                static const char *ca_paths[] = { "/apex/com.android.conscrypt/cacerts", "/system/etc/security/cacerts" };
-+                for (const char *ca_path : ca_paths) {
-+                    std::error_code ec;
-+                    if (std::filesystem::is_directory(ca_path, ec)) {
-+                        curl_easy_setopt(handle, CURLOPT_CAPATH, ca_path);
-+                        curl_easy_setopt(handle, CURLOPT_CAINFO, nullptr);
-+                        break;
++                static const std::string bundle = []() {
++                    std::string pem;
++                    static const char *ca_paths[] = { "/apex/com.android.conscrypt/cacerts", "/system/etc/security/cacerts" };
++                    for (const char *ca_path : ca_paths) {
++                        std::error_code ec;
++                        if (!std::filesystem::is_directory(ca_path, ec)) {
++                            continue;
++                        }
++                        for (const auto &entry : std::filesystem::directory_iterator(ca_path, ec)) {
++                            std::ifstream in{ entry.path(), std::ios::binary };
++                            std::string file((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
++                            const size_t begin = file.find("-----BEGIN CERTIFICATE-----");
++                            const size_t end = file.find("-----END CERTIFICATE-----");
++                            if (begin != std::string::npos && end != std::string::npos && end > begin) {
++                                pem.append(file, begin, end + 25 - begin);
++                                pem += "\n";
++                            }
++                        }
++                        if (!pem.empty()) {
++                            break;
++                        }
 +                    }
++                    return pem;
++                }();
++                if (!bundle.empty()) {
++                    curl_blob blob{};
++                    blob.data = const_cast<char *>(bundle.data());
++                    blob.len = bundle.size();
++                    blob.flags = CURL_BLOB_NOCOPY;
++                    curl_easy_setopt(handle, CURLOPT_CAINFO_BLOB, &blob);
 +                }
 +            }
 +#endif
