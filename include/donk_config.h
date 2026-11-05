@@ -24,6 +24,7 @@ namespace dk64 {
             inline const std::string story_skip = "story_skip";
             inline const std::string camera_type = "camera_type";
             inline const std::string lightning_flashes = "lightning_flashes";
+            inline const std::string skip_launcher = "skip_launcher";
         }
 
         namespace sound {
@@ -88,6 +89,8 @@ namespace dk64 {
         Off
     };
     LightningFlashMode get_lightning_flash();
+    // Start the game straight away instead of showing the launcher (Start Game / Settings / Mods).
+    bool get_skip_launcher();
 
     enum class CutsceneBordersMode {
         On,

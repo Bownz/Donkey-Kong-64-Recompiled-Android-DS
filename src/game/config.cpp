@@ -145,6 +145,19 @@ static void add_general_options(recomp::config::Config &config) {
         lightning_flash_options,
         dk64::LightningFlashMode::Reduced
     );
+    static EnumOptionVector skip_launcher_options = {
+        {0u, "Off", "Off"},
+        {1u, "On", "On"},
+    };
+    config.add_enum_option(
+        dk64::configkeys::general::skip_launcher,
+        "Skip Launcher",
+        "Goes straight into the game when it starts, without the launcher screen "
+        "(Start Game, Setup Controls, Settings, Mods). Everything there is still in this menu.<br />"
+        "Only skips once your ROM has been loaded, and not when an enabled mod adds game modes to pick from.",
+        skip_launcher_options,
+        0u
+    );
 }
 
 template <typename T = uint32_t>
@@ -175,6 +188,10 @@ dk64::StorySkipMode dk64::get_story_skip() {
 
 dk64::CameraTypeMode dk64::get_camera_type() {
     return get_general_config_enum_value<dk64::CameraTypeMode>(dk64::configkeys::general::camera_type);
+}
+
+bool dk64::get_skip_launcher() {
+    return get_general_config_enum_value(dk64::configkeys::general::skip_launcher) == 1u;
 }
 
 dk64::LightningFlashMode dk64::get_lightning_flash() {

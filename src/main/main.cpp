@@ -739,6 +739,24 @@ void on_launcher_init(recompui::LauncherMenu *menu) {
     dk64::launcher_animation_setup(menu);
 }
 
+// The launcher's first update: with "Skip Launcher" on (and a ROM loaded, and no mod game
+// modes to choose from), start the game as the Start Game option would.
+static void on_launcher_update(recompui::LauncherMenu *menu) {
+    static bool skip_checked = false;
+    if (!skip_checked) {
+        skip_checked = true;
+        const auto &game = supported_games[0];
+        if (dk64::get_skip_launcher() && recomp::is_rom_valid(game.game_id)
+                && recomp::mods::game_mode_count(game.mod_game_id, false) == 0) {
+            recompui::update_game_mod_id(game.mod_game_id);
+            recomp::start_game(game.game_id, {});
+            recompui::hide_all_contexts();
+            return;
+        }
+    }
+    dk64::launcher_animation_update(menu);
+}
+
 #define REGISTER_FUNC(name) recomp::overlays::register_base_export(#name, name)
 
 int main(int argc, char** argv) {
@@ -883,7 +901,7 @@ int main(int argc, char** argv) {
     dk64::init_config();
 
     recompui::register_launcher_init_callback(on_launcher_init);
-    recompui::register_launcher_update_callback(dk64::launcher_animation_update);
+    recompui::register_launcher_update_callback(on_launcher_update);
 
     recomp::rsp::callbacks_t rsp_callbacks{
         .get_rsp_microcode = get_rsp_microcode,
