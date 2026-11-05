@@ -86,12 +86,66 @@ void recomptheme::set_custom_theme() {
     theme::set_theme_color(theme::color::BW75, Color{191, 191, 191, 255});
     theme::set_theme_color(theme::color::BW90, Color{229, 229, 229, 255});
 
+#ifdef __ANDROID__
+    // Android: warm dark smoked panels with an antique-gold accent and cream text, in the
+    // spirit of the Dusklight port's menus (and DK64's own gold), instead of blue on black.
+    {
+        const Color gold{214, 178, 92, 255}, goldL{240, 222, 170, 255}, goldD{122, 96, 40, 255};
+        auto alpha = [](Color c, uint8_t a) { c.a = a; return c; };
+        theme::set_theme_color(theme::color::Background1, Color{16, 14, 10, 255});
+        theme::set_theme_color(theme::color::Background2, Color{26, 23, 17, 255});
+        theme::set_theme_color(theme::color::Background3, Color{36, 32, 24, 255});
+        theme::set_theme_color(theme::color::BGOverlay, Color{214, 190, 130, 22});
+        theme::set_theme_color(theme::color::ModalOverlay, Color{22, 20, 15, 236});
+        theme::set_theme_color(theme::color::BGShadow2, Color{16, 14, 10, 184});
+        theme::set_theme_color(theme::color::Text, Color{238, 231, 212, 255});
+        theme::set_theme_color(theme::color::TextActive, Color{250, 244, 226, 255});
+        theme::set_theme_color(theme::color::TextDim, Color{204, 194, 168, 255});
+        theme::set_theme_color(theme::color::TextInactive, Color{238, 231, 212, 140});
+        theme::set_theme_color(theme::color::TextA5, Color{238, 231, 212, 13});
+        theme::set_theme_color(theme::color::TextA20, Color{238, 231, 212, 51});
+        theme::set_theme_color(theme::color::TextA30, Color{238, 231, 212, 77});
+        theme::set_theme_color(theme::color::TextA50, Color{238, 231, 212, 128});
+        theme::set_theme_color(theme::color::TextA80, Color{238, 231, 212, 204});
+        theme::set_theme_color(theme::color::Primary, gold);
+        theme::set_theme_color(theme::color::PrimaryL, goldL);
+        theme::set_theme_color(theme::color::PrimaryD, goldD);
+        theme::set_theme_color(theme::color::PrimaryA5, alpha(gold, 13));
+        theme::set_theme_color(theme::color::PrimaryA20, alpha(gold, 51));
+        theme::set_theme_color(theme::color::PrimaryA30, alpha(gold, 77));
+        theme::set_theme_color(theme::color::PrimaryA50, alpha(gold, 128));
+        theme::set_theme_color(theme::color::PrimaryA80, alpha(gold, 204));
+        const Color border{214, 190, 130, 255};
+        theme::set_theme_color(theme::color::Border, alpha(border, 64));
+        theme::set_theme_color(theme::color::BorderSoft, alpha(border, 36));
+        theme::set_theme_color(theme::color::BorderHard, alpha(border, 105));
+        theme::set_theme_color(theme::color::BorderSolid, alpha(border, 170));
+        theme::set_theme_color(theme::color::Elevated, alpha(border, 24));
+        theme::set_theme_color(theme::color::ElevatedSoft, alpha(border, 12));
+        theme::set_theme_color(theme::color::ElevatedBorder, alpha(border, 170));
+        theme::set_theme_color(theme::color::ElevatedBorderHard, alpha(border, 235));
+        // The "A" button colour (selection highlights) follows the accent too.
+        theme::set_theme_color(theme::color::A, gold);
+        theme::set_theme_color(theme::color::AL, goldL);
+        theme::set_theme_color(theme::color::AD, goldD);
+        theme::set_theme_color(theme::color::AA5, alpha(gold, 13));
+        theme::set_theme_color(theme::color::AA20, alpha(gold, 51));
+        theme::set_theme_color(theme::color::AA30, alpha(gold, 77));
+        theme::set_theme_color(theme::color::AA50, alpha(gold, 128));
+        theme::set_theme_color(theme::color::AA80, alpha(gold, 204));
+    }
+#endif
+
     theme::border::radius_sm = 12.0f;
     theme::border::radius_md = 18.0f;
     theme::border::radius_lg = 24.0f;
 
     const uint32_t header_weight = 700;
+#ifdef __ANDROID__
+    const uint32_t label_weight = 700;   // bold condensed labels, as in Dusklight
+#else
     const uint32_t label_weight = 500;
+#endif
     const uint32_t base_weight = 400;
     theme::set_typography_preset(theme::Typography::Header1, 68.0f, 0.01f, header_weight);
     theme::set_typography_preset(theme::Typography::Header2, 52.0f, 0.01f, header_weight);

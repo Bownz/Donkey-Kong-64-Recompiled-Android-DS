@@ -850,7 +850,15 @@ int main(int argc, char** argv) {
     }
 
     // Register fonts.
+#ifdef __ANDROID__
+    // A condensed face like the Dusklight port's menus: more fits on a handheld screen and the
+    // bold labels read clearly. Fira Sans Condensed (OFL, assets/FiraSansCondensed-OFL.txt).
+    recompui::register_primary_font("FiraSansCondensed-Regular.ttf", "Fira Sans Condensed");
+    recompui::register_extra_font("FiraSansCondensed-Bold.ttf");
+    recompui::register_extra_font("InterVariable.ttf");
+#else
     recompui::register_primary_font("InterVariable.ttf", "Inter Variable");
+#endif
     recompui::register_extra_font("Suplexmentary Comic NC.ttf");
 
     // Register configuration path.
