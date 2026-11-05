@@ -806,13 +806,15 @@ extern "C" void dk64_android_apply_control_preset(int modern) {
     general.update_option_value(dk64::configkeys::general::camera_type,
         static_cast<uint32_t>(modern ? dk64::CameraTypeMode::Analog : dk64::CameraTypeMode::Free));
     // Aiming: Modern looks up when you push (or tilt) up, like most games now; Classic keeps
-    // the N64's (up looks down). The third person camera isn't inverted in either; swimming
-    // stays as the original game.
+    // the N64's (up looks down). Swimming follows the same rule (Modern: up swims up). The
+    // third person camera isn't inverted in either.
     general.update_option_value(dk64::configkeys::general::third_person_camera_invert_mode,
         static_cast<uint32_t>(dk64::CameraInvertMode::InvertNone));
     general.update_option_value(dk64::configkeys::general::first_person_invert_mode,
         static_cast<uint32_t>(modern ? dk64::CameraInvertMode::InvertNone : dk64::CameraInvertMode::InvertY));
     general.update_option_value(dk64::configkeys::general::gyro_invert_mode,
+        static_cast<uint32_t>(modern ? dk64::CameraInvertMode::InvertNone : dk64::CameraInvertMode::InvertY));
+    general.update_option_value(dk64::configkeys::general::swimming_invert_mode,
         static_cast<uint32_t>(modern ? dk64::CameraInvertMode::InvertNone : dk64::CameraInvertMode::InvertY));
     if (general.has_option(recompui::config::general::options::gyro_sensitivity)) {
         general.update_option_value(recompui::config::general::options::gyro_sensitivity, modern ? 25.0 : 0.0);
