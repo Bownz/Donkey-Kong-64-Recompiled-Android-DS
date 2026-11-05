@@ -210,7 +210,7 @@ index 6de7a94..15301ba 100644
                          return;
                      case recomp::RomValidationError::FailedToOpen:
 diff --git a/recompui/src/base/ui_state.cpp b/recompui/src/base/ui_state.cpp
-index 277a421..b33343d 100644
+index 277a421..25a9a74 100644
 --- a/recompui/src/base/ui_state.cpp
 +++ b/recompui/src/base/ui_state.cpp
 @@ -278,6 +278,9 @@ public:
@@ -276,7 +276,21 @@ index 277a421..b33343d 100644
          if (!all_input_is_disabled) {
              bool is_mouse_input = false;
              // Implement some additional behavior for specific events on top of what RmlUi normally does with them.
-@@ -838,7 +887,14 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
+@@ -787,8 +836,11 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
+                 else if (*await_stick_return && fabsf(axis_value) < 0.15f) {
+                     *await_stick_return = false;
+                     // Stop pressing the current key if the axis that was released was the one triggering key presses.
+-                    int sdl_key = cont_axis_to_key(cur_event.caxis, axis_value);
+-                    if (sdl_key == latest_controller_key_pressed) {
++                    // Both directions of the axis are checked: a stick coming back to the middle can
++                    // stop just past it (e.g. slightly down after up), which looked like the other
++                    // direction, so the key kept repeating and the menu scrolled on by itself.
++                    if (cont_axis_to_key(cur_event.caxis, 1.0f) == latest_controller_key_pressed
++                            || cont_axis_to_key(cur_event.caxis, -1.0f) == latest_controller_key_pressed) {
+                         latest_controller_key_pressed = SDLK_UNKNOWN;
+                     }
+                 }
+@@ -838,7 +890,14 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
              }
  
              if (open_config) {
@@ -291,7 +305,7 @@ index 277a421..b33343d 100644
              }
          }
      } // end dequeue event loop
-@@ -870,7 +926,12 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
+@@ -870,7 +929,12 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
          int height = swap_chain_framebuffer->getHeight();
  
          // Scale the UI based on the window size with 1080 vertical resolution as the reference point.
