@@ -743,6 +743,33 @@ index 0000000..4050818
 +} // namespace recompui
 +
 +#endif
+diff --git a/recompui/src/composites/ui_mod_discovery_http.cpp b/recompui/src/composites/ui_mod_discovery_http.cpp
+index c312734..6e02b96 100644
+--- a/recompui/src/composites/ui_mod_discovery_http.cpp
++++ b/recompui/src/composites/ui_mod_discovery_http.cpp
+@@ -24,6 +24,22 @@ namespace recompui
+             curl_easy_setopt(handle, CURLOPT_USERAGENT, "ModDownloader/1.0");
+             curl_easy_setopt(handle, CURLOPT_SSL_VERIFYPEER, 1L);
+             curl_easy_setopt(handle, CURLOPT_SSL_VERIFYHOST, 2L);
++#ifdef __ANDROID__
++            // Android has no CA bundle file for curl's OpenSSL; point it at the system's
++            // certificate store (hashed PEM files, which OpenSSL reads as a CA path). Android 14+
++            // keeps the up-to-date store in the Conscrypt APEX.
++            {
++                static const char *ca_paths[] = { "/apex/com.android.conscrypt/cacerts", "/system/etc/security/cacerts" };
++                for (const char *ca_path : ca_paths) {
++                    std::error_code ec;
++                    if (std::filesystem::is_directory(ca_path, ec)) {
++                        curl_easy_setopt(handle, CURLOPT_CAPATH, ca_path);
++                        curl_easy_setopt(handle, CURLOPT_CAINFO, nullptr);
++                        break;
++                    }
++                }
++            }
++#endif
+         }
+ 
+         ~CurlSession()
 diff --git a/recompui/src/config/ui_config.cpp b/recompui/src/config/ui_config.cpp
 index 6c84c05..928fc28 100644
 --- a/recompui/src/config/ui_config.cpp
