@@ -125,10 +125,61 @@ index c89956e..c62e059 100644
  
          *buttons_out = cur_buttons;
 diff --git a/recompui/src/config/ui_config_tab_graphics.cpp b/recompui/src/config/ui_config_tab_graphics.cpp
-index 4fdf81f..4178fb8 100644
+index 4fdf81f..d889ea6 100644
 --- a/recompui/src/config/ui_config_tab_graphics.cpp
 +++ b/recompui/src/config/ui_config_tab_graphics.cpp
-@@ -304,7 +304,15 @@ namespace recompui {
+@@ -77,11 +77,19 @@ namespace recompui {
+             // {ultramodern::renderer::Antialiasing::MSAA8X, "MSAA8X"},
+         };
+ 
++#ifdef __ANDROID__
++        // Android: just the game's own 30, or 60 (Manual at 60; see apply_graphics_config).
++        static EnumOptionVector refresh_rate_options = {
++            {ultramodern::renderer::RefreshRate::Original, "Original", "30 FPS"},
++            {ultramodern::renderer::RefreshRate::Manual, "Manual", "60 FPS"},
++        };
++#else
+         static EnumOptionVector refresh_rate_options = {
+             {ultramodern::renderer::RefreshRate::Original, "Original"},
+             {ultramodern::renderer::RefreshRate::Display, "Display"},
+             {ultramodern::renderer::RefreshRate::Manual, "Manual"},
+         };
++#endif
+ 
+         static EnumOptionVector hpfb_options = {
+             {ultramodern::renderer::HighPrecisionFramebuffer::Auto, "Auto"},
+@@ -152,6 +160,15 @@ namespace recompui {
+         }
+ 
+         static std::string get_framerate_text(uint32_t refresh_rate) {
++#ifdef __ANDROID__
++            (void)refresh_rate;
++            return
++                "Sets the game's output framerate. This option does not affect gameplay."
++                "<br />"
++                "<br />"
++                "<recomp-color primary>30 FPS</recomp-color> is the game's own rate. <recomp-color primary>60 FPS</recomp-color> adds a smoothed frame between each of the game's frames, "
++                "which doubles the graphics work, so busy areas may slow down.";
++#endif
+             return
+                 "Sets the game's output framerate. This option does not affect gameplay."
+                 "<br />"
+@@ -174,6 +191,14 @@ namespace recompui {
+             new_config.rr_option = get_graphics_enum_value<ultramodern::renderer::RefreshRate>(graphics::options::rr_option);
+             new_config.hpfb_option = get_graphics_enum_value<ultramodern::renderer::HighPrecisionFramebuffer>(graphics::options::hpfb_option);
+             new_config.rr_manual_value = get_graphics_number_value<int>(graphics::options::rr_manual_value);
++#ifdef __ANDROID__
++            // Only 30 or 60 on Android: anything else (an older "Display" setting) is 30.
++            if (new_config.rr_option == ultramodern::renderer::RefreshRate::Manual) {
++                new_config.rr_manual_value = 60;
++            } else {
++                new_config.rr_option = ultramodern::renderer::RefreshRate::Original;
++            }
++#endif
+ 
+             new_config.ds_option = get_graphics_enum_value<int>(graphics::options::ds_option);
+ 
+@@ -304,7 +329,15 @@ namespace recompui {
                  "Framerate",
                  get_framerate_text(60),
                  refresh_rate_options,
@@ -144,7 +195,31 @@ index 4fdf81f..4178fb8 100644
              );
  
              config.add_number_option(
-@@ -330,7 +338,12 @@ namespace recompui {
+@@ -314,12 +347,23 @@ namespace recompui {
+                 20.0, 240.0, 1.0, 0, false, 60.0
+             );
+             {
++#ifdef __ANDROID__
++                // No slider on Android: 60 FPS is always exactly 60.
++                config.add_option_hidden_dependency(
++                    graphics::options::rr_manual_value,
++                    graphics::options::rr_option,
++                    ultramodern::renderer::RefreshRate::Original,
++                    ultramodern::renderer::RefreshRate::Display,
++                    ultramodern::renderer::RefreshRate::Manual
++                );
++#else
+                 config.add_option_hidden_dependency(
+                     graphics::options::rr_manual_value,
+                     graphics::options::rr_option,
+                     ultramodern::renderer::RefreshRate::Original,
+                     ultramodern::renderer::RefreshRate::Display
+                 );
++#endif
+             }
+ 
+             config.add_enum_option(
+@@ -330,7 +374,12 @@ namespace recompui {
                  "<br />"
                  "<recomp-color primary>Note: This option won't be available if your GPU does not support programmable MSAA sample positions, as it is currently required to avoid rendering glitches.</recomp-color>",
                  antialiasing_options,
