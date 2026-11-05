@@ -1185,7 +1185,7 @@ public final class BottomScreenView extends View {
                 float hop = duck < 0.25f ? -(float) Math.sin(duck / 0.25f * Math.PI) * lh * 0.04f : 0f;
                 float down = duck > 0.25f ? (duck - 0.25f) / 0.75f : 0f;
                 float rise = (1f - robotPop) * lh * 0.3f + hop + down * down * lh * 0.45f;
-                drawAndroidRobot(c, tmp.right - lw * 0.10f, tmp.top + lh * 0.02f + bob + rise, lh * 0.34f * Math.max(0.01f, robotPop), 20f, alpha);
+                drawAndroidRobot(c, tmp.right - lw * 0.10f, tmp.top - lh * 0.06f + bob + rise, lh * 0.34f * Math.max(0.01f, robotPop), 20f, alpha);
             }
             bitmapPaint.setAlpha(alpha);
             c.drawBitmap(logo, null, tmp, bitmapPaint);
