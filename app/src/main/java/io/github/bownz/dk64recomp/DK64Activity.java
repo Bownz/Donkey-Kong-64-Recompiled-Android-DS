@@ -592,8 +592,12 @@ public class DK64Activity extends SDLActivity
         Log.i(TAG, "ROM supplied: restarting the app for a clean first start");
         Diagnostics.markLeaving(this);
         runOnUiThread(() -> {
-            startActivity(new Intent(this, RestartActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
-            overridePendingTransition(0, 0);
+            // Say what's happening, give it a moment to be read, then restart.
+            android.widget.Toast.makeText(this, R.string.rom_restart, android.widget.Toast.LENGTH_LONG).show();
+            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+                startActivity(new Intent(this, RestartActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                overridePendingTransition(0, 0);
+            }, 1800);
         });
     }
 
