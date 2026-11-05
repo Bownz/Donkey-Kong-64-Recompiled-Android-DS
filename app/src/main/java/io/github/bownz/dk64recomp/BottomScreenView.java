@@ -1144,19 +1144,38 @@ public final class BottomScreenView extends View {
             titleLeaving = false;
             titleIdle = true;   // the Android peeking over the logo bobs gently
         }
+        final long now = android.os.SystemClock.uptimeMillis();
+        if (titleShownAt == 0) {
+            titleShownAt = now;
+        }
+        final float since = (now - titleShownAt) / 1000f;
+        // Intro: the logo pops in (overshoots, settles), then the Android pops up behind it.
+        // After that the logo gently breathes and sways.
+        final float pop = backOut(Math.min(1f, since / 0.6f));
+        final float robotPop = backOut(Math.max(0f, Math.min(1f, (since - 0.45f) / 0.45f)));
+        if (since < 1.0f) {
+            animating = true;   // smooth for the intro; the idle sway runs at the idle rate
+        }
+        final float breathe = 1f + (float) Math.sin(now / 900.0) * 0.015f;
+        final float sway = (float) Math.sin(now / 1400.0) * 1.5f;
 
         Bitmap logo = logo();
         if (logo != null) {
             float scale = Math.min(w * 0.78f / logo.getWidth(), h * 0.62f / logo.getHeight());
             float lw = logo.getWidth() * scale, lh = logo.getHeight() * scale;
             int saved = c.save();
-            c.scale(shrink, shrink, w / 2f, h / 2f);
+            c.scale(shrink * pop * breathe, shrink * pop * breathe, w / 2f, h / 2f);
+            c.rotate(sway, w / 2f, h / 2f);
             int alpha = Math.round(255 * Math.min(1f, shrink * 1.4f));
             tmp.set((w - lw) / 2, (h - lh) / 2, (w + lw) / 2, (h + lh) / 2);
             // The Android robot peeks out from behind the logo's top right: drawn first, so the
             // logo covers its lower half.
             float bob = (float) Math.sin(android.os.SystemClock.uptimeMillis() / 600.0) * lh * 0.02f;
-            drawAndroidRobot(c, tmp.right - lw * 0.10f, tmp.top + lh * 0.02f + bob, lh * 0.34f, 20f, alpha);
+            if (robotPop > 0f) {
+                // Rises up from behind the logo.
+                float rise = (1f - robotPop) * lh * 0.3f;
+                drawAndroidRobot(c, tmp.right - lw * 0.10f, tmp.top + lh * 0.02f + bob + rise, lh * 0.34f * Math.max(0.01f, robotPop), 20f, alpha);
+            }
             bitmapPaint.setAlpha(alpha);
             c.drawBitmap(logo, null, tmp, bitmapPaint);
             bitmapPaint.setAlpha(255);
@@ -1177,6 +1196,14 @@ public final class BottomScreenView extends View {
     }
 
     private static final long TITLE_OUT_MS = 550;
+    private long titleShownAt;
+
+    /** Ease out with a little overshoot (0..1 -> 0..1). */
+    private static float backOut(float t) {
+        final float k = 1.70158f;
+        final float u = t - 1f;
+        return 1f + u * u * ((k + 1f) * u + k);
+    }
     private boolean titleIdle, titleLeaving, titleGone;
     private static final int ANDROID_GREEN = Color.rgb(61, 220, 132);
 
