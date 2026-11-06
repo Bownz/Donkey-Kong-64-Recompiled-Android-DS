@@ -1,28 +1,3 @@
-diff --git a/librecomp/include/librecomp/mods.hpp b/librecomp/include/librecomp/mods.hpp
-index 37556bd..d2a403b 100644
---- a/librecomp/include/librecomp/mods.hpp
-+++ b/librecomp/include/librecomp/mods.hpp
-@@ -224,6 +224,8 @@ namespace recomp {
-             bool runtime_toggleable;
-             bool enabled_by_default;
-             bool custom_gamemode;
-+            // Only textures (no code or ROM patch): a texture pack.
-+            bool texture_pack = false;
-         };
- 
-         struct ModManifest {
-@@ -510,7 +512,10 @@ namespace recomp {
-                     .dependencies = manifest.dependencies,
-                     .runtime_toggleable = is_runtime_toggleable(),
-                     .enabled_by_default = manifest.enabled_by_default,
--                    .custom_gamemode = manifest.custom_gamemode
-+                    .custom_gamemode = manifest.custom_gamemode,
-+                    // The code (0) and ROM patch (1) content types are registered first.
-+                    .texture_pack = !content_types.empty() && std::none_of(content_types.begin(), content_types.end(),
-+                        [](const ModContentTypeId& t) { return t.value <= 1; })
-                 };
-             }
-         private:
 diff --git a/librecomp/src/mods.cpp b/librecomp/src/mods.cpp
 index 0f7de83..7541a3c 100644
 --- a/librecomp/src/mods.cpp

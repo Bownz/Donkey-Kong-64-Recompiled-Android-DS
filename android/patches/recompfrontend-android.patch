@@ -288,7 +288,7 @@ index c89956e..c62e059 100644
  
          *buttons_out = cur_buttons;
 diff --git a/recompui/include/recompui/config.h b/recompui/include/recompui/config.h
-index fd04cb3..b5c5e15 100644
+index fd04cb3..710c0e3 100644
 --- a/recompui/include/recompui/config.h
 +++ b/recompui/include/recompui/config.h
 @@ -2,6 +2,8 @@
@@ -300,19 +300,7 @@ index fd04cb3..b5c5e15 100644
  
  #include "librecomp/config.hpp"
  #include "elements/ui_modal.h"
-@@ -84,6 +86,11 @@ namespace recompui {
-             inline const std::string tab_name = "Manage Mods";
-         }
- 
-+        namespace texture_packs {
-+            inline const std::string id = "texture_packs";
-+            inline const std::string tab_name = "Texture Packs";
-+        }
-+
-         namespace mod_discovery {
-             inline const std::string id = "mod_discovery";
-             inline const std::string tab_name = "Find Mods";
-@@ -131,6 +138,25 @@ namespace recompui {
+@@ -131,6 +133,25 @@ namespace recompui {
          recomp::config::Config &create_sound_tab(const std::string &name = config::sound::tab_name);
          void create_mods_tab(const std::string &name = config::mods::tab_name);
  
@@ -995,7 +983,7 @@ index 8d442e6..6699ec4 100644
              [this](const std::string &text)
              {
 diff --git a/recompui/src/composites/ui_mod_menu.cpp b/recompui/src/composites/ui_mod_menu.cpp
-index 39a7abc..d37a487 100644
+index 39a7abc..7d403fe 100644
 --- a/recompui/src/composites/ui_mod_menu.cpp
 +++ b/recompui/src/composites/ui_mod_menu.cpp
 @@ -9,6 +9,7 @@
@@ -1006,41 +994,7 @@ index 39a7abc..d37a487 100644
  
  #include <string>
  
-@@ -269,11 +270,28 @@ void ModEntrySpacer::set_active(bool active) {
- }
- 
- recompui::ModMenu* mod_menu = nullptr;
-+// Android: the Texture Packs tab has its own mod list (texture packs only); the Mods tab's
-+// list leaves them out.
-+recompui::ModMenu* texture_pack_menu = nullptr;
- static std::string current_game_mod_id = "";
- 
- 
- // ModMenu
- 
-+std::vector<recomp::mods::ModDetails> ModMenu::listed_mod_details() const {
-+    std::vector<recomp::mods::ModDetails> all = recomp::mods::get_all_mod_details(game_mod_id);
-+    if (filter < 0) {
-+        return all;
-+    }
-+    std::vector<recomp::mods::ModDetails> out;
-+    for (auto &details : all) {
-+        if ((details.texture_pack ? 1 : 0) == filter) {
-+            out.push_back(std::move(details));
-+        }
-+    }
-+    return out;
-+}
-+
- void ModMenu::refresh_mods(bool scan_mods) {
-     for (const std::string &thumbnail : loaded_thumbnails) {
-         recompui::release_image(thumbnail);
-@@ -283,10 +301,43 @@ void ModMenu::refresh_mods(bool scan_mods) {
-     if (scan_mods && !ultramodern::is_game_started()) {
-         recomp::mods::scan_mods();
-     }
--    mod_details = recomp::mods::get_all_mod_details(game_mod_id);
-+    mod_details = listed_mod_details();
+@@ -287,6 +288,39 @@ void ModMenu::refresh_mods(bool scan_mods) {
      create_mod_list();
  }
  
@@ -1080,60 +1034,7 @@ index 39a7abc..d37a487 100644
  void ModMenu::open_mods_folder() {
      std::filesystem::path mods_directory = recomp::mods::get_mods_directory();
  #if defined(WIN32)
-@@ -440,8 +491,21 @@ void ModMenu::mod_dragged(uint32_t mod_index, EventDrag drag) {
-         mod_entry_floating_view->set_display(Display::None);
- 
-         // Re-order the mods and update all the details on the menu.
--        recomp::mods::set_mod_index(game_mod_id, mod_details[mod_index].mod_id, mod_drag_target_index);
--        mod_details = recomp::mods::get_all_mod_details(game_mod_id);
-+        // The list may be filtered (Mods / Texture Packs): move to where the mod now at
-+        // the target position sits in the full order.
-+        size_t global_target = mod_drag_target_index;
-+        if (filter >= 0 && !mod_details.empty()) {
-+            const std::string &target_id = mod_details[std::min<size_t>(mod_drag_target_index, mod_details.size() - 1)].mod_id;
-+            std::vector<recomp::mods::ModDetails> all = recomp::mods::get_all_mod_details(game_mod_id);
-+            for (size_t i = 0; i < all.size(); i++) {
-+                if (all[i].mod_id == target_id) {
-+                    global_target = i;
-+                    break;
-+                }
-+            }
-+        }
-+        recomp::mods::set_mod_index(game_mod_id, mod_details[mod_index].mod_id, global_target);
-+        mod_details = listed_mod_details();
-         for (size_t i = 0; i < mod_entry_buttons.size(); i++) {
-             mod_entry_buttons[i]->set_mod_details(mod_details[i]);
-             mod_entry_buttons[i]->set_mod_thumbnail(generate_thumbnail_src_for_mod(mod_details[i].mod_id));
-@@ -494,7 +558,7 @@ void ModMenu::mod_configure_requested() {
-         mod_config_modal->set_on_close_callback([this]() {
-             auto mod_config = recomp::mods::get_mod_config(this->mod_details[this->active_mod_index].mod_id);
-             mod_config->save_config();
--            mod_menu->get_mod_configure_button()->focus();
-+            this->get_mod_configure_button()->focus();
- 
-             auto schema = mod_config->get_config_schema();
-             for (const auto &option : schema.options) {
-@@ -654,13 +718,17 @@ void ModMenu::process_event(const Event &e) {
-     }
- }
- 
--ModMenu::ModMenu(ResourceId rid, Element *parent) : Element(rid, parent) {
-+ModMenu::ModMenu(ResourceId rid, Element *parent, int filter) : Element(rid, parent), filter(filter) {
-     if (current_game_mod_id.empty()) {
-         throw std::runtime_error("ModMenu created before game mod ID was set. call update_game_mod_id() first.");
-     }
- 
-     game_mod_id = current_game_mod_id;
--    mod_menu = this;
-+    if (filter == 1) {
-+        texture_pack_menu = this;
-+    } else {
-+        mod_menu = this;
-+    }
- 
-     ContextId context = get_current_context();
- 
-@@ -730,8 +798,15 @@ ModMenu::ModMenu(ResourceId rid, Element *parent) : Element(rid, parent) {
+@@ -730,8 +764,15 @@ ModMenu::ModMenu(ResourceId rid, Element *parent) : Element(rid, parent) {
              refresh_button = context.create_element<IconButton>(footer_container, "icons/Reset.svg", recompui::ButtonStyle::Secondary, recompui::IconButtonSize::XLarge);
              refresh_button->add_pressed_callback([this](){ refresh_mods(true); });
  
@@ -1149,89 +1050,13 @@ index 39a7abc..d37a487 100644
          } // footer_container
      } // this
      
-@@ -748,17 +823,29 @@ ModMenu::ModMenu(ResourceId rid, Element *parent) : Element(rid, parent) {
- }
- 
- ModMenu::~ModMenu() {
--    mod_menu = nullptr;
-+    if (texture_pack_menu == this) {
-+        texture_pack_menu = nullptr;
-+    }
-+    if (mod_menu == this) {
-+        mod_menu = nullptr;
-+    }
- }
- 
- 
- void update_mod_list(bool scan_mods) {
--    if (mod_menu) {
-+    if (mod_menu || texture_pack_menu) {
-         recompui::ContextId ui_context = recompui::config::get_config_context_id();
-         bool opened = ui_context.open_if_not_already();
- 
--        mod_menu->set_mods_dirty(scan_mods);
--        mod_menu->queue_update();
-+        // Only one list rescans the mods folder; the other just re-reads the list.
-+        if (mod_menu) {
-+            mod_menu->set_mods_dirty(scan_mods);
-+            mod_menu->queue_update();
-+        }
-+        if (texture_pack_menu) {
-+            texture_pack_menu->set_mods_dirty(scan_mods && mod_menu == nullptr);
-+            texture_pack_menu->queue_update();
-+        }
- 
-         if (opened) {
-             ui_context.close();
-@@ -775,11 +862,16 @@ const std::string &get_game_mod_id() {
- }
- 
- void process_game_started() {
--    if (mod_menu) {
-+    if (mod_menu || texture_pack_menu) {
-         recompui::ContextId ui_context = recompui::config::get_config_context_id();
-         bool opened = ui_context.open_if_not_already();
- 
--        mod_menu->queue_update();
-+        if (mod_menu) {
-+            mod_menu->queue_update();
-+        }
-+        if (texture_pack_menu) {
-+            texture_pack_menu->queue_update();
-+        }
- 
-         if (opened) {
-             ui_context.close();
-@@ -788,6 +880,9 @@ void process_game_started() {
- }
- 
- void focus_mod_configure_button() {
-+    if (mod_menu == nullptr) {
-+        return;
-+    }
-     Element* configure_button = mod_menu->get_mod_configure_button();
-     if (configure_button) {
-         configure_button->focus();
 diff --git a/recompui/src/composites/ui_mod_menu.h b/recompui/src/composites/ui_mod_menu.h
-index 294c371..7f987c4 100644
+index 294c371..f9bee82 100644
 --- a/recompui/src/composites/ui_mod_menu.h
 +++ b/recompui/src/composites/ui_mod_menu.h
-@@ -73,7 +73,8 @@ public:
- 
- class ModMenu : public Element {
- public:
--    ModMenu(ResourceId rid, Element *parent);
-+    // filter: -1 every mod, 0 mods that aren't texture packs, 1 texture packs only.
-+    ModMenu(ResourceId rid, Element *parent, int filter = -1);
-     virtual ~ModMenu();
-     void set_mods_dirty(bool scan_mods) { mods_dirty = true; mod_scan_queued = scan_mods; }
-     void set_game_mod_id(const std::string &mod_game_id) { game_mod_id = mod_game_id; set_mods_dirty(true); }
-@@ -83,7 +84,10 @@ protected:
-     std::string_view get_type_name() override { return "ModMenu"; }
+@@ -84,6 +84,7 @@ protected:
  private:
      void refresh_mods(bool scan_mods);
-+    std::vector<recomp::mods::ModDetails> listed_mod_details() const;
-+    int filter = -1;
      void open_mods_folder();
 +    void remove_selected_mod();
      void open_install_dialog();
@@ -1319,7 +1144,7 @@ index 56a0b70..fd57e2c 100644
 +    }
 +}
 diff --git a/recompui/src/config/ui_config.cpp b/recompui/src/config/ui_config.cpp
-index 6c84c05..73c5d58 100644
+index 6c84c05..f5dc0b4 100644
 --- a/recompui/src/config/ui_config.cpp
 +++ b/recompui/src/config/ui_config.cpp
 @@ -107,6 +107,28 @@ namespace recompui {
@@ -1363,7 +1188,7 @@ index 6c84c05..73c5d58 100644
 +        if (id == config::controls::id) {
 +            return 1;
 +        }
-+        if (id == config::mods::id || id == config::texture_packs::id || id == config::mod_discovery::id || id == "technical") {
++        if (id == config::mods::id || id == config::mod_discovery::id || id == "technical") {
 +            return 2;
 +        }
 +        return 0;
@@ -2772,33 +2597,6 @@ index 4fdf81f..4834249 100644
              );
  
              config.add_enum_option(
-diff --git a/recompui/src/config/ui_config_tab_mods.cpp b/recompui/src/config/ui_config_tab_mods.cpp
-index e982587..97aff79 100644
---- a/recompui/src/config/ui_config_tab_mods.cpp
-+++ b/recompui/src/config/ui_config_tab_mods.cpp
-@@ -13,9 +13,22 @@ void config::create_mods_tab(const std::string &name) {
-         name,
-         config::mods::id,
-         [](ContextId context, Element* parent) {
-+#ifdef __ANDROID__
-+            context.create_element<ModMenu>(parent, 0);   // texture packs have their own tab
-+#else
-             context.create_element<ModMenu>(parent);
-+#endif
-         }
-     );
-+#ifdef __ANDROID__
-+    config::create_tab(
-+        config::texture_packs::tab_name,
-+        config::texture_packs::id,
-+        [](ContextId context, Element* parent) {
-+            context.create_element<ModMenu>(parent, 1);
-+        }
-+    );
-+#endif
- 
-     recompui::update_mod_list(false);
- 
 diff --git a/recompui/src/elements/ui_binding_button.cpp b/recompui/src/elements/ui_binding_button.cpp
 index caa1020..355460f 100644
 --- a/recompui/src/elements/ui_binding_button.cpp
