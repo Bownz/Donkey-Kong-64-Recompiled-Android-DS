@@ -327,7 +327,7 @@ index fd04cb3..710c0e3 100644
          // This loads all of the user's config files from disk.
          void finalize();
 diff --git a/recompui/include/recompui/recompui.h b/recompui/include/recompui/recompui.h
-index 30c463b..4cbcf09 100644
+index 30c463b..2e52b40 100644
 --- a/recompui/include/recompui/recompui.h
 +++ b/recompui/include/recompui/recompui.h
 @@ -65,6 +65,11 @@ namespace recompui {
@@ -342,6 +342,15 @@ index 30c463b..4cbcf09 100644
      void open_choice_prompt(
          const std::string& header_text,
          const std::string& content_text,
+@@ -95,6 +100,8 @@ namespace recompui {
+     void apply_color_hack();
+     void get_window_size(int& width, int& height);
+     void open_quit_game_prompt();
++    // Adds a third choice to the prompt just opened (Android: Main Menu on the quit prompt).
++    void set_prompt_extra_button(const std::string& label_text, std::function<void()> action, ButtonStyle variant);
+     bool get_cursor_visible();
+     void set_cursor_visible(bool visible);
+     void update_supported_options();
 diff --git a/recompui/src/base/ui_launcher.cpp b/recompui/src/base/ui_launcher.cpp
 index 6de7a94..7e5c496 100644
 --- a/recompui/src/base/ui_launcher.cpp
@@ -398,10 +407,34 @@ index 6de7a94..7e5c496 100644
                      recompui::hide_all_contexts();
                  }
 diff --git a/recompui/src/base/ui_state.cpp b/recompui/src/base/ui_state.cpp
-index 277a421..63ecda3 100644
+index 277a421..16d4c98 100644
 --- a/recompui/src/base/ui_state.cpp
 +++ b/recompui/src/base/ui_state.cpp
-@@ -278,6 +278,9 @@ public:
+@@ -35,6 +35,10 @@
+ 
+ static std::atomic_bool cursor_enabled = true;
+ 
++#ifdef __ANDROID__
++extern "C" void dk64_android_restart_to_launcher() __attribute__((weak));
++#endif
++
+ void recompui::open_quit_game_prompt() {
+     recompui::open_choice_prompt(
+         "Are you sure you want to quit?",
+@@ -49,6 +53,12 @@ void recompui::open_quit_game_prompt() {
+         recompui::ButtonStyle::Tertiary,
+         true
+     );
++#ifdef __ANDROID__
++    // Main Menu: restarts the app to the launcher (DK64 Android). Only while playing.
++    if (dk64_android_restart_to_launcher != nullptr && ultramodern::is_game_started()) {
++        recompui::set_prompt_extra_button("Main Menu", []() { dk64_android_restart_to_launcher(); }, recompui::ButtonStyle::Secondary);
++    }
++#endif
+ }
+ 
+ static std::string primary_font = "";
+@@ -278,6 +288,9 @@ public:
          recompui::init_styling(recompui::file::get_asset_path("recomp.rcss"));
          recompui::init_launcher_menu();
          recompui::init_prompt_context();
@@ -411,7 +444,7 @@ index 277a421..63ecda3 100644
          recompui::AssignPlayersModal::init();
          recompui::config::init_modal();
      }
-@@ -580,6 +583,31 @@ bool check_menu_button_pressed(int profile_index, recompinput::GameInput input,
+@@ -580,6 +593,31 @@ bool check_menu_button_pressed(int profile_index, recompinput::GameInput input,
      return false;
  }
  
@@ -443,7 +476,7 @@ index 277a421..63ecda3 100644
  int cont_button_to_key(SDL_ControllerButtonEvent& button) {
      int player1_profile = recompinput::profiles::get_input_profile_for_player(0, recompinput::InputDevice::Controller);
  
-@@ -694,6 +722,52 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
+@@ -694,6 +732,52 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
              }
          }
  
@@ -496,7 +529,7 @@ index 277a421..63ecda3 100644
          if (!all_input_is_disabled) {
              bool is_mouse_input = false;
              // Implement some additional behavior for specific events on top of what RmlUi normally does with them.
-@@ -731,6 +805,7 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
+@@ -731,6 +815,7 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
              case SDL_EventType::SDL_CONTROLLERBUTTONDOWN: {
                  int sdl_key = cont_button_to_key(cur_event.cbutton);
                  if (context_capturing_input && sdl_key) {
@@ -504,7 +537,7 @@ index 277a421..63ecda3 100644
                      ui_state->context->ProcessKeyDown(convert_sdl_to_rml(sdl_key), 0);
                      latest_controller_key_pressed = sdl_key;
                      next_repeat_time = clock::now() + start_repeat_delay;
-@@ -776,7 +851,8 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
+@@ -776,7 +861,8 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
                          non_mouse_interacted = true;
                          int sdl_key = cont_axis_to_key(cur_event.caxis, axis_value);
                          if (context_capturing_input && sdl_key) {
@@ -514,7 +547,7 @@ index 277a421..63ecda3 100644
                              latest_controller_key_pressed = sdl_key;
                              next_repeat_time = clock::now() + start_repeat_delay;
                          }
-@@ -787,8 +863,11 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
+@@ -787,8 +873,11 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
                  else if (*await_stick_return && fabsf(axis_value) < 0.15f) {
                      *await_stick_return = false;
                      // Stop pressing the current key if the axis that was released was the one triggering key presses.
@@ -528,7 +561,7 @@ index 277a421..63ecda3 100644
                          latest_controller_key_pressed = SDLK_UNKNOWN;
                      }
                  }
-@@ -838,15 +917,30 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
+@@ -838,15 +927,30 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
              }
  
              if (open_config) {
@@ -559,7 +592,7 @@ index 277a421..63ecda3 100644
              ui_state->context->ProcessKeyDown(convert_sdl_to_rml(latest_controller_key_pressed), 0);
              next_repeat_time += repeat_rate;
          }
-@@ -870,7 +964,14 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
+@@ -870,7 +974,14 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
          int height = swap_chain_framebuffer->getHeight();
  
          // Scale the UI based on the window size with 1080 vertical resolution as the reference point.
@@ -1029,6 +1062,87 @@ index 294c371..f9bee82 100644
      void open_install_dialog();
      void mod_toggled(bool enabled);
      void mod_selected(uint32_t mod_index);
+diff --git a/recompui/src/composites/ui_prompt.cpp b/recompui/src/composites/ui_prompt.cpp
+index 56a0b70..fd57e2c 100644
+--- a/recompui/src/composites/ui_prompt.cpp
++++ b/recompui/src/composites/ui_prompt.cpp
+@@ -14,6 +14,8 @@ struct {
+     recompui::Element* prompt_controls;
+     recompui::Button* confirm_button;
+     recompui::Button* cancel_button;
++    recompui::Button* extra_button;   // Android: a third choice (Main Menu on the quit prompt)
++    std::function<void()> extra_action;
+     std::function<void()> confirm_action;
+     std::function<void()> cancel_action;
+     std::mutex mutex;
+@@ -31,6 +33,18 @@ void run_confirm_callback() {
+     recompui::hide_context(prompt_state.ui_context);
+ }
+ 
++void run_extra_callback() {
++    std::function<void()> extra_action;
++    {
++        std::lock_guard lock{ prompt_state.mutex };
++        extra_action = std::move(prompt_state.extra_action);
++    }
++    if (extra_action) {
++        extra_action();
++    }
++    recompui::hide_context(prompt_state.ui_context);
++}
++
+ void run_cancel_callback() {
+     std::function<void()> cancel_action;
+     {
+@@ -115,6 +129,11 @@ void recompui::init_prompt_context() {
+     prompt_state.confirm_button->set_min_width(185.0f, Unit::Dp);
+     prompt_state.confirm_button->add_pressed_callback(run_confirm_callback);
+ 
++    prompt_state.extra_button = context.create_element<Button>(prompt_state.prompt_controls, "", ButtonStyle::Secondary);
++    prompt_state.extra_button->set_min_width(185.0f, Unit::Dp);
++    prompt_state.extra_button->add_pressed_callback(run_extra_callback);
++    prompt_state.extra_button->set_display(Display::None);
++
+     prompt_state.cancel_button = context.create_element<Button>(prompt_state.prompt_controls, "", ButtonStyle::Danger);
+     prompt_state.cancel_button->set_min_width(185.0f, Unit::Dp);
+     prompt_state.cancel_button->add_pressed_callback(run_cancel_callback);
+@@ -166,6 +185,8 @@ void recompui::open_choice_prompt(
+     prompt_state.prompt_controls->set_display(Display::Flex);
+     prompt_state.confirm_button->set_display(Display::Flex);
+     prompt_state.cancel_button->set_display(Display::Flex);
++    prompt_state.extra_button->set_display(Display::None);
++    prompt_state.extra_action = nullptr;
+     prompt_state.confirm_button->set_text(confirm_label_text);
+     prompt_state.cancel_button->set_text(cancel_label_text);
+     prompt_state.confirm_action = confirm_action;
+@@ -202,6 +223,8 @@ void recompui::open_info_prompt(
+     prompt_state.prompt_controls->set_display(Display::Flex);
+     prompt_state.confirm_button->set_display(Display::None);
+     prompt_state.cancel_button->set_display(Display::Flex);
++    prompt_state.extra_button->set_display(Display::None);
++    prompt_state.extra_action = nullptr;
+     prompt_state.cancel_button->set_text(okay_label_text);
+     prompt_state.confirm_action = {};
+     prompt_state.cancel_action = okay_action;
+@@ -263,3 +286,18 @@ bool recompui::is_prompt_open() {
+ 
+ 	return recompui::is_context_shown(prompt_state.ui_context);
+ }
++
++// Adds a third button (between the other two) to the prompt just opened.
++void recompui::set_prompt_extra_button(const std::string& label_text, std::function<void()> action, ButtonStyle variant) {
++    std::lock_guard lock{ prompt_state.mutex };
++    ContextId prev_context = try_close_current_context();
++    prompt_state.ui_context.open();
++    prompt_state.extra_button->set_text(label_text);
++    prompt_state.extra_button->apply_button_style(variant);
++    prompt_state.extra_button->set_display(Display::Flex);
++    prompt_state.extra_action = std::move(action);
++    prompt_state.ui_context.close();
++    if (prev_context != ContextId::null()) {
++        prev_context.open();
++    }
++}
 diff --git a/recompui/src/config/ui_config.cpp b/recompui/src/config/ui_config.cpp
 index 6c84c05..f5dc0b4 100644
 --- a/recompui/src/config/ui_config.cpp

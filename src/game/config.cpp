@@ -390,7 +390,6 @@ extern "C" void dk64_android_set_touch_controls_mode(int mode);
 extern "C" void dk64_android_set_button_icons(int enabled);
 extern "C" int dk64_android_has_second_screen();
 extern "C" void dk64_android_edit_touch_layout();
-extern "C" void dk64_android_restart_to_launcher();
 
 static void add_dual_screen_options(recomp::config::Config &config) {
     using EnumOptionVector = const std::vector<recomp::config::ConfigOptionEnumOption>;
@@ -789,17 +788,11 @@ void dk64::init_config() {
         auto &sound_config = recompui::config::create_sound_tab("Audio");
         add_sound_options(sound_config);
 
-        Entry to_menu; to_menu.kind = Kind::Button; to_menu.text = "Return to Main Menu";
-        to_menu.description = "Restarts the app and opens the main menu, even with Skip Launcher on. "
-            "Save your game first: progress since your last save is lost.";
-        to_menu.on_press = []() { dk64_android_restart_to_launcher(); };
-
         recompui::config::create_layout_tab("Gameplay", "gameplay", {
             option(g, "android_experience"),
             option(g, keys::story_skip),
             option(g, keys::lightning_flashes),
             option(g, keys::skip_launcher),
-            to_menu,
         }, { g });
     }
 
