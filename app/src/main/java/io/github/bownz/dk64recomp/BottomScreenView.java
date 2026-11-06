@@ -93,6 +93,15 @@ public final class BottomScreenView extends View {
 
     private Move running;
     private int selectedKong = -1;   // -1: follow the Kong being played
+
+    /** Looking at another Kong goes back to the one being played after this long. */
+    private static final long LOOK_TIMEOUT_MS = 60_000;
+    private final Runnable lookTimeout = () -> {
+        if (selectedKong != -1) {
+            selectedKong = -1;
+            invalidate();
+        }
+    };
     private boolean active;
 
     private final Runnable poll = new Runnable() {
@@ -2212,6 +2221,10 @@ public final class BottomScreenView extends View {
                 // Tapping the Kong you're playing (or the one already shown) goes back to
                 // following whoever you play as.
                 selectedKong = (current || i == selectedKong) ? -1 : i;
+                removeCallbacks(lookTimeout);
+                if (selectedKong != -1) {
+                    postDelayed(lookTimeout, LOOK_TIMEOUT_MS);
+                }
                 Haptics.tap(this);
                 invalidate();
                 return true;
