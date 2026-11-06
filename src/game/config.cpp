@@ -30,6 +30,27 @@
 #include "apple/rt64_apple.h"
 #endif
 
+#if defined(__ANDROID__)
+#include <atomic>
+#include <jni.h>
+// Read by the on-screen touch controls (TouchInput.nativeUiState).
+static std::atomic<bool> dk64_android_analog_camera{false};
+
+// Bit 1: a menu (the launcher, the menu bar, settings) is taking input, so the touch
+// buttons are hidden and touches go to it. Bit 2: the Analog Camera is selected.
+extern "C" JNIEXPORT jint JNICALL
+Java_io_github_bownz_dk64recomp_TouchInput_nativeUiState(JNIEnv*, jclass) {
+    jint bits = 0;
+    if (recompui::is_context_capturing_input()) {
+        bits |= 1;
+    }
+    if (dk64_android_analog_camera.load()) {
+        bits |= 2;
+    }
+    return bits;
+}
+#endif
+
 static void add_general_options(recomp::config::Config &config) {
     using EnumOptionVector = const std::vector<recomp::config::ConfigOptionEnumOption>;
 
@@ -127,6 +148,13 @@ static void add_general_options(recomp::config::Config &config) {
         camera_type_options,
         dk64::CameraTypeMode::Free
     );
+#if defined(__ANDROID__)
+    // The touch controls show a second (camera) stick while the Analog Camera is selected.
+    config.add_option_change_callback(dk64::configkeys::general::camera_type,
+        [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext) {
+            dk64_android_analog_camera.store(std::get<uint32_t>(cur) == static_cast<uint32_t>(dk64::CameraTypeMode::Analog));
+        });
+#endif
     config.add_number_option(
         dk64::configkeys::general::analog_camera_sensitivity,
         "Analog Camera Sensitivity",
@@ -361,6 +389,7 @@ static void add_gpu_driver_option(recomp::config::Config &config) {
 extern "C" void dk64_android_set_touch_controls_mode(int mode);
 extern "C" void dk64_android_set_button_icons(int enabled);
 extern "C" int dk64_android_has_second_screen();
+extern "C" void dk64_android_edit_touch_layout();
 
 static void add_dual_screen_options(recomp::config::Config &config) {
     using EnumOptionVector = const std::vector<recomp::config::ConfigOptionEnumOption>;
@@ -727,6 +756,11 @@ void dk64::init_config() {
         configure.description = "Choose which button does what on your controller, or pick the Classic or Modern layout.";
         configure.on_press = []() { recompui::config::set_tab(recompui::config::controls::id); };
 
+        Entry edit_touch; edit_touch.kind = Kind::Button; edit_touch.text = "Edit Touch Layout";
+        edit_touch.description = "Move and resize the on-screen buttons. Drag a button to move it, pinch or use - and + to resize it. "
+            "With the Analog Camera selected, this edits the layout with the second stick.";
+        edit_touch.on_press = []() { dk64_android_edit_touch_layout(); };
+
         recompui::config::create_layout_tab("Input", "input", {
             header("Inputs"),
             configure,
@@ -736,6 +770,7 @@ void dk64::init_config() {
             option(d, "android_button_icons"),
             header("Touch"),
             option(d, "android_touch_controls"),
+            edit_touch,
             option(d, "android_bottom_screen"),
             option(d, "android_touch_kong_swap"),
             option(d, "android_touch_feedback"),

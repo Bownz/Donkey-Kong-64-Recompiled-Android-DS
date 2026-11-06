@@ -273,6 +273,11 @@ extern "C" int dk64_android_touch_controls_mode() {
     return value.empty() ? 0 : (value[0] - '0');
 }
 
+// Input > Touch > Edit Touch Layout: the touch controls' layout editor (TouchControllerView).
+extern "C" void dk64_android_edit_touch_layout() {
+    call_activity("editTouchLayout", "()Ljava/lang/String;", nullptr);
+}
+
 extern "C" void dk64_android_set_touch_controls_mode(int mode) {
     const std::string arg = std::to_string(mode);
     call_activity("touchControlsMode", "(Ljava/lang/String;)Ljava/lang/String;", &arg);

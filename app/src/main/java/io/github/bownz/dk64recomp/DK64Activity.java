@@ -459,6 +459,18 @@ public class DK64Activity extends SDLActivity
         return String.valueOf(touchControlsPref());
     }
 
+    /** From native code (Input > Touch > Edit Touch Layout): opens the touch layout editor. */
+    @SuppressWarnings("unused")
+    public String editTouchLayout() {
+        runOnUiThread(() -> {
+            if (overlay != null) {
+                overlay.bringToFront();
+                overlay.startEditing();
+            }
+        });
+        return null;
+    }
+
     private boolean hasPhysicalGamepad() {
         for (int id : InputDevice.getDeviceIds()) {
             InputDevice device = InputDevice.getDevice(id);
