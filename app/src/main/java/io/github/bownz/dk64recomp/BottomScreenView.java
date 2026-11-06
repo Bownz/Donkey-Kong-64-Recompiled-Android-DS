@@ -1806,8 +1806,10 @@ public final class BottomScreenView extends View {
 
     private void drawKongPanel(Canvas c) {
         int tab = displayedKong();
-        // Switching Kongs: the panel grows out of that Kong's barrel.
+        // Switching Kongs: the panel grows out of that Kong's barrel...
         watch("panelTab", tab, "panelOpen");
+        // ...and when you go to another level (DK Isles into Jungle Japes, say).
+        watch("panelLevel", shownLevel(), "panelOpen");
         float open = animProgress("panelOpen", PANEL_OPEN_MS);
         if (open < 0f || tab < 0 || tab >= tabRects.length) {
             drawKongPanelContents(c, tab);
