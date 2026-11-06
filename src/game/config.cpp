@@ -496,6 +496,29 @@ static void add_dual_screen_options(recomp::config::Config &config) {
             }
         });
 
+    // The bottom screen's touch buttons (gun, instrument, oranges, camera, first person...).
+    static const std::string bottom_buttons_option = "android_bottom_buttons";
+    static EnumOptionVector bottom_buttons_options = {
+        {0u, "Off", "Off"},
+        {1u, "On", "On"},
+    };
+    config.add_enum_option(
+        bottom_buttons_option,
+        "Bottom Screen Buttons",
+        "The touch buttons on the bottom screen (oranges, gun, instrument, camera, first person). "
+        "Turn them off to give the Kong barrels and collectibles the whole screen.",
+        bottom_buttons_options,
+        1u,
+        one_screen
+    );
+    config.add_option_change_callback(bottom_buttons_option,
+        [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
+            dk64::android::set_bottom_buttons(std::get<uint32_t>(cur) == 1u);
+            if (context == recomp::config::OptionChangeContext::Permanent) {
+                recompui::config::get_config("dual_screen").save_config();
+            }
+        });
+
     // A little vibration when a touch button is pressed, and how strong it is.
     static const std::string touch_feedback_option = "android_touch_feedback";
     static EnumOptionVector touch_feedback_options = {
@@ -772,6 +795,7 @@ void dk64::init_config() {
             option(d, "android_touch_controls"),
             edit_touch,
             option(d, "android_bottom_screen"),
+            option(d, "android_bottom_buttons"),
             option(d, "android_touch_kong_swap"),
             option(d, "android_touch_feedback"),
             option(d, "android_touch_feedback_strength"),

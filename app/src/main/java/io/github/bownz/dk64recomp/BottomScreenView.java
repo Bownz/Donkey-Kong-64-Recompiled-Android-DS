@@ -93,6 +93,7 @@ public final class BottomScreenView extends View {
 
     private Move running;
     private int selectedKong = -1;   // -1: follow the Kong being played
+    private boolean buttonsShown = true;   // Bottom Screen Buttons (Input > Touch)
 
     /** Looking at another Kong goes back to the one being played after this long. */
     private static final long LOOK_TIMEOUT_MS = 60_000;
@@ -849,24 +850,35 @@ public final class BottomScreenView extends View {
         unit = Math.min(w, h);
         float m = unit * 0.03f;
 
-        // Right column: four action buttons.
-        float colW = Math.min(w * 0.27f, h * 0.27f);
-        float colLeft = w - m - colW;
-        float gap = m * 0.7f;
-        float cellH = (h - 2 * m - 3 * gap) / 4f;
-        for (int i = 0; i < 4; i++) {
-            float top = m + i * (cellH + gap);
-            actionRects[i].set(colLeft, top, w - m, top + cellH);
+        buttonsShown = GameState.bottomButtons();
+        float left = m, right;
+        if (buttonsShown) {
+            // Right column: four action buttons.
+            float colW = Math.min(w * 0.27f, h * 0.27f);
+            float colLeft = w - m - colW;
+            float gap = m * 0.7f;
+            float cellH = (h - 2 * m - 3 * gap) / 4f;
+            for (int i = 0; i < 4; i++) {
+                float top = m + i * (cellH + gap);
+                actionRects[i].set(colLeft, top, w - m, top + cellH);
+            }
+            right = colLeft - m;
+        } else {
+            // Bottom Screen Buttons off: no button column; everything else spreads across.
+            for (RectF r : actionRects) {
+                r.setEmpty();
+            }
+            right = w - m;
         }
 
-        // Left area.
-        float left = m, right = colLeft - m;
+        // Left area (the whole width without the buttons).
         fpR = Math.min(unit * 0.085f, (right - left) * 0.12f);
         fpX = left + fpR;
         fpY = m + fpR;
 
         melonR = fpR * 0.75f;
-        healthX = fpX + fpR + m * 1.8f + melonR;
+        // Without the first-person button the melons start at the left edge.
+        healthX = buttonsShown ? fpX + fpR + m * 1.8f + melonR : left + melonR;
         healthY = fpY;
 
         // Lanky's Orangstand toggle, at the right end of the top row, after up to 3 melons.
@@ -879,7 +891,8 @@ public final class BottomScreenView extends View {
         float carryTop = m + 2 * fpR + m;
         float carryH = unit * 0.1f;
         carryRect.set(left, carryTop, right, carryTop + carryH);
-        float tabH = unit * 0.13f;
+        // Bigger barrels when they have the whole width.
+        float tabH = unit * (buttonsShown ? 0.13f : 0.17f);
         float tabsTop = h - m - tabH;
         float tabGap = m * 0.5f;
         float tabW = (right - left - tabGap * (TAB_COUNT - 1)) / TAB_COUNT;
@@ -931,19 +944,28 @@ public final class BottomScreenView extends View {
             return;
         }
         watch("kong", state.currentKong, "tab" + state.currentKong);
-        drawFirstPersonButton(canvas);
+        if (GameState.bottomButtons() != buttonsShown) {
+            layoutFor(getWidth(), getHeight());   // the setting changed
+        }
+        if (buttonsShown) {
+            drawFirstPersonButton(canvas);
+        }
         drawHealth(canvas);
-        if (showCancel()) {
-            drawCancelButton(canvas);
-        } else if (showOrangstand()) {
-            drawOrangstandButton(canvas);
-        } else if (zbMoveName() != null) {
-            drawZbMoveButton(canvas);
+        if (buttonsShown) {
+            if (showCancel()) {
+                drawCancelButton(canvas);
+            } else if (showOrangstand()) {
+                drawOrangstandButton(canvas);
+            } else if (zbMoveName() != null) {
+                drawZbMoveButton(canvas);
+            }
         }
         drawTabs(canvas);
         drawKongPanel(canvas);
         drawCarrying(canvas);   // after the panel, so its icons can poke out over it
-        drawActions(canvas);
+        if (buttonsShown) {
+            drawActions(canvas);
+        }
     }
 
     /**
@@ -2200,6 +2222,9 @@ public final class BottomScreenView extends View {
         }
 
         float ox = x - osX, oy = y - osY;
+        if (!buttonsShown) {
+            ox = oy = Float.MAX_VALUE / 4;   // no touch buttons: only the Kong barrels
+        }
         if (showCancel() && ox * ox + oy * oy <= osR * osR * 1.3f) {
             cancelAbility();
             return true;
@@ -2213,7 +2238,7 @@ public final class BottomScreenView extends View {
             return true;
         }
         float dx = x - fpX, dy = y - fpY;
-        if (dx * dx + dy * dy <= fpR * fpR * 1.3f) {
+        if (buttonsShown && dx * dx + dy * dy <= fpR * fpR * 1.3f) {
             if (available(Move.FIRST_PERSON)) {
                 perform(Move.FIRST_PERSON);
             }

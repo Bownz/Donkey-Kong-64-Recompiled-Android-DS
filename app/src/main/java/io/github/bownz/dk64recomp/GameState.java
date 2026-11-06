@@ -133,6 +133,16 @@ final class GameState {
     private static native int nativeOverlay();
     private static native boolean nativeFontMetrics(byte[] out);
     private static native int nativeTouchFeedback();
+    private static native boolean nativeBottomButtons();
+
+    /** Bottom Screen Buttons (Input > Touch): false hides the touch buttons. */
+    static boolean bottomButtons() {
+        try {
+            return nativeBottomButtons();
+        } catch (UnsatisfiedLinkError e) {
+            return true;
+        }
+    }
     private static native int nativeDisplayFrameCount();
 
     /** Frames shown on screen (with the Framerate setting's in-between frames), or -1. */
