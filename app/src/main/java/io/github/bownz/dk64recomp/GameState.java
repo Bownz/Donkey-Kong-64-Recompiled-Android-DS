@@ -136,12 +136,12 @@ final class GameState {
     private static native boolean nativeBottomButtons();
     private static native int nativeTagBarrelKong();
     private static native int nativeHeldBananas(int kong, int level);
-    private static native int[] nativeSpriteFrames(int table, int file);
+    private static native int[] nativeSpriteFrames(int table, int file, int width, int height);
 
     /** The texture files of the game's animated sprite that uses this one, or null. */
-    static int[] spriteFrames(int table, int file) {
+    static int[] spriteFrames(int table, int file, int width, int height) {
         try {
-            return nativeSpriteFrames(table, file);
+            return nativeSpriteFrames(table, file, width, height);
         } catch (UnsatisfiedLinkError e) {
             return null;
         }

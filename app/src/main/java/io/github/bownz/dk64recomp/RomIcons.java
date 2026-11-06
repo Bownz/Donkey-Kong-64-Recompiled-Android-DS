@@ -144,6 +144,7 @@ final class RomIcons {
     private static final java.util.List<Animatable> animatable = new java.util.ArrayList<>();
     private static final java.util.Map<Bitmap, Bitmap[]> animations = new java.util.concurrent.ConcurrentHashMap<>();
     private static volatile boolean animationsStarted;
+    private static volatile long retryAt;
 
     private static void animate(Bitmap still, Spec spec, int hue) {
         if (still != null) {
@@ -158,7 +159,8 @@ final class RomIcons {
      * running (its sprite table is set up then). Safe to call repeatedly.
      */
     static void ensureAnimations() {
-        if (animationsStarted || !started || GameState.frameCount() <= 0) {
+        if (animationsStarted || !started || GameState.frameCount() <= 0
+                || android.os.SystemClock.uptimeMillis() < retryAt) {
             return;
         }
         animationsStarted = true;
@@ -175,7 +177,7 @@ final class RomIcons {
                 }
                 for (Animatable a : list) {
                     int table = a.spec.table == TEXTURES_GEOMETRY ? 25 : a.spec.table;
-                    int[] files = GameState.spriteFrames(table, a.spec.file);
+                    int[] files = GameState.spriteFrames(table, a.spec.file, a.spec.width, a.spec.height);
                     if (files == null || files.length < 2) {
                         continue;
                     }
@@ -206,6 +208,11 @@ final class RomIcons {
                 }
             }
             Log.i(TAG, "Bottom screen: " + animated + " animated sprites");
+            if (animated == 0) {
+                // The game may not have its sprites set up yet: try again later.
+                retryAt = android.os.SystemClock.uptimeMillis() + 5000;
+                animationsStarted = false;
+            }
         }, "DK64RomAnimations").start();
     }
 
