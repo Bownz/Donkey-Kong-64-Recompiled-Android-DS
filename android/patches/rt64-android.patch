@@ -370,10 +370,24 @@ index 7de5b69..99c1807 100644
          // Create the semaphore the acquire method will use.
          acquiredSemaphore = ext.device->createCommandSemaphore();
 diff --git a/src/hle/rt64_workload_queue.cpp b/src/hle/rt64_workload_queue.cpp
-index 5a331aa..f050bcf 100644
+index 5a331aa..426eacc 100644
 --- a/src/hle/rt64_workload_queue.cpp
 +++ b/src/hle/rt64_workload_queue.cpp
-@@ -301,6 +301,10 @@ namespace RT64 {
+@@ -188,7 +188,13 @@ namespace RT64 {
+         switch (resolutionMode) {
+         case UserConfiguration::Resolution::WindowIntegerScale:
+             if (ext.sharedResources->swapChainHeight > 0) {
++#           if defined(__ANDROID__)
++                // Android: exactly the screen's height (1080 is 4.5x the N64's 240), not the
++                // next whole multiple (5x, 1200 lines: about 23% more pixels than the screen).
++                resolutionMultiplier = std::max(float(ext.sharedResources->swapChainHeight) / float(referenceHeight), 1.0f);
++#           else
+                 resolutionMultiplier = std::max(float((ext.sharedResources->swapChainHeight + referenceHeight - 1) / referenceHeight), 1.0f);
++#           endif
+             }
+             else {
+                 resolutionMultiplier = 1.0f;
+@@ -301,6 +307,10 @@ namespace RT64 {
          const bool usingMSAA = (targetManager.multisampling.sampleCount > 1);
  
          rendererCPUProfiler.start();
@@ -384,7 +398,7 @@ index 5a331aa..f050bcf 100644
  
          const bool aspectRatioAdjustment = (abs(workloadConfig.aspectRatioScale - 1.0f) > 1e-6f);
          const bool processProjections = aspectRatioAdjustment || prevFrame.matched|| curFrame.isDebuggerCameraEnabled(*this);
-@@ -484,6 +488,10 @@ namespace RT64 {
+@@ -484,6 +494,10 @@ namespace RT64 {
  
                      if (colorTarget != nullptr) {
                          rtWidth = std::max(rtWidth, colorTarget->width);
@@ -395,7 +409,7 @@ index 5a331aa..f050bcf 100644
                          rtHeight = std::max(rtHeight, colorTarget->height);
                          chosenRt = colorTarget;
                      }
-@@ -840,8 +848,15 @@ namespace RT64 {
+@@ -840,8 +854,15 @@ namespace RT64 {
              ext.workloadGraphicsWorker->commandList->writeTimestamp(queryPool.get(), 1);
              ext.workloadGraphicsWorker->commandList->end();
              framebufferRenderer->waitForUploaders();
@@ -411,7 +425,7 @@ index 5a331aa..f050bcf 100644
              workerMutex.unlock();
  
              // Update the GPU profiler with the results from the timestamps of the frame.
-@@ -880,6 +895,7 @@ namespace RT64 {
+@@ -880,6 +901,7 @@ namespace RT64 {
  
      void WorkloadQueue::renderThreadLoop() {
          Thread::setCurrentThreadName("RT64 Workload");
@@ -471,7 +485,7 @@ index 69a82ac..3f7dd70 100644
              if (device != nullptr) {
                  create(device);
 diff --git a/src/render/rt64_framebuffer_renderer.cpp b/src/render/rt64_framebuffer_renderer.cpp
-index 9fae0d4..e6259d6 100644
+index 9fae0d4..75bea66 100644
 --- a/src/render/rt64_framebuffer_renderer.cpp
 +++ b/src/render/rt64_framebuffer_renderer.cpp
 @@ -50,6 +50,17 @@ namespace interop {
@@ -517,7 +531,21 @@ index 9fae0d4..e6259d6 100644
          return true;
      }
      
-@@ -571,6 +592,9 @@ namespace RT64 {
+@@ -554,7 +575,12 @@ namespace RT64 {
+                 const interop::OtherMode otherMode = triangles.shaderDesc.otherMode;
+                 bool depthDecal = (otherMode.zMode() == ZMODE_DEC);
+                 bool depthWrite = otherMode.zUpd();
+-                if (depthDecal) {
++                if (depthDecal && triangles.hardwareDecal) {
++                    // Android: tested by the depth test, so the depth buffer stays a render
++                    // target and the pass carries on.
++                    switchToDepthWrite();
++                }
++                else if (depthDecal) {
+                     switchToDepthRead();
+                 }
+                 else if (!depthDecal && depthWrite) {
+@@ -571,6 +597,9 @@ namespace RT64 {
                      previousPipeline = triangles.pipeline;
                  }
                  
@@ -527,7 +555,7 @@ index 9fae0d4..e6259d6 100644
                  rasterParams.renderIndex = i;
                  rasterParams.screenScale = triangles.screenScale;
                  rasterParams.screenOffset = triangles.screenOffset;
-@@ -1229,6 +1253,9 @@ namespace RT64 {
+@@ -1229,6 +1258,9 @@ namespace RT64 {
      }
  
      void FramebufferRenderer::recordFramebuffer(RenderWorker *worker, uint32_t framebufferIndex) {
@@ -537,6 +565,17 @@ index 9fae0d4..e6259d6 100644
          // Submit all transition barriers first.
          thread_local std::vector<RenderTextureBarrier> startBarriers;
          startBarriers.clear();
+@@ -1608,8 +1640,10 @@ namespace RT64 {
+                         triangles.shaderDesc = call.shaderDesc;
+ 
+                         RasterShader *gpuShader = p.ubershadersOnly ? nullptr : p.rasterShaderCache->getGPUShader(call.shaderDesc);
++                        triangles.hardwareDecal = false;
+                         if (gpuShader != nullptr) {
+                             triangles.pipeline = gpuShader->pipeline.get();
++                            triangles.hardwareDecal = gpuShader->hardwareDecal;
+                         }
+                         else {
+                             const bool copyMode = (call.shaderDesc.otherMode.cycleType() == G_CYC_COPY);
 diff --git a/src/render/rt64_framebuffer_renderer.h b/src/render/rt64_framebuffer_renderer.h
 index 3add9c3..2719258 100644
 --- a/src/render/rt64_framebuffer_renderer.h
@@ -573,6 +612,105 @@ index 3add9c3..2719258 100644
      struct DynamicTextureView {
          const RenderTexture *texture = nullptr;
          uint32_t dstIndex = 0;
+diff --git a/src/render/rt64_framebuffer_renderer_call.h b/src/render/rt64_framebuffer_renderer_call.h
+index f2eee70..b64d898 100644
+--- a/src/render/rt64_framebuffer_renderer_call.h
++++ b/src/render/rt64_framebuffer_renderer_call.h
+@@ -41,6 +41,7 @@ namespace RT64 {
+                 bool vertexTestZ : 1;
+                 bool postBlendDitherNoise : 1;
+                 bool postBlendDitherNoiseNegative : 1;
++                bool hardwareDecal : 1;   // Android: the depth test does the decal check
+             } triangles;
+ 
+             struct {
+diff --git a/src/render/rt64_raster_shader.cpp b/src/render/rt64_raster_shader.cpp
+index 721a01e..badfba3 100644
+--- a/src/render/rt64_raster_shader.cpp
++++ b/src/render/rt64_raster_shader.cpp
+@@ -84,6 +84,17 @@ namespace RT64 {
+ 
+     // RasterShader
+ 
++    bool RasterShader::useHardwareDecal(const ShaderDescription &desc) {
++#   if defined(__ANDROID__)
++        const bool copyMode = (desc.otherMode.cycleType() == G_CYC_COPY);
++        // Only decals that test depth and don't write it (all of DK64's), so nothing else changes.
++        return !copyMode && (desc.otherMode.zMode() == ZMODE_DEC) && desc.otherMode.zCmp() && !desc.otherMode.zUpd();
++#   else
++        (void)(desc);
++        return false;
++#   endif
++    }
++
+     RasterShader::RasterShader(RenderDevice *device, const ShaderDescription &desc, const RenderPipelineLayout *pipelineLayout, RenderShaderFormat shaderFormat, const RenderMultisampling &multisampling, 
+         const ShaderCompiler *shaderCompiler, const OptimizerCacheSPIRV *optimizerCacheSPIRV)
+     {
+@@ -124,7 +135,8 @@ namespace RT64 {
+                 specConstantsSetup = true;
+             }
+             
+-            specConstants[0].values[0] = desc.otherMode.L;
++            // Android hardware decals: the shader doesn't do the decal depth check itself.
++            specConstants[0].values[0] = useHardwareDecal(desc) ? (desc.otherMode.L & ~uint32_t(ZMODE_MASK)) : desc.otherMode.L;
+             specConstants[1].values[0] = desc.otherMode.H;
+             specConstants[2].values[0] = desc.colorCombiner.L;
+             specConstants[3].values[0] = desc.colorCombiner.H;
+@@ -227,7 +239,9 @@ namespace RT64 {
+         creation.pixelShader = pixelShader.get();
+         creation.alphaBlend = !copyMode && interop::Blender::usesAlphaBlend(desc.otherMode);
+         creation.culling = !copyMode && desc.flags.culling;
+-        creation.zCmp = !copyMode && desc.otherMode.zCmp() && (desc.otherMode.zMode() != ZMODE_DEC);
++        hardwareDecal = (shaderFormat == RenderShaderFormat::SPIRV) && useHardwareDecal(desc);
++        creation.hardwareDecal = hardwareDecal;
++        creation.zCmp = !copyMode && desc.otherMode.zCmp() && ((desc.otherMode.zMode() != ZMODE_DEC) || hardwareDecal);
+         creation.zUpd = !copyMode && desc.otherMode.zUpd();
+         creation.cvgAdd = (desc.otherMode.cvgDst() == CVG_DST_WRAP) || (desc.otherMode.cvgDst() == CVG_DST_SAVE);
+         creation.NoN = desc.flags.NoN;
+@@ -315,6 +329,16 @@ namespace RT64 {
+         pipelineDesc.depthClipEnabled = !c.NoN;
+         pipelineDesc.depthEnabled = c.zCmp || c.zUpd;
+         pipelineDesc.depthFunction = c.zCmp ? RenderComparisonFunction::LESS : RenderComparisonFunction::ALWAYS;
++        if (c.hardwareDecal) {
++            // The decal passes where it's at, or within the tolerance in front of, what's
++            // already there: the bias pulls it towards the camera by about the shader's
++            // tolerance (a constant part for the depth's precision and a slope part for the
++            // triangle's depth change across a pixel), capped at the shader's largest one.
++            pipelineDesc.depthFunction = RenderComparisonFunction::LESS_EQUAL;
++            pipelineDesc.depthBias = -1024;
++            pipelineDesc.slopeScaledDepthBias = -2.0f;
++            pipelineDesc.depthBiasClamp = -0.0005f;
++        }
+         pipelineDesc.depthWriteEnabled = c.zUpd;
+         pipelineDesc.depthTargetFormat = RenderFormat::D32_FLOAT;
+         pipelineDesc.multisampling = c.multisampling;
+diff --git a/src/render/rt64_raster_shader.h b/src/render/rt64_raster_shader.h
+index 3b991ff..2829369 100644
+--- a/src/render/rt64_raster_shader.h
++++ b/src/render/rt64_raster_shader.h
+@@ -51,6 +51,7 @@ namespace RT64 {
+         bool zUpd;
+         bool cvgAdd;
+         bool usesHDR;
++        bool hardwareDecal = false;   // Android: decal by the depth test (see RasterShader)
+         std::vector<RenderSpecConstant> specConstants;
+         RenderMultisampling multisampling;
+     };
+@@ -65,6 +66,14 @@ namespace RT64 {
+         RenderDevice *device;
+         std::unique_ptr<RenderPipeline> pipeline;
+ 
++        // Android (tile-based GPUs): decals (ZMODE_DEC) are tested by the depth test against
++        // the depth buffer, pulled towards the camera by a bias for the decal tolerance, instead
++        // of the pixel shader reading the depth buffer. Reading it means ending the render pass
++        // (the whole colour and depth targets go to memory and back) every time a decal follows
++        // a draw that wrote depth: about 50 times a frame in busy DK64 scenes.
++        bool hardwareDecal = false;
++        static bool useHardwareDecal(const ShaderDescription &desc);
++
+         RasterShader(RenderDevice *device, const ShaderDescription &desc, const RenderPipelineLayout *pipelineLayout, RenderShaderFormat shaderFormat, const RenderMultisampling &multisampling, 
+             const ShaderCompiler *shaderCompiler, const OptimizerCacheSPIRV *optimizerCacheSPIRV);
+ 
 diff --git a/src/render/rt64_shader_library.cpp b/src/render/rt64_shader_library.cpp
 index d1c5273..0f14d91 100644
 --- a/src/render/rt64_shader_library.cpp
