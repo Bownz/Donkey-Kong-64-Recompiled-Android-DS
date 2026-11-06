@@ -124,7 +124,7 @@ index 7006549..cec813b 100644
              return nullptr;
          }
 diff --git a/src/hle/rt64_application.cpp b/src/hle/rt64_application.cpp
-index ee8bc1f..2545d4d 100644
+index ee8bc1f..b5414ec 100644
 --- a/src/hle/rt64_application.cpp
 +++ b/src/hle/rt64_application.cpp
 @@ -18,11 +18,13 @@
@@ -165,7 +165,7 @@ index ee8bc1f..2545d4d 100644
          swapChainDesc.textureCount = (userConfig.displayBuffering == UserConfiguration::DisplayBuffering::Triple) ? 3 : 2;
  
          // Enable present wait if supported by the device. We specify a max latency of 1 as we use it to wait right before the next
-@@ -522,6 +530,19 @@ namespace RT64 {
+@@ -522,6 +530,34 @@ namespace RT64 {
          appWindow->sdlCheckFilterInstallation();
          screenApiProfiler.logAndRestart();
          state->updateScreen(core.decodeVI(), false);
@@ -179,6 +179,21 @@ index ee8bc1f..2545d4d 100644
 +            fprintf(stdout, "Perf: game frame %.1f ms (DL interval), DL parse %.1f ms, workload %.1f ms, renderer CPU %.1f ms, GPU %.1f ms, present %.1f ms\n",
 +                dlApiProfiler.average(), state->dlCpuProfiler.average(), workloadQueue->workloadProfiler.average(),
 +                workloadQueue->rendererCPUProfiler.average(), workloadQueue->rendererGPUProfiler.average(), presentQueue->presentProfiler.average());
++            // Per rendered frame (game frames and in-between ones) over the last 5 seconds.
++            const uint64_t renders = AndroidRenderStats::renders.exchange(0);
++            const uint64_t passes = AndroidRenderStats::passes.exchange(0);
++            const uint64_t depthSwitches = AndroidRenderStats::depthSwitches.exchange(0);
++            const uint64_t draws = AndroidRenderStats::draws.exchange(0);
++            const uint64_t recordMicros = AndroidRenderStats::recordMicros.exchange(0);
++            const uint64_t waitMicros = AndroidRenderStats::waitMicros.exchange(0);
++            if (renders > 0) {
++                const double n = double(renders);
++                const UserConfiguration &config = sharedQueueResources->userConfig;
++                fprintf(stdout, "Perf frames: %.1f rendered/s, target %ux%u, %.1f passes, %.1f depth switches, %.0f draws, record %.1f ms, GPU wait %.1f ms per frame; framerate mode %d (target %d), resolution mode %d (x%.1f)\n",
++                    n / 5.0, AndroidRenderStats::targetWidth.load(), AndroidRenderStats::targetHeight.load(),
++                    double(passes) / n, double(depthSwitches) / n, double(draws) / n, double(recordMicros) / n / 1000.0, double(waitMicros) / n / 1000.0,
++                    int(config.refreshRate), config.refreshRateTarget, int(config.resolution), config.resolutionMultiplier);
++            }
 +            fflush(stdout);
 +        }
 +#   endif
@@ -355,10 +370,48 @@ index 7de5b69..99c1807 100644
          // Create the semaphore the acquire method will use.
          acquiredSemaphore = ext.device->createCommandSemaphore();
 diff --git a/src/hle/rt64_workload_queue.cpp b/src/hle/rt64_workload_queue.cpp
-index 5a331aa..3a76e8e 100644
+index 5a331aa..f050bcf 100644
 --- a/src/hle/rt64_workload_queue.cpp
 +++ b/src/hle/rt64_workload_queue.cpp
-@@ -880,6 +880,7 @@ namespace RT64 {
+@@ -301,6 +301,10 @@ namespace RT64 {
+         const bool usingMSAA = (targetManager.multisampling.sampleCount > 1);
+ 
+         rendererCPUProfiler.start();
++#   if defined(__ANDROID__)
++        ElapsedTimer androidRecordTimer;
++        AndroidRenderStats::renders.fetch_add(1, std::memory_order_relaxed);
++#   endif
+ 
+         const bool aspectRatioAdjustment = (abs(workloadConfig.aspectRatioScale - 1.0f) > 1e-6f);
+         const bool processProjections = aspectRatioAdjustment || prevFrame.matched|| curFrame.isDebuggerCameraEnabled(*this);
+@@ -484,6 +488,10 @@ namespace RT64 {
+ 
+                     if (colorTarget != nullptr) {
+                         rtWidth = std::max(rtWidth, colorTarget->width);
++#                   if defined(__ANDROID__)
++                        AndroidRenderStats::targetWidth.store(colorTarget->width, std::memory_order_relaxed);
++                        AndroidRenderStats::targetHeight.store(colorTarget->height, std::memory_order_relaxed);
++#                   endif
+                         rtHeight = std::max(rtHeight, colorTarget->height);
+                         chosenRt = colorTarget;
+                     }
+@@ -840,8 +848,15 @@ namespace RT64 {
+             ext.workloadGraphicsWorker->commandList->writeTimestamp(queryPool.get(), 1);
+             ext.workloadGraphicsWorker->commandList->end();
+             framebufferRenderer->waitForUploaders();
++#       if defined(__ANDROID__)
++            AndroidRenderStats::recordMicros.fetch_add(uint64_t(androidRecordTimer.elapsedMicroseconds()), std::memory_order_relaxed);
++            ElapsedTimer androidWaitTimer;
++#       endif
+             ext.workloadGraphicsWorker->execute();
+             ext.workloadGraphicsWorker->wait();
++#       if defined(__ANDROID__)
++            AndroidRenderStats::waitMicros.fetch_add(uint64_t(androidWaitTimer.elapsedMicroseconds()), std::memory_order_relaxed);
++#       endif
+             workerMutex.unlock();
+ 
+             // Update the GPU profiler with the results from the timestamps of the frame.
+@@ -880,6 +895,7 @@ namespace RT64 {
  
      void WorkloadQueue::renderThreadLoop() {
          Thread::setCurrentThreadName("RT64 Workload");
@@ -418,10 +471,28 @@ index 69a82ac..3f7dd70 100644
              if (device != nullptr) {
                  create(device);
 diff --git a/src/render/rt64_framebuffer_renderer.cpp b/src/render/rt64_framebuffer_renderer.cpp
-index 9fae0d4..67deaa7 100644
+index 9fae0d4..e6259d6 100644
 --- a/src/render/rt64_framebuffer_renderer.cpp
 +++ b/src/render/rt64_framebuffer_renderer.cpp
-@@ -312,7 +312,14 @@ namespace RT64 {
+@@ -50,6 +50,17 @@ namespace interop {
+ };
+ 
+ namespace RT64 {
++#if defined(__ANDROID__)
++    std::atomic<uint64_t> AndroidRenderStats::renders{ 0 };
++    std::atomic<uint64_t> AndroidRenderStats::passes{ 0 };
++    std::atomic<uint64_t> AndroidRenderStats::depthSwitches{ 0 };
++    std::atomic<uint64_t> AndroidRenderStats::draws{ 0 };
++    std::atomic<uint64_t> AndroidRenderStats::recordMicros{ 0 };
++    std::atomic<uint64_t> AndroidRenderStats::waitMicros{ 0 };
++    std::atomic<uint32_t> AndroidRenderStats::targetWidth{ 0 };
++    std::atomic<uint32_t> AndroidRenderStats::targetHeight{ 0 };
++#endif
++
+     // Helper functions.
+     
+     RenderRect convertFixedRect(FixedRect rect, hlslpp::float2 resScale, int32_t fbWidth, float aspectRatioScale, float extOriginPercentage, int32_t horizontalMisalignment, uint16_t leftOrigin, uint16_t rightOrigin) {
+@@ -312,7 +323,14 @@ namespace RT64 {
          
          const bool createSet = (descTextureSet == nullptr) || (descTextureSet->textureCacheSize < (textureCacheSize + 1));
          if (createSet) {
@@ -436,6 +507,72 @@ index 9fae0d4..67deaa7 100644
          }
  
          if (createSet || (descriptorTextureReplacementMapEnabled != textureCacheReplacementMapEnabled)) {
+@@ -462,6 +480,9 @@ namespace RT64 {
+         worker->commandList->barriers(RenderBarrierStage::GRAPHICS, RenderTextureBarrier(fbStorage->depthTarget->texture.get(), readOnly ? depthReadState : RenderTextureLayout::DEPTH_WRITE));
+         worker->commandList->setFramebuffer(renderFramebuffer);
+         depthState = readOnly;
++#   if defined(__ANDROID__)
++        AndroidRenderStats::depthSwitches.fetch_add(1, std::memory_order_relaxed);
++#   endif
+         return true;
+     }
+     
+@@ -571,6 +592,9 @@ namespace RT64 {
+                     previousPipeline = triangles.pipeline;
+                 }
+                 
++#           if defined(__ANDROID__)
++                AndroidRenderStats::draws.fetch_add(1, std::memory_order_relaxed);
++#           endif
+                 rasterParams.renderIndex = i;
+                 rasterParams.screenScale = triangles.screenScale;
+                 rasterParams.screenOffset = triangles.screenOffset;
+@@ -1229,6 +1253,9 @@ namespace RT64 {
+     }
+ 
+     void FramebufferRenderer::recordFramebuffer(RenderWorker *worker, uint32_t framebufferIndex) {
++#   if defined(__ANDROID__)
++        AndroidRenderStats::passes.fetch_add(1, std::memory_order_relaxed);
++#   endif
+         // Submit all transition barriers first.
+         thread_local std::vector<RenderTextureBarrier> startBarriers;
+         startBarriers.clear();
+diff --git a/src/render/rt64_framebuffer_renderer.h b/src/render/rt64_framebuffer_renderer.h
+index 3add9c3..2719258 100644
+--- a/src/render/rt64_framebuffer_renderer.h
++++ b/src/render/rt64_framebuffer_renderer.h
+@@ -4,6 +4,8 @@
+ 
+ #pragma once
+ 
++#include <atomic>
++
+ #include <stdint.h>
+ 
+ #include "common/rt64_emulator_configuration.h"
+@@ -30,6 +32,22 @@
+ #endif
+ 
+ namespace RT64 {
++#if defined(__ANDROID__)
++    // Android performance log: what each rendered frame costs on a tile-based GPU. Every
++    // render pass break (a framebuffer pass, or a switch between writing and reading depth for
++    // decals) stores the whole colour and depth targets to memory and loads them back.
++    struct AndroidRenderStats {
++        static std::atomic<uint64_t> renders;        // frames rendered (game + in-between)
++        static std::atomic<uint64_t> passes;         // framebuffer passes recorded
++        static std::atomic<uint64_t> depthSwitches;  // depth write <-> read (decal) switches
++        static std::atomic<uint64_t> draws;          // triangle / rect draws
++        static std::atomic<uint64_t> recordMicros;   // CPU time recording, before the GPU wait
++        static std::atomic<uint64_t> waitMicros;     // time waiting for the GPU
++        static std::atomic<uint32_t> targetWidth;    // the last target's size, in pixels
++        static std::atomic<uint32_t> targetHeight;
++    };
++#endif
++
+     struct DynamicTextureView {
+         const RenderTexture *texture = nullptr;
+         uint32_t dstIndex = 0;
 diff --git a/src/render/rt64_shader_library.cpp b/src/render/rt64_shader_library.cpp
 index d1c5273..0f14d91 100644
 --- a/src/render/rt64_shader_library.cpp
