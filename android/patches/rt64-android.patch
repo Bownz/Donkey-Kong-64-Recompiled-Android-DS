@@ -414,7 +414,7 @@ index 7de5b69..99c1807 100644
          // Create the semaphore the acquire method will use.
          acquiredSemaphore = ext.device->createCommandSemaphore();
 diff --git a/src/hle/rt64_workload_queue.cpp b/src/hle/rt64_workload_queue.cpp
-index 5a331aa..6326083 100644
+index 5a331aa..6d7a371 100644
 --- a/src/hle/rt64_workload_queue.cpp
 +++ b/src/hle/rt64_workload_queue.cpp
 @@ -11,6 +11,76 @@
@@ -623,6 +623,27 @@ index 5a331aa..6326083 100644
  
          WorkloadConfiguration workloadConfig;
          int64_t logicalTicks = 0;
+@@ -1070,7 +1197,19 @@ namespace RT64 {
+                         const int64_t currentTimeMicro = workloadTimer.elapsedMicroseconds() - setupTimeMicro;
+                         const int64_t expectedTimeMicro = frame * maxTimePerFrameMicro;
+                         const int64_t measuredFrameMicro = renderTimeTotalMicro / framesRendered;
+-                        if ((currentTimeMicro > expectedTimeMicro) || ((currentTimeMicro + measuredFrameMicro) > adjustedTimeWindowMicro)) {
++#                   if defined(__ANDROID__)
++                        // Android: only skip an in-between frame once rendering is a whole frame
++                        // behind. Skipping as soon as a frame runs a little late halves the GPU's
++                        // load, so the phone's GPU governor lowers its clock, frames get slower
++                        // still and the game stays stuck at 30 FPS. Rendering it anyway keeps the
++                        // GPU busy enough to stay clocked up. (A new game frame waiting still
++                        // skips the rest below.)
++                        const bool skipFrame = (currentTimeMicro > (expectedTimeMicro + maxTimePerFrameMicro));
++                        (void)measuredFrameMicro;
++#                   else
++                        const bool skipFrame = (currentTimeMicro > expectedTimeMicro) || ((currentTimeMicro + measuredFrameMicro) > adjustedTimeWindowMicro);
++#                   endif
++                        if (skipFrame) {
+                             displayTicks += workload.viOriginalRate;
+                             skippedFrames = true;
+                             continue;
 diff --git a/src/render/rt64_descriptor_sets.h b/src/render/rt64_descriptor_sets.h
 index 69a82ac..3f7dd70 100644
 --- a/src/render/rt64_descriptor_sets.h
