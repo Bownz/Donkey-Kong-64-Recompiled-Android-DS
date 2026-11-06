@@ -979,6 +979,11 @@ extern "C" void dk64_android_apply_experience(int modern) {
         static_cast<uint32_t>(modern ? ultramodern::renderer::Resolution::Auto : ultramodern::renderer::Resolution::Original));
     graphics.update_option_value(recompui::config::graphics::options::msaa_option,
         static_cast<uint32_t>(modern ? ultramodern::renderer::Antialiasing::MSAA2X : ultramodern::renderer::Antialiasing::None));
+    // Classic keeps the N64's 4:3 picture and HUD; Modern fills a widescreen.
+    graphics.update_option_value(recompui::config::graphics::options::ar_option,
+        static_cast<uint32_t>(modern ? ultramodern::renderer::AspectRatio::Expand : ultramodern::renderer::AspectRatio::Original));
+    graphics.update_option_value(recompui::config::graphics::options::hr_option,
+        static_cast<uint32_t>(modern ? ultramodern::renderer::HUDRatioMode::Clamp16x9 : ultramodern::renderer::HUDRatioMode::Original));
     graphics.save_config();
 
     recomp::mods::enable_mod("dk64_tag_anywhere", modern != 0);
