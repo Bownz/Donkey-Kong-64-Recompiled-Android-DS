@@ -925,10 +925,35 @@ public final class BottomScreenView extends View {
     // Drawing
     // ------------------------------------------------------------------------------
 
+    // Cutscenes: the bottom screen dims down (and back up afterwards) so it doesn't draw the
+    // eye while there's nothing on it.
+    private static final float CUTSCENE_DIM = 0.72f;     // how dark, 0-1
+    private static final float DIM_FADE_MS = 700f;
+    private float dim = 0f;
+    private long dimTime = 0;
+
+    private void drawDim(Canvas canvas) {
+        long now = android.os.SystemClock.uptimeMillis();
+        float dt = dimTime == 0 ? 0f : Math.min(100f, now - dimTime);
+        dimTime = now;
+        float target = state.inGame() && state.cutscene && !state.paused ? 1f : 0f;
+        if (dim != target) {
+            float step = dt / DIM_FADE_MS;
+            dim = target > dim ? Math.min(target, dim + step) : Math.max(target, dim - step);
+            animating = true;
+        }
+        if (dim > 0f) {
+            // Ease in and out.
+            float e = dim * dim * (3f - 2f * dim);
+            canvas.drawColor(Color.argb(Math.round(255 * CUTSCENE_DIM * e), 0, 0, 0));
+        }
+    }
+
     @Override
     protected void onDraw(Canvas canvas) {
         animating = false;
         drawContent(canvas);
+        drawDim(canvas);
         if (animating) {
             postInvalidateOnAnimation();
         } else if (titleIdle || (state.inGame() && !state.paused && !state.cutscene)) {
