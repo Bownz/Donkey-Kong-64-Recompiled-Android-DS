@@ -14,16 +14,16 @@ AYN Thor: the game on the top screen, the companion on the bottom.
 
 <table>
   <tr>
-    <td align="center"><img src="docs/screenshots/thor-gameplay.png" width="400" alt="Gameplay in Jungle Japes with DK's collectibles on the bottom screen"><br>Jungle Japes, with DK's collectibles below</td>
     <td align="center"><img src="docs/screenshots/thor-launcher.png" width="400" alt="The main menu"><br>The main menu</td>
+    <td align="center"><img src="docs/screenshots/thor-gameplay.png" width="400" alt="Gameplay in Jungle Japes with DK's collectibles on the bottom screen"><br>Jungle Japes, with DK's collectibles below</td>
   </tr>
   <tr>
+    <td align="center"><img src="docs/screenshots/thor-diddy.png" width="400" alt="Interactive Touch Controls"><br>Interactive Touch Controls</td>
     <td align="center"><img src="docs/screenshots/thor-pause.png" width="400" alt="Pause menu with the controller's button icons and every Kong's progress on the bottom screen"><br>Paused: controller button icons, every Kong's progress below</td>
-    <td align="center"><img src="docs/screenshots/thor-configure.png" width="400" alt="Configure Inputs with the detected controller"><br>Configure Inputs, with the detected controller</td>
   </tr>
   <tr>
     <td align="center"><img src="docs/screenshots/thor-settings.png" width="400" alt="Settings, Input tab"><br>Settings: Video, Input, Audio, Gameplay</td>
-    <td align="center"><img src="docs/screenshots/thor-diddy.png" width="400" alt="Playing as Diddy"><br>Playing as Diddy</td>
+    <td align="center"><img src="docs/screenshots/thor-configure.png" width="400" alt="Configure Inputs with the detected controller"><br>Configure Inputs, with the detected controller</td>
   </tr>
 </table>
 
