@@ -124,7 +124,7 @@ index 7006549..cec813b 100644
              return nullptr;
          }
 diff --git a/src/hle/rt64_application.cpp b/src/hle/rt64_application.cpp
-index ee8bc1f..e81274c 100644
+index ee8bc1f..7ba0991 100644
 --- a/src/hle/rt64_application.cpp
 +++ b/src/hle/rt64_application.cpp
 @@ -18,11 +18,13 @@
@@ -165,7 +165,15 @@ index ee8bc1f..e81274c 100644
          swapChainDesc.textureCount = (userConfig.displayBuffering == UserConfiguration::DisplayBuffering::Triple) ? 3 : 2;
  
          // Enable present wait if supported by the device. We specify a max latency of 1 as we use it to wait right before the next
-@@ -522,6 +530,46 @@ namespace RT64 {
+@@ -441,6 +449,7 @@ namespace RT64 {
+         stateExt.device = device.get();
+         stateExt.swapChain = swapChain.get();
+         stateExt.framebufferGraphicsWorker = framebufferGraphicsWorker.get();
++        stateExt.workloadGraphicsWorker = workloadGraphicsWorker.get();
+         stateExt.shaderLibrary = shaderLibrary.get();
+         stateExt.drawDataUploader = drawDataUploader.get();
+         stateExt.transformsUploader = transformsUploader.get();
+@@ -522,6 +531,46 @@ namespace RT64 {
          appWindow->sdlCheckFilterInstallation();
          screenApiProfiler.logAndRestart();
          state->updateScreen(core.decodeVI(), false);
@@ -421,10 +429,18 @@ index 7de5b69..99c1807 100644
          // Create the semaphore the acquire method will use.
          acquiredSemaphore = ext.device->createCommandSemaphore();
 diff --git a/src/hle/rt64_state.cpp b/src/hle/rt64_state.cpp
-index 2970e71..a3dc955 100644
+index 2970e71..beeff1f 100644
 --- a/src/hle/rt64_state.cpp
 +++ b/src/hle/rt64_state.cpp
-@@ -1310,7 +1310,7 @@ namespace RT64 {
+@@ -1237,6 +1237,7 @@ namespace RT64 {
+             uint32_t framebufferIndex = 0;
+             auto renderSetup = [&]() {
+                 scratchFbChangePool.reset();
++                ext.framebufferGraphicsWorker->flushPendingWait();
+                 ext.framebufferGraphicsWorker->commandList->begin();
+                 framebufferManager.resetOperations();
+                 framebufferRenderer->resetFramebuffers(ext.framebufferGraphicsWorker, false, workload.extended.ditherNoiseStrength, renderTargetManager.multisampling);
+@@ -1310,7 +1311,7 @@ namespace RT64 {
                  }
  
                  // Synchronize all texture uploads before filling out the GPU tiles and update the texture cache on the framebuffer renderer.
@@ -433,7 +449,7 @@ index 2970e71..a3dc955 100644
                  framebufferRenderer->updateTextureCache(ext.textureCache);
  
                  thread_local std::vector<BufferUploader *> bufferUploaders;
-@@ -1469,9 +1469,8 @@ namespace RT64 {
+@@ -1469,9 +1470,8 @@ namespace RT64 {
                  }
  
                  ext.framebufferGraphicsWorker->commandList->end();
@@ -445,7 +461,15 @@ index 2970e71..a3dc955 100644
  
                  pairCursor = framebufferPairCursor;
                  while (pairCursor < maxFramebufferPair) {
-@@ -1578,11 +1577,9 @@ namespace RT64 {
+@@ -1570,6 +1570,7 @@ namespace RT64 {
+             }
+ 
+             // Do not render anything, just wait for the data to be uploaded.
++            ext.framebufferGraphicsWorker->flushPendingWait();
+             ext.framebufferGraphicsWorker->commandList->begin();
+             ext.drawDataUploader->commandListBeforeBarriers(ext.framebufferGraphicsWorker);
+             ext.transformsUploader->commandListBeforeBarriers(ext.framebufferGraphicsWorker);
+@@ -1578,11 +1579,28 @@ namespace RT64 {
              ext.drawDataUploader->commandListAfterBarriers(ext.framebufferGraphicsWorker);
              ext.transformsUploader->commandListAfterBarriers(ext.framebufferGraphicsWorker);
              ext.framebufferGraphicsWorker->commandList->end();
@@ -455,12 +479,31 @@ index 2970e71..a3dc955 100644
 -            ext.framebufferGraphicsWorker->wait();
 -            ext.textureCache->waitForGPUUploads();
 +            RT64_ANDROID_TIME(dlWaitUploaders, ext.drawDataUploader->wait(); ext.transformsUploader->wait());
-+            RT64_ANDROID_TIME(dlWaitFbWorker, ext.framebufferGraphicsWorker->execute(); ext.framebufferGraphicsWorker->wait());
++#       if defined(__ANDROID__)
++            // Android: the copies go to this workload's own buffers, and the workload's draws are
++            // submitted to the same GPU queue afterwards, so the GPU runs them in order; there's
++            // no need for the game to wait here (behind the frames the GPU is still drawing).
++            // The wait happens when this worker is next used, by which time it's long done.
++            static const bool deferUploadWait = (ext.workloadGraphicsWorker != nullptr) && ext.framebufferGraphicsWorker->sharesQueueWith(*ext.workloadGraphicsWorker);
++            static bool loggedDefer = false;
++            if (!loggedDefer) {
++                loggedDefer = true;
++                fprintf(stdout, "Display list uploads: %s\n", deferUploadWait ? "not waited for (same GPU queue as the renderer)" : "waited for (different GPU queue from the renderer)");
++                fflush(stdout);
++            }
++            if (deferUploadWait) {
++                RT64_ANDROID_TIME(dlWaitFbWorker, ext.framebufferGraphicsWorker->executeDeferred());
++            }
++            else
++#       endif
++            {
++                RT64_ANDROID_TIME(dlWaitFbWorker, ext.framebufferGraphicsWorker->execute(); ext.framebufferGraphicsWorker->wait());
++            }
 +            RT64_ANDROID_TIME(dlWaitUploads, ext.textureCache->waitForGPUUploads());
          }
  
          // Evict from the texture cache that are too old and should no longer be maintained.
-@@ -1624,6 +1621,9 @@ namespace RT64 {
+@@ -1624,6 +1642,9 @@ namespace RT64 {
          }
  
          // Log and reset profilers.
@@ -470,6 +513,18 @@ index 2970e71..a3dc955 100644
          dlCpuProfiler.end();
          dlCpuProfiler.log();
          screenCpuProfiler.log();
+diff --git a/src/hle/rt64_state.h b/src/hle/rt64_state.h
+index 7a8c13b..9e98b4b 100644
+--- a/src/hle/rt64_state.h
++++ b/src/hle/rt64_state.h
+@@ -46,6 +46,7 @@ namespace RT64 {
+             RenderDevice *device;
+             RenderSwapChain *swapChain;
+             RenderWorker *framebufferGraphicsWorker;
++            RenderWorker *workloadGraphicsWorker = nullptr; // Android: to check it shares the framebuffer worker's GPU queue.
+             ShaderLibrary *shaderLibrary;
+             BufferUploader *drawDataUploader;
+             BufferUploader *transformsUploader;
 diff --git a/src/hle/rt64_workload_queue.cpp b/src/hle/rt64_workload_queue.cpp
 index 5a331aa..6d7a371 100644
 --- a/src/hle/rt64_workload_queue.cpp
@@ -1035,6 +1090,97 @@ index 3b991ff..2829369 100644
          RasterShader(RenderDevice *device, const ShaderDescription &desc, const RenderPipelineLayout *pipelineLayout, RenderShaderFormat shaderFormat, const RenderMultisampling &multisampling, 
              const ShaderCompiler *shaderCompiler, const OptimizerCacheSPIRV *optimizerCacheSPIRV);
  
+diff --git a/src/render/rt64_render_worker.cpp b/src/render/rt64_render_worker.cpp
+index 0250645..34bc797 100644
+--- a/src/render/rt64_render_worker.cpp
++++ b/src/render/rt64_render_worker.cpp
+@@ -4,6 +4,10 @@
+ 
+ #include "rt64_render_worker.h"
+ 
++#if defined(__ANDROID__)
++#   include "plume_vulkan.h"
++#endif
++
+ namespace RT64 {
+     // RenderWorker
+ 
+@@ -26,6 +30,28 @@ namespace RT64 {
+ 
+     void RenderWorker::wait() {
+         commandQueue->waitForCommandFence(commandFence.get());
++        pendingWait.store(false, std::memory_order_relaxed);
++    }
++
++    void RenderWorker::executeDeferred() {
++        execute();
++        pendingWait.store(true, std::memory_order_relaxed);
++    }
++
++    void RenderWorker::flushPendingWait() {
++        if (pendingWait.exchange(false, std::memory_order_relaxed)) {
++            commandQueue->waitForCommandFence(commandFence.get());
++        }
++    }
++
++    bool RenderWorker::sharesQueueWith(const RenderWorker &other) const {
++#   if defined(__ANDROID__)
++        const auto *a = static_cast<const plume::VulkanCommandQueue *>(commandQueue.get());
++        const auto *b = static_cast<const plume::VulkanCommandQueue *>(other.commandQueue.get());
++        return (a->queue != nullptr) && (a->queue == b->queue);
++#   else
++        return false;
++#   endif
+     }
+ 
+     // RenderWorkerExecution
+@@ -34,6 +60,7 @@ namespace RT64 {
+         assert(worker != nullptr);
+ 
+         this->worker = worker;
++        worker->flushPendingWait();
+         worker->commandList->begin();
+     }
+ 
+diff --git a/src/render/rt64_render_worker.h b/src/render/rt64_render_worker.h
+index 85d12ee..1d6381c 100644
+--- a/src/render/rt64_render_worker.h
++++ b/src/render/rt64_render_worker.h
+@@ -4,6 +4,8 @@
+ 
+ #pragma once
+ 
++#include <atomic>
++
+ #include "common/rt64_plume.h"
+ 
+ namespace RT64 {
+@@ -14,10 +16,25 @@ namespace RT64 {
+         std::unique_ptr<RenderCommandList> commandList;
+         std::unique_ptr<RenderCommandFence> commandFence;
+ 
++        // Android: an execution whose wait was put off until this worker is next used
++        // (see executeDeferred).
++        std::atomic<bool> pendingWait{ false };
++
+         RenderWorker(RenderDevice *device, const std::string &name, RenderCommandListType commandListType);
+         ~RenderWorker();
+         void execute();
+         void wait();
++
++        // Submits the command list and waits for it only when the worker is next used (by
++        // flushPendingWait, wait or a RenderWorkerExecution), so the CPU doesn't stall while
++        // the GPU is still busy with earlier work. Only safe when whatever reads the results
++        // is submitted to the same GPU queue afterwards (see sharesQueueWith), which keeps
++        // them in order on the GPU.
++        void executeDeferred();
++        void flushPendingWait();
++
++        // True when both workers submit to the same hardware queue.
++        bool sharesQueueWith(const RenderWorker &other) const;
+     };
+ 
+     // RAII convenience class for aiding opening, closing and execution of command lists inside a scope.
 diff --git a/src/render/rt64_shader_library.cpp b/src/render/rt64_shader_library.cpp
 index d1c5273..0f14d91 100644
 --- a/src/render/rt64_shader_library.cpp
