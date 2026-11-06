@@ -150,6 +150,13 @@ public class DK64Activity extends SDLActivity
                 fpsView.setVisibility(View.GONE);
                 fpsLastFrames = -1;
                 fpsLastShown = -1;
+            } else if ((TouchInput.uiState() & 1) != 0) {
+                // A menu (menu bar, settings, launcher) is open: the counter sits above the
+                // game's own drawing, so it would cover the menu. Hidden until it closes.
+                fpsView.setVisibility(View.GONE);
+                fpsLastFrames = frames;
+                fpsLastShown = displayed;
+                fpsLastTime = now;
             } else {
                 if (fpsLastFrames >= 0 && now > fpsLastTime && frames >= fpsLastFrames) {
                     float fps = (frames - fpsLastFrames) * 1000f / (now - fpsLastTime);
