@@ -881,6 +881,86 @@ index c312734..2917814 100644
          }
  
          ~CurlSession()
+diff --git a/recompui/src/composites/ui_mod_menu.cpp b/recompui/src/composites/ui_mod_menu.cpp
+index 39a7abc..7d403fe 100644
+--- a/recompui/src/composites/ui_mod_menu.cpp
++++ b/recompui/src/composites/ui_mod_menu.cpp
+@@ -9,6 +9,7 @@
+ #include "config/ui_config_page_options_menu.h"
+ 
+ #include "librecomp/mods.hpp"
++#include "ultramodern/ultramodern.hpp"
+ 
+ #include <string>
+ 
+@@ -287,6 +288,39 @@ void ModMenu::refresh_mods(bool scan_mods) {
+     create_mod_list();
+ }
+ 
++void ModMenu::remove_selected_mod() {
++    if (active_mod_index < 0 || active_mod_index >= static_cast<int32_t>(mod_details.size())) {
++        recompui::open_info_prompt("Remove Mod", "Select a mod in the list first.", "OK", []() {});
++        return;
++    }
++    if (ultramodern::is_game_started()) {
++        recompui::open_info_prompt("Remove Mod", "Mods can be removed from the main menu, before the game starts.", "OK", []() {});
++        return;
++    }
++    const std::string mod_id = mod_details[active_mod_index].mod_id;
++    const std::string name = mod_details[active_mod_index].display_name;
++    recompui::open_choice_prompt(
++        "Remove " + name + "?",
++        "This deletes the mod from your mods folder. You can download it again from Find Mods.",
++        "Remove",
++        "Cancel",
++        [this, mod_id]() {
++            std::filesystem::path path = recomp::mods::get_mod_filename(mod_id);
++            recomp::mods::enable_mod(mod_id, false);
++            std::error_code ec;
++            if (!path.empty()) {
++                std::filesystem::remove_all(path, ec);
++            }
++            active_mod_index = -1;
++            refresh_mods(true);
++        },
++        []() {},
++        recompui::ButtonStyle::Danger,
++        recompui::ButtonStyle::Tertiary,
++        true
++    );
++}
++
+ void ModMenu::open_mods_folder() {
+     std::filesystem::path mods_directory = recomp::mods::get_mods_directory();
+ #if defined(WIN32)
+@@ -730,8 +764,15 @@ ModMenu::ModMenu(ResourceId rid, Element *parent) : Element(rid, parent) {
+             refresh_button = context.create_element<IconButton>(footer_container, "icons/Reset.svg", recompui::ButtonStyle::Secondary, recompui::IconButtonSize::XLarge);
+             refresh_button->add_pressed_callback([this](){ refresh_mods(true); });
+ 
++#ifdef __ANDROID__
++            // Android has no file manager to open the mods folder in, so this removes the
++            // selected mod instead.
++            mods_folder_button = context.create_element<Button>(footer_container, "Remove Mod", recompui::ButtonStyle::Warning);
++            mods_folder_button->add_pressed_callback([this](){ remove_selected_mod(); });
++#else
+             mods_folder_button = context.create_element<Button>(footer_container, "Open Mods Folder", recompui::ButtonStyle::Tertiary);
+             mods_folder_button->add_pressed_callback([this](){ open_mods_folder(); });
++#endif
+         } // footer_container
+     } // this
+     
+diff --git a/recompui/src/composites/ui_mod_menu.h b/recompui/src/composites/ui_mod_menu.h
+index 294c371..f9bee82 100644
+--- a/recompui/src/composites/ui_mod_menu.h
++++ b/recompui/src/composites/ui_mod_menu.h
+@@ -84,6 +84,7 @@ protected:
+ private:
+     void refresh_mods(bool scan_mods);
+     void open_mods_folder();
++    void remove_selected_mod();
+     void open_install_dialog();
+     void mod_toggled(bool enabled);
+     void mod_selected(uint32_t mod_index);
 diff --git a/recompui/src/config/ui_config.cpp b/recompui/src/config/ui_config.cpp
 index 6c84c05..f5dc0b4 100644
 --- a/recompui/src/config/ui_config.cpp
