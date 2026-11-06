@@ -1149,29 +1149,33 @@ index 56a0b70..fd57e2c 100644
 +    }
 +}
 diff --git a/recompui/src/config/ui_config.cpp b/recompui/src/config/ui_config.cpp
-index 6c84c05..5cc91e0 100644
+index 6c84c05..9a90083 100644
 --- a/recompui/src/config/ui_config.cpp
 +++ b/recompui/src/config/ui_config.cpp
-@@ -107,6 +107,50 @@ namespace recompui {
+@@ -107,6 +107,54 @@ namespace recompui {
          return new_config;
      }
  
-+    static std::vector<std::pair<const recomp::config::Config *, std::vector<config::LayoutEntry>>> page_button_registry;
++    // By config id: the configs live in a vector, so pointers to them move as more are added.
++    static std::vector<std::pair<std::string, std::vector<config::LayoutEntry>>> page_button_registry;
 +
 +    void config::add_page_button(recomp::config::Config &config, LayoutEntry button) {
-+        for (auto &[cfg, buttons] : page_button_registry) {
-+            if (cfg == &config) {
++        for (auto &[id, buttons] : page_button_registry) {
++            if (id == config.id) {
 +                buttons.push_back(std::move(button));
 +                return;
 +            }
 +        }
-+        page_button_registry.push_back({ &config, { std::move(button) } });
++        page_button_registry.push_back({ config.id, { std::move(button) } });
 +    }
 +
 +    const std::vector<config::LayoutEntry> &config::page_buttons(const recomp::config::Config *config) {
 +        static const std::vector<config::LayoutEntry> none;
-+        for (auto &[cfg, buttons] : page_button_registry) {
-+            if (cfg == config) {
++        if (config == nullptr) {
++            return none;
++        }
++        for (auto &[id, buttons] : page_button_registry) {
++            if (id == config->id) {
 +                return buttons;
 +            }
 +        }
@@ -1203,7 +1207,7 @@ index 6c84c05..5cc91e0 100644
      void config::finalize() {
          if (loaded_configs) {
              throw std::runtime_error("Configurations have already been loaded.");
-@@ -121,7 +165,72 @@ namespace recompui {
+@@ -121,7 +169,72 @@ namespace recompui {
          loaded_configs = true;
      }
  
@@ -1276,7 +1280,7 @@ index 6c84c05..5cc91e0 100644
          if (config_modal == nullptr) {
              for (auto &tab : pending_tabs) {
                  if (tab.id == id) {
-@@ -153,8 +262,14 @@ namespace recompui {
+@@ -153,8 +266,14 @@ namespace recompui {
              }
          }
          config_modal->set_selected_tab(0);
@@ -1291,7 +1295,7 @@ index 6c84c05..5cc91e0 100644
          quit_button->add_pressed_callback([]() {
              if (ultramodern::is_game_started()) {
                  recompui::open_quit_game_prompt();
-@@ -182,7 +297,11 @@ namespace recompui {
+@@ -182,7 +301,11 @@ namespace recompui {
              throw std::runtime_error("No tab with ID '" + id + "' has been added to the config modal.");
          }
  
@@ -1303,7 +1307,7 @@ index 6c84c05..5cc91e0 100644
      }
  
      void config::open() {
-@@ -197,6 +316,17 @@ namespace recompui {
+@@ -197,6 +320,17 @@ namespace recompui {
          if (config_modal == nullptr) {
              throw std::runtime_error("Config modal has not been initialized.");
          }
