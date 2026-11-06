@@ -576,10 +576,10 @@ index 277a421..63ecda3 100644
  
 diff --git a/recompui/src/composites/ui_menu_bar.cpp b/recompui/src/composites/ui_menu_bar.cpp
 new file mode 100644
-index 0000000..4050818
+index 0000000..62d8030
 --- /dev/null
 +++ b/recompui/src/composites/ui_menu_bar.cpp
-@@ -0,0 +1,256 @@
+@@ -0,0 +1,275 @@
 +// Android: the in-game menu bar. The menu button opens a slim bar across the top of the
 +// screen (in the bottom screen's DK style) instead of the full settings window; the bar opens
 +// Settings or Mods in the settings window, or quits. Like the Dusklight port's.
@@ -587,6 +587,7 @@ index 0000000..4050818
 +
 +#include <algorithm>
 +#include <chrono>
++#include <vector>
 +#include "recompui.h"
 +#include "recompui/config.h"
 +#include "elements/ui_element.h"
@@ -605,6 +606,10 @@ index 0000000..4050818
 +    bool menu_bar_ready = false;
 +
 +    void close_menu_bar_animated();
++
++    class MenuBarItem;
++    std::vector<MenuBarItem *> menu_bar_items;   // in order, for L / R
++    void focus_neighbour(MenuBarItem *from, int step);
 +
 +    // One entry on the bar: chunky capitals, banana yellow in a rounded outline when focused.
 +    class MenuBarItem : public Element {
@@ -625,6 +630,9 @@ index 0000000..4050818
 +                MenuAction action = std::get<EventMenuAction>(e.variant).action;
 +                if (action == MenuAction::Back || action == MenuAction::Toggle) {
 +                    close_menu_bar_animated();
++                } else if (action == MenuAction::TabLeft || action == MenuAction::TabRight) {
++                    // L / R step along the bar (wrapping round), like the settings tabs.
++                    focus_neighbour(this, action == MenuAction::TabLeft ? -1 : 1);
 +                }
 +                break;
 +            }
@@ -760,6 +768,16 @@ index 0000000..4050818
 +
 +    MenuBarRoot *menu_bar_root = nullptr;
 +
++    void focus_neighbour(MenuBarItem *from, int step) {
++        auto it = std::find(menu_bar_items.begin(), menu_bar_items.end(), from);
++        if (it == menu_bar_items.end() || menu_bar_items.empty()) {
++            return;
++        }
++        int n = static_cast<int>(menu_bar_items.size());
++        int i = static_cast<int>(it - menu_bar_items.begin());
++        menu_bar_items[((i + step) % n + n) % n]->focus();
++    }
++
 +    void close_menu_bar_animated() {
 +        if (menu_bar_root != nullptr) {
 +            menu_bar_root->slide_up();
@@ -807,14 +825,15 @@ index 0000000..4050818
 +    menu_bar_root = root;
 +
 +    MenuBarItem *settings = context.create_element<MenuBarItem>(bar, "SETTINGS", []() { open_settings_tab(config::general::id); });
-+    context.create_element<MenuBarItem>(bar, "MODS", []() { open_settings_tab(config::mods::id); });
-+    context.create_element<MenuBarItem>(bar, "QUIT", []() {
++    menu_bar_items.push_back(settings);
++    menu_bar_items.push_back(context.create_element<MenuBarItem>(bar, "MODS", []() { open_settings_tab(config::mods::id); }));
++    menu_bar_items.push_back(context.create_element<MenuBarItem>(bar, "QUIT", []() {
 +        menu_bar_root->hide_now();
 +        recompui::open_quit_game_prompt();
-+    });
++    }));
 +    Element *spacer = context.create_element<Element>(bar);
 +    spacer->set_flex_grow(1.0f);
-+    context.create_element<MenuBarItem>(bar, "X", []() { menu_bar_root->slide_up(); });
++    menu_bar_items.push_back(context.create_element<MenuBarItem>(bar, "X", []() { menu_bar_root->slide_up(); }));
 +
 +    root->queue_update();   // starts its every-frame update
 +    context.set_autofocus_element(settings);
