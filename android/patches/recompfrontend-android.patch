@@ -398,7 +398,7 @@ index 6de7a94..7e5c496 100644
                      recompui::hide_all_contexts();
                  }
 diff --git a/recompui/src/base/ui_state.cpp b/recompui/src/base/ui_state.cpp
-index 277a421..c35eeda 100644
+index 277a421..63ecda3 100644
 --- a/recompui/src/base/ui_state.cpp
 +++ b/recompui/src/base/ui_state.cpp
 @@ -278,6 +278,9 @@ public:
@@ -528,7 +528,7 @@ index 277a421..c35eeda 100644
                          latest_controller_key_pressed = SDLK_UNKNOWN;
                      }
                  }
-@@ -838,7 +917,14 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
+@@ -838,15 +917,30 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
              }
  
              if (open_config) {
@@ -543,7 +543,15 @@ index 277a421..c35eeda 100644
              }
          }
      } // end dequeue event loop
-@@ -847,6 +933,7 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
+ 
+     // Handle controller key repeats.
++#ifdef __ANDROID__
++    // While the on-screen keyboard is up it can swallow the D-pad's release, which would
++    // leave the held direction repeating forever: no repeats while typing.
++    if (SDL_IsTextInputActive()) {
++        latest_controller_key_pressed = SDLK_UNKNOWN;
++    }
++#endif
      if (latest_controller_key_pressed != SDLK_UNKNOWN) {
          clock::time_point now = clock::now();
          if (now >= next_repeat_time) {
@@ -551,7 +559,7 @@ index 277a421..c35eeda 100644
              ui_state->context->ProcessKeyDown(convert_sdl_to_rml(latest_controller_key_pressed), 0);
              next_repeat_time += repeat_rate;
          }
-@@ -870,7 +957,14 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
+@@ -870,7 +964,14 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
          int height = swap_chain_framebuffer->getHeight();
  
          // Scale the UI based on the window size with 1080 vertical resolution as the reference point.
@@ -2801,7 +2809,7 @@ index b8d3783..d136839 100644
          int get_active_tab() const { return active_tab; }
          void set_tab_visible(int tab_index, bool is_visible);
 diff --git a/recompui/src/elements/ui_text_input.cpp b/recompui/src/elements/ui_text_input.cpp
-index 42c74e7..9164e73 100644
+index 42c74e7..0818c1c 100644
 --- a/recompui/src/elements/ui_text_input.cpp
 +++ b/recompui/src/elements/ui_text_input.cpp
 @@ -1,6 +1,9 @@
@@ -2814,21 +2822,42 @@ index 42c74e7..9164e73 100644
  
  namespace recompui {
  
-@@ -22,6 +25,14 @@ namespace recompui {
+@@ -22,14 +25,34 @@ namespace recompui {
                  focus_callback(event.active);
              }
              set_style_enabled(focus_state, event.active);
 +#ifdef __ANDROID__
-+            // Bring up (and put away) the on-screen keyboard.
-+            if (event.active) {
-+                SDL_StartTextInput();
-+            } else {
++            // Put the on-screen keyboard away when leaving the box. It isn't brought up just
++            // by moving onto the box with a controller (the keyboard then takes the D-pad);
++            // tapping the box, or pressing A on it, opens it.
++            if (!event.active) {
 +                SDL_StopTextInput();
 +            }
 +#endif
++            break;
++        }
++#ifdef __ANDROID__
++        case EventType::Click: {
++            SDL_StartTextInput();
              break;
          }
++#endif
          default:
+             break;
+         }
+     }
+     
+-    TextInput::TextInput(ResourceId rid, Element *parent, bool text_visible) : Element(rid, parent, Events(EventType::Text, EventType::Focus), "input") {
++    TextInput::TextInput(ResourceId rid, Element *parent, bool text_visible) : Element(rid, parent,
++#ifdef __ANDROID__
++        Events(EventType::Text, EventType::Focus, EventType::Click),
++#else
++        Events(EventType::Text, EventType::Focus),
++#endif
++        "input") {
+         if (!text_visible) {
+             set_attribute("type", "password");
+         }
 diff --git a/recompui/src/renderer/rt64_render_context.cpp b/recompui/src/renderer/rt64_render_context.cpp
 index a7954c7..dec1073 100644
 --- a/recompui/src/renderer/rt64_render_context.cpp
