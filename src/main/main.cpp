@@ -757,6 +757,7 @@ void on_launcher_init(recompui::LauncherMenu *menu) {
 extern "C" int dk64_android_experience_chosen();
 extern "C" void dk64_android_apply_experience(int modern);
 extern "C" int dk64_android_last_run_crashed();
+extern "C" int dk64_android_take_show_launcher_once();
 
 // First launch: a Classic or Modern experience? (Settings > General > Experience later.)
 static bool ask_for_experience() {
@@ -814,6 +815,10 @@ static void on_launcher_update(recompui::LauncherMenu *menu) {
 #ifdef __ANDROID__
         // After a crash, always show the launcher so the settings can still be reached.
         crashed_last_run = dk64_android_last_run_crashed() != 0;
+        // Return to Main Menu restarts the app to show the launcher, so skip the skip.
+        if (dk64_android_take_show_launcher_once() != 0) {
+            crashed_last_run = true;
+        }
 #endif
         skip_pending = dk64::get_skip_launcher() && !crashed_last_run && recomp::is_rom_valid(game.game_id)
             && recomp::mods::game_mode_count(game.mod_game_id, false) == 0;
