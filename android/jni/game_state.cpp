@@ -217,85 +217,61 @@ namespace {
     }
 }
 
-// TEMPORARY probe (finding where the Tag Barrel keeps the Kong you're looking at). The
-// Tag Barrel is player control state 66. While in it, every byte of RDRAM is watched; on
-// leaving, bytes that changed a few times, only ever held 0-7 (at least three different
-// values) and now hold the Kong you came out as are logged. Logcat tag DK64Tag.
+// The Tag Barrel (player control state 66): which Kong you're looking at. Found on a
+// device: the barrel actor keeps it at +0x17E (0 DK ... 4 Chunky; the current Kong only
+// changes when you leave). The barrel is found in the loaded-actor array (entries of
+// Actor*, type), as the actor whose type is a Tag Barrel's.
 namespace {
-    constexpr uint32_t kTagBarrelState = 66;
-    constexpr size_t kRdramSize = 8 * 1024 * 1024;
-    std::vector<uint8_t> g_probe_prev, g_probe_count, g_probe_values;
-    bool g_probe_in = false;
-    int g_probe_samples = 0;
+    constexpr int kTagBarrelState = 66;
+    constexpr uint32_t kLoadedActors = 0x807FB930u;        // { Actor*, s32 type }[64]
+    constexpr int kLoadedActorSlots = 64;
+    constexpr uint32_t kActorType = 0x58;                  // s32 in the actor (unk58)
+    constexpr uint32_t kTagBarrelLooking = 0x17E;          // u8 in the Tag Barrel actor
+    bool g_tag_logged = false;
 
-    void tag_probe(const uint8_t* rdram) {
-        const uint32_t player = read_u32(rdram, kPlayerPointer);
-        int ctl = -1;
-        if (player >= 0x80000000u && player < 0x807FFC00u) {
-            ctl = read_u8(rdram, player + kPlayerControlState);
-        }
-        const bool in = ctl == static_cast<int>(kTagBarrelState);
-        if (in && !g_probe_in) {
-            g_probe_prev.assign(rdram, rdram + kRdramSize);
-            g_probe_count.assign(kRdramSize, 0);
-            g_probe_values.assign(kRdramSize, 0);
-            g_probe_samples = 0;
-            __android_log_print(ANDROID_LOG_INFO, "DK64Tag", "Tag Barrel: in (kong %d)", read_u8(rdram, kCurrentCharacterIndex));
-        } else if (in) {
-            g_probe_samples++;
-            for (size_t i = 0; i < kRdramSize; i++) {
-                const uint8_t v = rdram[i];
-                if (v != g_probe_prev[i]) {
-                    if (g_probe_count[i] < 255) g_probe_count[i]++;
-                    g_probe_values[i] |= v < 7 ? static_cast<uint8_t>(1u << v) : 0x80u;
-                    g_probe_values[i] |= g_probe_prev[i] < 7 ? static_cast<uint8_t>(1u << g_probe_prev[i]) : 0x80u;
-                    g_probe_prev[i] = v;
-                }
-            }
-        } else if (g_probe_in) {
-            const int kong = read_u8(rdram, kCurrentCharacterIndex);
-            __android_log_print(ANDROID_LOG_INFO, "DK64Tag", "Tag Barrel: out as kong %d after %d samples", kong, g_probe_samples);
-            int lines = 0;
-            for (size_t i = 0; i < kRdramSize && lines < 80; i++) {
-                const uint8_t mask = g_probe_values[i];
-                // Cycling through 5 Kongs: 4+ changes over 4+ different values (an index
-                // 0-4, or an actor type 2-6), not a constantly changing one.
-                if (g_probe_count[i] < 3 || g_probe_count[i] > 20 || (mask & 0x80u) || __builtin_popcount(mask) < 4) {
-                    continue;
-                }
-                const uint32_t address = 0x80000000u + static_cast<uint32_t>(i ^ 3);
-                // The one we want ends on the Kong you came out as.
-                if (rdram[i] != kong) {
-                    continue;
-                }
-                __android_log_print(ANDROID_LOG_INFO, "DK64Tag", "candidate %08X: %d changes, values %02X, last %u, now %u",
-                    address, g_probe_count[i], mask, g_probe_prev[i], rdram[i]);
-                lines++;
-                // What points at the structure it's in (globals and the player): pointers to
-                // up to 0x1000 bytes before it.
-                int pointers = 0;
-                for (uint32_t a = 0x80740000u; a < 0x80800000u && pointers < 6; a += 4) {
-                    const uint32_t v = read_u32(rdram, a);
-                    if (v <= address && address - v < 0x1000u) {
-                        __android_log_print(ANDROID_LOG_INFO, "DK64Tag", "   pointer at %08X = %08X (+0x%X)", a, v, address - v);
-                        pointers++;
-                    }
-                }
-            }
-            g_probe_prev.clear(); g_probe_prev.shrink_to_fit();
-            g_probe_count.clear(); g_probe_count.shrink_to_fit();
-            g_probe_values.clear(); g_probe_values.shrink_to_fit();
-        }
-        g_probe_in = in;
+    bool is_actor_pointer(uint32_t p) {
+        return p >= 0x80000000u && p < 0x807FF000u && (p & 3) == 0;
     }
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_io_github_bownz_dk64recomp_GameState_nativeTagBarrelKong(JNIEnv*, jclass) {
+    const uint8_t* rdram = g_rdram.load();
+    if (rdram == nullptr) {
+        return -1;
+    }
+    const uint32_t player = read_u32(rdram, kPlayerPointer);
+    if (!is_actor_pointer(player) || read_u8(rdram, player + kPlayerControlState) != kTagBarrelState) {
+        g_tag_logged = false;
+        return -1;
+    }
+    int found = -1;
+    for (int i = 0; i < kLoadedActorSlots; i++) {
+        const uint32_t actor = read_u32(rdram, kLoadedActors + i * 8);
+        if (!is_actor_pointer(actor)) {
+            continue;
+        }
+        const uint32_t type = read_u32(rdram, actor + kActorType);
+        const uint8_t looking = read_u8(rdram, actor + kTagBarrelLooking);
+        if (!g_tag_logged) {
+            __android_log_print(ANDROID_LOG_INFO, "DK64Tag", "loaded actor %d: %08X type %u, +0x17E %u",
+                i, actor, type, looking);
+        }
+        if ((type == 98 || type == 136 || type == 137) && looking < 5 && found < 0) {
+            found = looking;
+        }
+    }
+    if (!g_tag_logged) {
+        __android_log_print(ANDROID_LOG_INFO, "DK64Tag", "Tag Barrel: looking at %d", found);
+        g_tag_logged = true;
+    }
+    return found;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_io_github_bownz_dk64recomp_GameState_nativeRead(JNIEnv* env, jclass, jintArray out) {
     const uint8_t* rdram = g_rdram.load();
-    if (rdram != nullptr) {
-        tag_probe(rdram);
-    }
+
     constexpr jsize kCount = 8 + 5 * 6 + 2 + 5 * kLevelSlots * 2 + 1 + 1;
     if (rdram == nullptr || out == nullptr || env->GetArrayLength(out) < kCount) {
         return JNI_FALSE;

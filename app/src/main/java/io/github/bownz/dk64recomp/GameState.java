@@ -134,6 +134,16 @@ final class GameState {
     private static native boolean nativeFontMetrics(byte[] out);
     private static native int nativeTouchFeedback();
     private static native boolean nativeBottomButtons();
+    private static native int nativeTagBarrelKong();
+
+    /** In a Tag Barrel: the Kong you're looking at (0-4), else -1. */
+    static int tagBarrelKong() {
+        try {
+            return nativeTagBarrelKong();
+        } catch (UnsatisfiedLinkError e) {
+            return -1;
+        }
+    }
 
     /** Bottom Screen Buttons (Input > Touch): false hides the touch buttons. */
     static boolean bottomButtons() {

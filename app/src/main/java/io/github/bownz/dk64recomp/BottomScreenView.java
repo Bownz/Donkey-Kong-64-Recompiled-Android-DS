@@ -747,6 +747,11 @@ public final class BottomScreenView extends View {
 
     /** The tab being shown: a Kong (0-4) or SHARED_TAB. */
     private int displayedKong() {
+        // In a Tag Barrel: whoever you're looking at.
+        int tag = state.inGame() ? GameState.tagBarrelKong() : -1;
+        if (tag >= 0 && !isLocked(tag)) {
+            return tag;
+        }
         if (selectedKong == SHARED_TAB || (selectedKong >= 0 && !isLocked(selectedKong))) {
             return selectedKong;
         }
