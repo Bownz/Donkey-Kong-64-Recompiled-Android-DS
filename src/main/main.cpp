@@ -823,8 +823,12 @@ static void on_launcher_update(recompui::LauncherMenu *menu) {
         skip_pending = dk64::get_skip_launcher() && !crashed_last_run && recomp::is_rom_valid(game.game_id)
             && recomp::mods::game_mode_count(game.mod_game_id, false) == 0;
         if (skip_pending) {
-            // Skipping: don't show the launcher while waiting to start (just black).
+            // Skipping: don't show the launcher while waiting to start (just black). The
+            // logo, island and buttons are drawn over the menu's own background, so they're
+            // hidden too.
             menu->set_opacity(0.0f);
+            menu->get_background_container()->set_display(recompui::Display::None);
+            menu->get_menu_container()->set_display(recompui::Display::None);
         }
     }
 #ifdef __ANDROID__
@@ -845,11 +849,16 @@ static void on_launcher_update(recompui::LauncherMenu *menu) {
     // Starting the game straight away crashes it on Android (tried again on the second
     // frame: DK's "OK!" plays, nothing is drawn, then it crashes), so the skip waits until
     // the launcher has been up for a moment, as if Start Game was pressed.
-    if (skip_pending && std::chrono::steady_clock::now() - first_update >= std::chrono::milliseconds(1500)) {
-        skip_pending = false;
-        recompui::update_game_mod_id(game.mod_game_id);
-        recomp::start_game(game.game_id, {});
-        recompui::hide_all_contexts();
+    if (skip_pending) {
+        if (std::chrono::steady_clock::now() - first_update >= std::chrono::milliseconds(1500)) {
+            skip_pending = false;
+            recompui::update_game_mod_id(game.mod_game_id);
+            recomp::start_game(game.game_id, {});
+            recompui::hide_all_contexts();
+            return;
+        }
+        // Keeps running while hidden, exactly as when the 1.5 s wait was found to be safe.
+        dk64::launcher_animation_update(menu);
         return;
     }
     dk64::launcher_animation_update(menu);
