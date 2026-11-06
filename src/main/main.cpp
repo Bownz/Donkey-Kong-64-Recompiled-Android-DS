@@ -842,11 +842,10 @@ static void on_launcher_update(recompui::LauncherMenu *menu) {
         return;
     }
 #endif
-    // Starting the game on the launcher's very first frame once crashed it on Android (it
-    // used to wait 1.5 s). Now it starts on the next frame, after the first one has run.
-    static int updates = 0;
-    updates++;
-    if (skip_pending && updates >= 2) {
+    // Starting the game straight away crashes it on Android (tried again on the second
+    // frame: DK's "OK!" plays, nothing is drawn, then it crashes), so the skip waits until
+    // the launcher has been up for a moment, as if Start Game was pressed.
+    if (skip_pending && std::chrono::steady_clock::now() - first_update >= std::chrono::milliseconds(1500)) {
         skip_pending = false;
         recompui::update_game_mod_id(game.mod_game_id);
         recomp::start_game(game.game_id, {});
