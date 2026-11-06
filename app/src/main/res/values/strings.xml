@@ -11,5 +11,4 @@
     <string name="rom_restart">ROM loaded! Restarting to finish setting up…</string>
     <string name="storage_bad_folder">That folder can\'t be used. Pick a folder on the device\'s storage or SD card.</string>
     <string name="storage_denied">No file access granted. Using app storage instead.</string>
-    <string name="shortcut_gpu_driver">Graphics driver</string>
 </resources>

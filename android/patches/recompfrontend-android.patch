@@ -288,7 +288,7 @@ index c89956e..c62e059 100644
  
          *buttons_out = cur_buttons;
 diff --git a/recompui/include/recompui/config.h b/recompui/include/recompui/config.h
-index fd04cb3..710c0e3 100644
+index fd04cb3..1f3c7b1 100644
 --- a/recompui/include/recompui/config.h
 +++ b/recompui/include/recompui/config.h
 @@ -2,6 +2,8 @@
@@ -300,7 +300,7 @@ index fd04cb3..710c0e3 100644
  
  #include "librecomp/config.hpp"
  #include "elements/ui_modal.h"
-@@ -131,6 +133,25 @@ namespace recompui {
+@@ -131,6 +133,30 @@ namespace recompui {
          recomp::config::Config &create_sound_tab(const std::string &name = config::sound::tab_name);
          void create_mods_tab(const std::string &name = config::mods::tab_name);
  
@@ -316,6 +316,11 @@ index fd04cb3..710c0e3 100644
 +            std::string description; // Button: shown when it's focused
 +            std::function<void()> on_press; // Button
 +        };
++        // Android: a whole-row button at the end of a config's own page (e.g. Video > Graphics
++        // Driver). Only Kind::Button entries.
++        void add_page_button(recomp::config::Config &config, LayoutEntry button);
++        const std::vector<LayoutEntry> &page_buttons(const recomp::config::Config *config);
++
 +        void create_layout_tab(
 +            const std::string &name,
 +            const std::string &id,
@@ -1144,13 +1149,35 @@ index 56a0b70..fd57e2c 100644
 +    }
 +}
 diff --git a/recompui/src/config/ui_config.cpp b/recompui/src/config/ui_config.cpp
-index 6c84c05..f5dc0b4 100644
+index 6c84c05..0ef2068 100644
 --- a/recompui/src/config/ui_config.cpp
 +++ b/recompui/src/config/ui_config.cpp
-@@ -107,6 +107,28 @@ namespace recompui {
+@@ -107,6 +107,50 @@ namespace recompui {
          return new_config;
      }
  
++    static std::vector<std::pair<const recomp::config::Config *, std::vector<LayoutEntry>>> page_button_registry;
++
++    void config::add_page_button(recomp::config::Config &config, LayoutEntry button) {
++        for (auto &[cfg, buttons] : page_button_registry) {
++            if (cfg == &config) {
++                buttons.push_back(std::move(button));
++                return;
++            }
++        }
++        page_button_registry.push_back({ &config, { std::move(button) } });
++    }
++
++    const std::vector<LayoutEntry> &config::page_buttons(const recomp::config::Config *config) {
++        static const std::vector<LayoutEntry> none;
++        for (auto &[cfg, buttons] : page_button_registry) {
++            if (cfg == config) {
++                return buttons;
++            }
++        }
++        return none;
++    }
++
 +    void config::create_layout_tab(
 +        const std::string &name,
 +        const std::string &id,
@@ -1176,7 +1203,7 @@ index 6c84c05..f5dc0b4 100644
      void config::finalize() {
          if (loaded_configs) {
              throw std::runtime_error("Configurations have already been loaded.");
-@@ -121,7 +143,72 @@ namespace recompui {
+@@ -121,7 +165,72 @@ namespace recompui {
          loaded_configs = true;
      }
  
@@ -1249,7 +1276,7 @@ index 6c84c05..f5dc0b4 100644
          if (config_modal == nullptr) {
              for (auto &tab : pending_tabs) {
                  if (tab.id == id) {
-@@ -153,8 +240,14 @@ namespace recompui {
+@@ -153,8 +262,14 @@ namespace recompui {
              }
          }
          config_modal->set_selected_tab(0);
@@ -1264,7 +1291,7 @@ index 6c84c05..f5dc0b4 100644
          quit_button->add_pressed_callback([]() {
              if (ultramodern::is_game_started()) {
                  recompui::open_quit_game_prompt();
-@@ -182,7 +275,11 @@ namespace recompui {
+@@ -182,7 +297,11 @@ namespace recompui {
              throw std::runtime_error("No tab with ID '" + id + "' has been added to the config modal.");
          }
  
@@ -1276,7 +1303,7 @@ index 6c84c05..f5dc0b4 100644
      }
  
      void config::open() {
-@@ -197,6 +294,17 @@ namespace recompui {
+@@ -197,6 +316,17 @@ namespace recompui {
          if (config_modal == nullptr) {
              throw std::runtime_error("Config modal has not been initialized.");
          }
@@ -2077,7 +2104,7 @@ index dd8ff24..7ba89cd 100644
      Element *nav_up_element = nullptr;
      Element *first_nav_element = nullptr;
 diff --git a/recompui/src/config/ui_config_page_options_menu.cpp b/recompui/src/config/ui_config_page_options_menu.cpp
-index 6ba64e2..8922845 100644
+index 6ba64e2..5871977 100644
 --- a/recompui/src/config/ui_config_page_options_menu.cpp
 +++ b/recompui/src/config/ui_config_page_options_menu.cpp
 @@ -1,4 +1,5 @@
@@ -2203,15 +2230,16 @@ index 6ba64e2..8922845 100644
          bound_on_option_hover = [this](const std::string &option_id) {
              this->on_option_hover(option_id);
          };
-@@ -236,6 +294,7 @@ void ConfigPageOptionsMenu::render_config_options() {
+@@ -236,15 +294,203 @@ void ConfigPageOptionsMenu::render_config_options() {
              element->update_disabled();
              element->update_hidden();
              config_option_elements.push_back(element);
 +            element_configs.push_back(config);
          }
++        add_page_buttons(body_left_scroll);
      }
  }
-@@ -243,8 +302,182 @@ void ConfigPageOptionsMenu::render_config_options() {
+ 
  void ConfigPageOptionsMenu::on_option_hover(const std::string &option_id) {
      if (description_container) {
          description_option_id = option_id;
@@ -2285,6 +2313,18 @@ index 6ba64e2..8922845 100644
 +            arrow->set_color(Color{249, 214, 72, 255});
 +        }
 +    };
++}
++
++void ConfigPageOptionsMenu::add_page_buttons(Element *parent) {
++    ContextId context = recompui::get_current_context();
++    for (const auto &entry : recompui::config::page_buttons(config)) {
++        const std::string description = entry.description;
++        context.create_element<LayoutButtonRow>(parent, entry.text, entry.on_press, [this, description]() {
++            description_option_id.clear();
++            description_config = nullptr;
++            set_description_text(description);
++        });
++    }
 +}
 +
 +void ConfigPageOptionsMenu::render_layout_options() {
@@ -2395,7 +2435,7 @@ index 6ba64e2..8922845 100644
 +
  } // namespace recompui
 diff --git a/recompui/src/config/ui_config_page_options_menu.h b/recompui/src/config/ui_config_page_options_menu.h
-index 49e05db..31f5815 100644
+index 49e05db..2176dd8 100644
 --- a/recompui/src/config/ui_config_page_options_menu.h
 +++ b/recompui/src/config/ui_config_page_options_menu.h
 @@ -6,6 +6,7 @@
@@ -2419,10 +2459,11 @@ index 49e05db..31f5815 100644
          Element *description_container = nullptr;
          std::string description_option_id = "";
          Button *apply_button = nullptr;
-@@ -25,10 +32,12 @@ namespace recompui {
+@@ -25,10 +32,13 @@ namespace recompui {
          set_option_value_t bound_set_option_value;
  
          void render_config_options();
++        void add_page_buttons(Element *parent);   // Android: buttons added to a config page (config::add_page_button)
 +        void render_layout_options();
          void render_confirmation_footer();
          void on_option_hover(const std::string &option_id);
@@ -2432,7 +2473,7 @@ index 49e05db..31f5815 100644
          void perform_option_render_updates();
          void set_description_text(const std::string &text);
      public:
-@@ -38,6 +47,12 @@ namespace recompui {
+@@ -38,6 +48,12 @@ namespace recompui {
              recomp::config::Config *config,
              bool is_internal = false
          );
