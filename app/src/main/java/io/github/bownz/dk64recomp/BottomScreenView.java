@@ -1431,6 +1431,14 @@ public final class BottomScreenView extends View {
 
     /** A DK barrel (front view) filling r: bulging staves, two iron hoops. */
     private void barrel(Canvas c, RectF r, boolean lit, boolean locked, int litColor) {
+        barrel(c, r, lit, locked, litColor, false);
+    }
+
+    /**
+     * strong: the Kong you're playing as. A thick outline in the Kong's colour with a glow;
+     * a Kong you're only looking at gets a thinner outline and no glow.
+     */
+    private void barrel(Canvas c, RectF r, boolean lit, boolean locked, int litColor, boolean strong) {
         float bulge = r.width() * 0.07f;
         path.reset();
         path.moveTo(r.left + bulge, r.top);
@@ -1465,7 +1473,17 @@ public final class BottomScreenView extends View {
         c.drawLine(r.left + bulge * 0.2f, h1, r.right - bulge * 0.2f, h1, paint);
         c.drawLine(r.left + bulge * 0.2f, h2, r.right - bulge * 0.2f, h2, paint);
         // Outline (the Kong's colour when selected).
-        paint.setStrokeWidth(unit * (lit ? 0.011f : 0.007f));
+        if (lit && strong) {
+            paint.setStrokeWidth(unit * 0.036f);
+            paint.setColor(litColor);
+            paint.setAlpha(70);
+            c.drawPath(path, paint);
+            paint.setStrokeWidth(unit * 0.022f);
+            paint.setAlpha(120);
+            c.drawPath(path, paint);
+            paint.setAlpha(255);
+        }
+        paint.setStrokeWidth(unit * (lit ? (strong ? 0.013f : 0.006f) : 0.007f));
         paint.setColor(lit ? litColor : (locked ? Color.rgb(34, 34, 34) : WOOD_EDGE));
         c.drawPath(path, paint);
         paint.setStyle(Paint.Style.FILL);
@@ -1628,13 +1646,17 @@ public final class BottomScreenView extends View {
             RectF r = barrelRect;
             r.set(t.centerX() - bw / 2, t.top, t.centerX() + bw / 2, t.bottom);
             boolean locked = isLocked(i);
-            boolean lit = !locked && i == shown;
+            // The Kong you're playing as stands out most; one you're only looking at
+            // (tapped, with Touch Kong Swap off) gets a lighter outline.
+            boolean isPlaying = i == playing;
+            boolean lit = !locked && (i == shown || isPlaying);
             float hop = animProgress("tab" + i, HOP_MS);
             int tabSaved = c.save();
             if (hop >= 0) {
                 c.translate(0, -(float) Math.sin(Math.PI * hop) * r.height() * 0.14f);
             }
-            barrel(c, r, lit, locked, i < KONG_COLORS.length ? KONG_COLORS[i] : BANANA);
+            barrel(c, r, lit, locked, i < KONG_COLORS.length ? KONG_COLORS[i] : BANANA,
+                isPlaying || (playing < 0 && i == shown));
             if (locked) {
                 c.restoreToCount(tabSaved);
                 continue; // Greyed out, no face or name, until the Kong is freed.
@@ -1771,11 +1793,35 @@ public final class BottomScreenView extends View {
      * Collectibles as a grid of round badges with wooden value tags, in the style of DKC
      * Returns 3D's item screen: a wooden frame around a dark inset board.
      */
+    private static final long PANEL_OPEN_MS = 340;
+
     private void drawKongPanel(Canvas c) {
+        int tab = displayedKong();
+        // Switching Kongs: the panel grows out of that Kong's barrel.
+        watch("panelTab", tab, "panelOpen");
+        float open = animProgress("panelOpen", PANEL_OPEN_MS);
+        if (open < 0f || tab < 0 || tab >= tabRects.length) {
+            drawKongPanelContents(c, tab);
+            return;
+        }
+        RectF p = panelRect;
+        float e = backOut(open);
+        float fromX = tabRects[tab].centerX(), fromY = tabRects[tab].centerY();
+        float x = fromX + (p.centerX() - fromX) * e, y = fromY + (p.centerY() - fromY) * e;
+        float scale = 0.12f + 0.88f * e;
+        int alpha = Math.round(255 * Math.min(1f, open * 3f));
+        int saved = c.saveLayerAlpha(null, alpha);
+        c.translate(x, y);
+        c.scale(scale, scale);
+        c.translate(-p.centerX(), -p.centerY());
+        drawKongPanelContents(c, tab);
+        c.restoreToCount(saved);
+    }
+
+    private void drawKongPanelContents(Canvas c, int tab) {
         RectF p = panelRect;
         woodPanel(c, p, unit * 0.03f, false);
 
-        int tab = displayedKong();
         java.util.List<Row> rows = rowsFor(tab, shownLevel());
         rows.removeIf(r -> r.total == 0);   // nothing of that kind here (e.g. bananas in Helm)
         rows.removeIf(r -> r.label.equals("Coins"));   // shown under Carrying
