@@ -253,10 +253,10 @@ index c6786e6..73eda2e 100644
      default:
          return recompinput::unknown_device_input;
 diff --git a/recompinput/src/profiles.cpp b/recompinput/src/profiles.cpp
-index c89956e..c62e059 100644
+index c89956e..75f2a3e 100644
 --- a/recompinput/src/profiles.cpp
 +++ b/recompinput/src/profiles.cpp
-@@ -371,6 +371,15 @@ namespace recompinput {
+@@ -371,6 +371,18 @@ namespace recompinput {
          return "SERIAL_" + guid.serial + "_VID_" + std::to_string(guid.vendor) + "_PID_" + std::to_string(guid.product) +"_VERSION_" + std::to_string(guid.version) +"_CRC16_" + std::to_string(guid.crc16);
      }
  
@@ -269,10 +269,27 @@ index c89956e..c62e059 100644
 +    extern "C" void dk64_android_report_physical_n64_buttons(uint16_t buttons) __attribute__((weak));
 +#endif
 +
++    static bool menu_was_open[4] = {};
++    static uint16_t held_from_menu[4] = {};
++
      bool profiles::get_n64_input(int player_index, uint16_t* buttons_out, float* x_out, float* y_out) {
          uint16_t cur_buttons = 0;
          float cur_x = 0.0f;
-@@ -405,6 +414,14 @@ namespace recompinput {
+@@ -402,9 +414,32 @@ namespace recompinput {
+             check_buttons(profile_index_cont);
+             check_buttons(profile_index_kb);
+ 
++            // Buttons still held from a menu (e.g. A pressed on the menu bar's X to close it)
++            // don't reach the game until they're let go, so it doesn't see a fresh press.
++            if (player_index >= 0 && player_index < 4) {
++                if (menu_was_open[player_index]) {
++                    held_from_menu[player_index] = cur_buttons;
++                    menu_was_open[player_index] = false;
++                }
++                held_from_menu[player_index] &= cur_buttons;
++                cur_buttons &= ~held_from_menu[player_index];
++            }
++
              check_joystick(profile_index_cont);
              recompinput::apply_joystick_deadzone(cur_x, cur_y, &cur_x, &cur_y);
              check_joystick(profile_index_kb);
@@ -284,6 +301,10 @@ index c89956e..c62e059 100644
 +                cur_buttons |= dk64_android_touch_n64_buttons();
 +            }
 +#endif
++        }
++
++        else if (player_index >= 0 && player_index < 4) {
++            menu_was_open[player_index] = true;
          }
  
          *buttons_out = cur_buttons;
@@ -412,21 +433,24 @@ index 6de7a94..7e5c496 100644
                      recompui::hide_all_contexts();
                  }
 diff --git a/recompui/src/base/ui_state.cpp b/recompui/src/base/ui_state.cpp
-index 277a421..16d4c98 100644
+index 277a421..71f98aa 100644
 --- a/recompui/src/base/ui_state.cpp
 +++ b/recompui/src/base/ui_state.cpp
-@@ -35,6 +35,10 @@
+@@ -35,6 +35,13 @@
  
  static std::atomic_bool cursor_enabled = true;
  
 +#ifdef __ANDROID__
 +extern "C" void dk64_android_restart_to_launcher() __attribute__((weak));
++namespace recompui {
++    std::atomic<bool> android_text_input_open{ false };
++}
 +#endif
 +
  void recompui::open_quit_game_prompt() {
      recompui::open_choice_prompt(
          "Are you sure you want to quit?",
-@@ -49,6 +53,12 @@ void recompui::open_quit_game_prompt() {
+@@ -49,6 +56,12 @@ void recompui::open_quit_game_prompt() {
          recompui::ButtonStyle::Tertiary,
          true
      );
@@ -439,7 +463,7 @@ index 277a421..16d4c98 100644
  }
  
  static std::string primary_font = "";
-@@ -278,6 +288,9 @@ public:
+@@ -278,6 +291,9 @@ public:
          recompui::init_styling(recompui::file::get_asset_path("recomp.rcss"));
          recompui::init_launcher_menu();
          recompui::init_prompt_context();
@@ -449,7 +473,7 @@ index 277a421..16d4c98 100644
          recompui::AssignPlayersModal::init();
          recompui::config::init_modal();
      }
-@@ -580,6 +593,31 @@ bool check_menu_button_pressed(int profile_index, recompinput::GameInput input,
+@@ -580,6 +596,31 @@ bool check_menu_button_pressed(int profile_index, recompinput::GameInput input,
      return false;
  }
  
@@ -481,7 +505,7 @@ index 277a421..16d4c98 100644
  int cont_button_to_key(SDL_ControllerButtonEvent& button) {
      int player1_profile = recompinput::profiles::get_input_profile_for_player(0, recompinput::InputDevice::Controller);
  
-@@ -694,6 +732,52 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
+@@ -694,6 +735,52 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
              }
          }
  
@@ -534,7 +558,7 @@ index 277a421..16d4c98 100644
          if (!all_input_is_disabled) {
              bool is_mouse_input = false;
              // Implement some additional behavior for specific events on top of what RmlUi normally does with them.
-@@ -731,6 +815,7 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
+@@ -731,6 +818,7 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
              case SDL_EventType::SDL_CONTROLLERBUTTONDOWN: {
                  int sdl_key = cont_button_to_key(cur_event.cbutton);
                  if (context_capturing_input && sdl_key) {
@@ -542,7 +566,7 @@ index 277a421..16d4c98 100644
                      ui_state->context->ProcessKeyDown(convert_sdl_to_rml(sdl_key), 0);
                      latest_controller_key_pressed = sdl_key;
                      next_repeat_time = clock::now() + start_repeat_delay;
-@@ -776,7 +861,8 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
+@@ -776,7 +864,8 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
                          non_mouse_interacted = true;
                          int sdl_key = cont_axis_to_key(cur_event.caxis, axis_value);
                          if (context_capturing_input && sdl_key) {
@@ -552,7 +576,7 @@ index 277a421..16d4c98 100644
                              latest_controller_key_pressed = sdl_key;
                              next_repeat_time = clock::now() + start_repeat_delay;
                          }
-@@ -787,8 +873,11 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
+@@ -787,8 +876,11 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
                  else if (*await_stick_return && fabsf(axis_value) < 0.15f) {
                      *await_stick_return = false;
                      // Stop pressing the current key if the axis that was released was the one triggering key presses.
@@ -566,7 +590,7 @@ index 277a421..16d4c98 100644
                          latest_controller_key_pressed = SDLK_UNKNOWN;
                      }
                  }
-@@ -838,15 +927,30 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
+@@ -838,15 +930,32 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
              }
  
              if (open_config) {
@@ -585,8 +609,10 @@ index 277a421..16d4c98 100644
      // Handle controller key repeats.
 +#ifdef __ANDROID__
 +    // While the on-screen keyboard is up it can swallow the D-pad's release, which would
-+    // leave the held direction repeating forever: no repeats while typing.
-+    if (SDL_IsTextInputActive()) {
++    // leave the held direction repeating forever: no repeats while typing. (Our own flag:
++    // SDL_IsTextInputActive() is true on Android even with no keyboard up, which stopped
++    // every repeat, e.g. holding left / right on a slider.)
++    if (recompui::android_text_input_open) {
 +        latest_controller_key_pressed = SDLK_UNKNOWN;
 +    }
 +#endif
@@ -597,7 +623,7 @@ index 277a421..16d4c98 100644
              ui_state->context->ProcessKeyDown(convert_sdl_to_rml(latest_controller_key_pressed), 0);
              next_repeat_time += repeat_rate;
          }
-@@ -870,7 +974,14 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
+@@ -870,7 +979,14 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
          int height = swap_chain_framebuffer->getHeight();
  
          // Scale the UI based on the window size with 1080 vertical resolution as the reference point.
@@ -2987,20 +3013,28 @@ index b8d3783..d136839 100644
          int get_active_tab() const { return active_tab; }
          void set_tab_visible(int tab_index, bool is_visible);
 diff --git a/recompui/src/elements/ui_text_input.cpp b/recompui/src/elements/ui_text_input.cpp
-index 42c74e7..0818c1c 100644
+index 42c74e7..01279d8 100644
 --- a/recompui/src/elements/ui_text_input.cpp
 +++ b/recompui/src/elements/ui_text_input.cpp
-@@ -1,6 +1,9 @@
+@@ -1,6 +1,17 @@
  #include "ui_text_input.h"
  
  #include <cassert>
 +#ifdef __ANDROID__
 +#include <SDL.h>
 +#endif
++
++#ifdef __ANDROID__
++#include <atomic>
++namespace recompui {
++    // Set while a text box has the on-screen keyboard up (ui_state.cpp).
++    extern std::atomic<bool> android_text_input_open;
++}
++#endif
  
  namespace recompui {
  
-@@ -22,14 +25,34 @@ namespace recompui {
+@@ -22,14 +33,36 @@ namespace recompui {
                  focus_callback(event.active);
              }
              set_style_enabled(focus_state, event.active);
@@ -3010,6 +3044,7 @@ index 42c74e7..0818c1c 100644
 +            // tapping the box, or pressing A on it, opens it.
 +            if (!event.active) {
 +                SDL_StopTextInput();
++                android_text_input_open = false;
 +            }
 +#endif
 +            break;
@@ -3017,6 +3052,7 @@ index 42c74e7..0818c1c 100644
 +#ifdef __ANDROID__
 +        case EventType::Click: {
 +            SDL_StartTextInput();
++            android_text_input_open = true;
              break;
          }
 +#endif
