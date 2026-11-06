@@ -258,7 +258,9 @@ namespace {
             int lines = 0;
             for (size_t i = 0; i < kRdramSize && lines < 80; i++) {
                 const uint8_t mask = g_probe_values[i];
-                if (g_probe_count[i] < 2 || g_probe_count[i] > 60 || (mask & 0x80u) || __builtin_popcount(mask) < 3) {
+                // Cycling through 5 Kongs: 4+ changes over 4+ different values (an index
+                // 0-4, or an actor type 2-6), not a constantly changing one.
+                if (g_probe_count[i] < 3 || g_probe_count[i] > 20 || (mask & 0x80u) || __builtin_popcount(mask) < 4) {
                     continue;
                 }
                 const uint32_t address = 0x80000000u + static_cast<uint32_t>(i ^ 3);
