@@ -11,6 +11,7 @@
 #include <atomic>
 #include <chrono>
 #include <string>
+#include <vector>
 
 #include "librecomp/mods.hpp"
 #include "gpu_driver.h"
@@ -216,63 +217,60 @@ namespace {
     }
 }
 
-// TEMPORARY probe (finding where the Tag Barrel keeps the Kong you're looking at): logs
-// small values (0-6) that change in the player actor, its extra data and some globals, and
-// the player's control state. Bytes that keep changing (animation etc.) go quiet after a
-// while. Logcat tag DK64Tag.
+// TEMPORARY probe (finding where the Tag Barrel keeps the Kong you're looking at). The
+// Tag Barrel is player control state 66. While in it, every byte of RDRAM is watched; on
+// leaving, bytes that changed a few times, only ever held 0-7 (at least three different
+// values) and now hold the Kong you came out as are logged. Logcat tag DK64Tag.
 namespace {
-    struct ProbeRegion { const char* name; uint32_t base; bool pointer; uint32_t size; };
-    constexpr ProbeRegion kProbeRegions[] = {
-        { "player", kPlayerPointer, true, 0x400 },
-        { "paad", kExtraPlayerInfo, true, 0x400 },
-        { "g807FC9", 0x807FC900u, false, 0x100 },
-        { "g8074E7", 0x8074E700u, false, 0x100 },
-        { "g807FBB", 0x807FBB00u, false, 0x100 },
-        { "g807FD5", 0x807FD500u, false, 0x100 },
-        { "g80750A", 0x8075AD00u, false, 0x100 },
-    };
-    constexpr int kProbeCount = sizeof(kProbeRegions) / sizeof(kProbeRegions[0]);
-    uint8_t g_probe_prev[kProbeCount][0x400];
-    uint16_t g_probe_changes[kProbeCount][0x400];
-    uint32_t g_probe_base[kProbeCount];
-    int g_probe_ctl = -1;
-    bool g_probe_started = false;
+    constexpr uint32_t kTagBarrelState = 66;
+    constexpr size_t kRdramSize = 8 * 1024 * 1024;
+    std::vector<uint8_t> g_probe_prev, g_probe_count, g_probe_values;
+    bool g_probe_in = false;
+    int g_probe_samples = 0;
 
     void tag_probe(const uint8_t* rdram) {
         const uint32_t player = read_u32(rdram, kPlayerPointer);
-        if (player >= 0x80000000u && player < 0x80800000u - 0x400) {
-            int ctl = read_u8(rdram, player + kPlayerControlState);
-            if (ctl != g_probe_ctl) {
-                __android_log_print(ANDROID_LOG_INFO, "DK64Tag", "control state %d -> %d (kong %d, props %08X)",
-                    g_probe_ctl, ctl, read_u8(rdram, kCurrentCharacterIndex), read_u32(rdram, kGlobalProperties));
-                g_probe_ctl = ctl;
-            }
+        int ctl = -1;
+        if (player >= 0x80000000u && player < 0x807FFC00u) {
+            ctl = read_u8(rdram, player + kPlayerControlState);
         }
-        int lines = 0;
-        for (int r = 0; r < kProbeCount; r++) {
-            const ProbeRegion& reg = kProbeRegions[r];
-            uint32_t base = reg.pointer ? read_u32(rdram, reg.base) : reg.base;
-            if (base < 0x80000000u || base >= 0x80800000u - reg.size) {
-                continue;
-            }
-            const bool fresh = !g_probe_started || base != g_probe_base[r];
-            g_probe_base[r] = base;
-            for (uint32_t i = 0; i < reg.size; i++) {
-                uint8_t v = read_u8(rdram, base + i);
-                uint8_t& prev = g_probe_prev[r][i];
-                if (!fresh && v != prev) {
-                    uint16_t& n = g_probe_changes[r][i];
-                    if (n < 0xFFFF) n++;
-                    if (n <= 40 && v <= 6 && prev <= 6 && lines < 40) {
-                        __android_log_print(ANDROID_LOG_INFO, "DK64Tag", "%s+0x%03X: %u -> %u (kong %d)",
-                            reg.name, i, prev, v, read_u8(rdram, kCurrentCharacterIndex));
-                        lines++;
-                    }
+        const bool in = ctl == static_cast<int>(kTagBarrelState);
+        if (in && !g_probe_in) {
+            g_probe_prev.assign(rdram, rdram + kRdramSize);
+            g_probe_count.assign(kRdramSize, 0);
+            g_probe_values.assign(kRdramSize, 0);
+            g_probe_samples = 0;
+            __android_log_print(ANDROID_LOG_INFO, "DK64Tag", "Tag Barrel: in (kong %d)", read_u8(rdram, kCurrentCharacterIndex));
+        } else if (in) {
+            g_probe_samples++;
+            for (size_t i = 0; i < kRdramSize; i++) {
+                const uint8_t v = rdram[i];
+                if (v != g_probe_prev[i]) {
+                    if (g_probe_count[i] < 255) g_probe_count[i]++;
+                    g_probe_values[i] |= v < 7 ? static_cast<uint8_t>(1u << v) : 0x80u;
+                    g_probe_values[i] |= g_probe_prev[i] < 7 ? static_cast<uint8_t>(1u << g_probe_prev[i]) : 0x80u;
+                    g_probe_prev[i] = v;
                 }
-                prev = v;
             }
+        } else if (g_probe_in) {
+            const int kong = read_u8(rdram, kCurrentCharacterIndex);
+            __android_log_print(ANDROID_LOG_INFO, "DK64Tag", "Tag Barrel: out as kong %d after %d samples", kong, g_probe_samples);
+            int lines = 0;
+            for (size_t i = 0; i < kRdramSize && lines < 80; i++) {
+                const uint8_t mask = g_probe_values[i];
+                if (g_probe_count[i] < 2 || g_probe_count[i] > 60 || (mask & 0x80u) || __builtin_popcount(mask) < 3) {
+                    continue;
+                }
+                const uint32_t address = 0x80000000u + static_cast<uint32_t>(i ^ 3);
+                __android_log_print(ANDROID_LOG_INFO, "DK64Tag", "candidate %08X: %d changes, values %02X, last %u, now %u",
+                    address, g_probe_count[i], mask, g_probe_prev[i], rdram[i]);
+                lines++;
+            }
+            g_probe_prev.clear(); g_probe_prev.shrink_to_fit();
+            g_probe_count.clear(); g_probe_count.shrink_to_fit();
+            g_probe_values.clear(); g_probe_values.shrink_to_fit();
         }
-        g_probe_started = true;
+        g_probe_in = in;
     }
 }
 
