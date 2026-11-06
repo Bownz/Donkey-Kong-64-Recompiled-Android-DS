@@ -112,6 +112,9 @@ public final class BottomScreenView extends View {
             boolean changed = state.refresh();
             if (state.paused && !wasPaused) {
                 pauseLevel = state.level >= 0 ? state.level : -1;   // open on where you are
+                pauseSlideFrom = NO_LEVEL;   // the table slides in from the right
+                pauseSlideDir = 1;
+                startAnim("pauseSlide");
             }
             wasPaused = state.paused;
             if (state.inGame() && state.crystals < crystalsBefore) {
@@ -1053,7 +1056,15 @@ public final class BottomScreenView extends View {
 
     private static final String[] PAUSE_COLUMNS = { "Golden Bananas", "Bananas", "Blueprints", "Banana Medals", "Coins" };
 
+    private static final int NO_LEVEL = Integer.MIN_VALUE;
+    private static final long PAUSE_SLIDE_MS = 320;
+    private int pauseSlideFrom = NO_LEVEL;   // the table sliding out (NO_LEVEL: none)
+    private int pauseSlideDir = 1;           // +1: the new one comes in from the right
+
     private void stepPauseLevel(int dir) {
+        pauseSlideFrom = pauseLevel;
+        pauseSlideDir = dir;
+        startAnim("pauseSlide");
         // -1 (all levels), then 0..LEVELS-1, wrapping round; levels not reached yet are skipped.
         int n = GameState.LEVELS + 1;
         for (int i = 0; i < n; i++) {
@@ -1104,21 +1115,57 @@ public final class BottomScreenView extends View {
         c.drawRoundRect(board, br, br, paint);
         paint.setShader(null);
 
+        // The table: slides out / in sideways when the level changes (and in when the pause
+        // screen opens).
+        float slide = animProgress("pauseSlide", PAUSE_SLIDE_MS);
+        if (slide < 0f) {
+            drawPauseTable(c, board, pauseLevel);
+        } else {
+            float e = 1f - (1f - slide) * (1f - slide) * (1f - slide);   // ease out
+            float w = board.width();
+            int saved = c.save();
+            c.clipRect(board);
+            if (pauseSlideFrom != NO_LEVEL) {
+                c.translate(-pauseSlideDir * e * w, 0);
+                drawPauseTable(c, board, pauseSlideFrom);
+                c.translate(pauseSlideDir * w, 0);
+            } else {
+                c.translate(pauseSlideDir * (1f - e) * w, 0);
+            }
+            drawPauseTable(c, board, pauseLevel);
+            c.restoreToCount(saved);
+        }
+    }
+
+    /** An item's sprite on its own (no badge), animated like in the game when it can be. */
+    private void sprite(Canvas c, float x, float y, float r, Row row) {
+        RomIcons.ensureAnimations();
+        Bitmap b = RomIcons.frame(row.icon, android.os.SystemClock.uptimeMillis(), 12);
+        if (RomIcons.hasAnimation(row.icon)) {
+            animating = true;
+        }
+        if (!RomIcons.draw(c, b, x, y, r)) {
+            badge(c, x, y, r * 0.9f, row);
+        }
+    }
+
+    /** The pause screen's table (one level, or all of them) on its board. */
+    private void drawPauseTable(Canvas c, RectF board, int level) {
         float nameW = board.width() * 0.2f;
         float colW = (board.width() - nameW) / PAUSE_COLUMNS.length;
-        float headRowH = board.height() * 0.13f;
-        float footH = board.height() * 0.15f;
+        float headRowH = board.height() * 0.17f;
+        float footH = board.height() * 0.18f;
         float rowH = (board.height() - headRowH - footH) / GameState.KONG_COUNT;
 
         // Column icons (from DK's rows, so the per-Kong icons show DK's colour).
-        java.util.List<Row> dkRows = rowsFor(GameState.DK, pauseLevel);
+        java.util.List<Row> dkRows = rowsFor(GameState.DK, level);
         for (int col = 0; col < PAUSE_COLUMNS.length; col++) {
             Row r = findRow(dkRows, PAUSE_COLUMNS[col]);
             if (r == null) {
                 continue;
             }
             float x = board.left + nameW + colW * (col + 0.5f), y = board.top + headRowH / 2f;
-            badge(c, x, y, Math.min(headRowH * 0.42f, colW * 0.3f), r);
+            sprite(c, x, y, Math.min(headRowH * 0.5f, colW * 0.4f), r);
         }
 
         for (int k = 0; k < GameState.KONG_COUNT; k++) {
@@ -1149,7 +1196,7 @@ public final class BottomScreenView extends View {
             text.setTextSize(fitText(name, nameW * 0.52f, tmp.height() * 0.42f));
             outlined(c, name, fx + faceR * 1.35f, cy + text.getTextSize() * 0.36f, locked ? Color.rgb(140, 130, 120) : CREAM);
 
-            java.util.List<Row> rows = locked ? null : rowsFor(k, pauseLevel);
+            java.util.List<Row> rows = locked ? null : rowsFor(k, level);
             for (int col = 0; col < PAUSE_COLUMNS.length; col++) {
                 Row r = rows == null ? null : findRow(rows, PAUSE_COLUMNS[col]);
                 String value;
@@ -1170,23 +1217,23 @@ public final class BottomScreenView extends View {
         }
 
         // Items that belong to no Kong: fairies, crowns, keys, rainbow coins.
-        java.util.List<Row> shared = rowsFor(SHARED_TAB, pauseLevel);
+        java.util.List<Row> shared = rowsFor(SHARED_TAB, level);
         shared.removeIf(r -> r.total == 0 || r.label.equals("Golden Bananas"));
         float fy = board.bottom - footH / 2f;
         float slot = board.width() / Math.max(1, shared.size());
         for (int i = 0; i < shared.size(); i++) {
             Row r = shared.get(i);
             float sx = board.left + slot * i;
-            float bR = Math.min(footH * 0.36f, slot * 0.14f);
+            float bR = Math.min(footH * 0.48f, slot * 0.2f);
             float bx = sx + slot * 0.12f + bR;
             String value = r.have + "/" + r.total;
             tmp.set(bx + bR * 0.4f, fy - bR * 0.6f, sx + slot * 0.92f, fy + bR * 0.6f);
             tag(c, tmp, value, r.have >= r.total);
-            badge(c, bx, fy, bR, r);
+            sprite(c, bx, fy, bR, r);
         }
-    }
+        }
 
-        /**
+    /**
      * Shown until a save is loaded: just the game's name over the jungle. (Our own lettering;
      * the official logo artwork isn't something this app ships.)
      */

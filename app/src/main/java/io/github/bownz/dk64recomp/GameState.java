@@ -136,6 +136,16 @@ final class GameState {
     private static native boolean nativeBottomButtons();
     private static native int nativeTagBarrelKong();
     private static native int nativeHeldBananas(int kong, int level);
+    private static native int[] nativeSpriteFrames(int table, int file);
+
+    /** The texture files of the game's animated sprite that uses this one, or null. */
+    static int[] spriteFrames(int table, int file) {
+        try {
+            return nativeSpriteFrames(table, file);
+        } catch (UnsatisfiedLinkError e) {
+            return null;
+        }
+    }
 
     /** Coloured bananas a Kong holds in a level (not yet fed to Troff 'n' Scoff). */
     static int heldBananas(int kong, int level) {

@@ -133,6 +133,98 @@ final class RomIcons {
     static final Bitmap[] weapon = new Bitmap[5];
     static final Bitmap[] instrument = new Bitmap[5];
 
+    // ---- Animation ----
+    // The pause screen shows the items spinning, as in the game: each still above is one
+    // frame of a game sprite; its other frames are found (once the game has set up its sprite
+    // table) and decoded the same way.
+    private static final class Animatable {
+        final Bitmap still; final Spec spec; final int hue;
+        Animatable(Bitmap still, Spec spec, int hue) { this.still = still; this.spec = spec; this.hue = hue; }
+    }
+    private static final java.util.List<Animatable> animatable = new java.util.ArrayList<>();
+    private static final java.util.Map<Bitmap, Bitmap[]> animations = new java.util.concurrent.ConcurrentHashMap<>();
+    private static volatile boolean animationsStarted;
+
+    private static void animate(Bitmap still, Spec spec, int hue) {
+        if (still != null) {
+            synchronized (animatable) {
+                animatable.add(new Animatable(still, spec, hue));
+            }
+        }
+    }
+
+    /**
+     * Finds and decodes the other frames of the stills, in the background, once the game is
+     * running (its sprite table is set up then). Safe to call repeatedly.
+     */
+    static void ensureAnimations() {
+        if (animationsStarted || !started || GameState.frameCount() <= 0) {
+            return;
+        }
+        animationsStarted = true;
+        new Thread(() -> {
+            RandomAccessFile f = openUsRom();
+            if (f == null) {
+                return;
+            }
+            int animated = 0;
+            try {
+                java.util.List<Animatable> list;
+                synchronized (animatable) {
+                    list = new java.util.ArrayList<>(animatable);
+                }
+                for (Animatable a : list) {
+                    int table = a.spec.table == TEXTURES_GEOMETRY ? 25 : a.spec.table;
+                    int[] files = GameState.spriteFrames(table, a.spec.file);
+                    if (files == null || files.length < 2) {
+                        continue;
+                    }
+                    Bitmap[] frames = new Bitmap[files.length];
+                    boolean ok = true;
+                    for (int i = 0; i < files.length && ok; i++) {
+                        Spec frame = new Spec(a.spec.table, files[i], a.spec.width, a.spec.height, a.spec.flipped, a.spec.format);
+                        frame.lenient = true;   // edge-on frames are mostly empty
+                        int[] argb = pixels(f, frame);
+                        if (argb == null) {
+                            ok = false;
+                            break;
+                        }
+                        if (a.hue >= 0) {
+                            argb = recolor(argb, a.hue);
+                        }
+                        frames[i] = Bitmap.createBitmap(argb, a.spec.width, a.spec.height, Bitmap.Config.ARGB_8888);
+                    }
+                    if (ok) {
+                        animations.put(a.still, frames);
+                        animated++;
+                    }
+                }
+            } finally {
+                try {
+                    f.close();
+                } catch (IOException ignored) {
+                }
+            }
+            Log.i(TAG, "Bottom screen: " + animated + " animated sprites");
+        }, "DK64RomAnimations").start();
+    }
+
+    /** The frame of {@code still}'s animation to show at {@code timeMs} (the still if none). */
+    static Bitmap frame(Bitmap still, long timeMs, int fps) {
+        if (still == null) {
+            return null;
+        }
+        Bitmap[] frames = animations.get(still);
+        if (frames == null) {
+            return still;
+        }
+        return frames[(int) ((timeMs * fps / 1000) % frames.length)];
+    }
+
+    static boolean hasAnimation(Bitmap still) {
+        return still != null && animations.containsKey(still);
+    }
+
     /** The game's data folder (holding DK64.z64), set by DK64Activity once it's known. */
     static volatile String dataDirectory;
 
@@ -174,6 +266,11 @@ final class RomIcons {
                 fairy = load(f, FAIRY);
                 crosshair = load(f, CROSSHAIR);
                 crystal = loadWidestFrame(f, CRYSTAL_FIRST, CRYSTAL_FRAMES, 40, 51);
+                animate(goldenBanana, GOLDEN_BANANA, -1);
+                animate(crown, CROWN, -1);
+                animate(key, KEY, -1);
+                animate(rainbowCoin, RAINBOW_COIN, -1);
+                animate(fairy, FAIRY, -1);
                 int[] medalPixels = pixels(f, MEDAL);
                 int found = count(melon, orange, film, goldenBanana, medal, blueprint, crown, key, rainbowCoin, fairy, crosshair, crystal);
                 for (int k = 0; k < 5; k++) {
@@ -182,6 +279,8 @@ final class RomIcons {
                         medalByKong[k] = Bitmap.createBitmap(KONG_HUES[k] < 0 ? medalPixels : recolor(medalPixels, KONG_HUES[k]),
                             MEDAL.width, MEDAL.height, Bitmap.Config.ARGB_8888);
                     }
+                    animate(medalByKong[k], MEDAL, KONG_HUES[k]);
+                    animate(coin[k], COIN[k], -1);
                     found += count(coin[k]);
                 }
                 for (int q = 0; q < 4; q++) {
@@ -192,6 +291,8 @@ final class RomIcons {
                 for (int k = 0; k < 5; k++) {
                     banana[k] = load(f, BANANA[k]);
                     blueprintByKong[k] = load(f, BLUEPRINT_BY_KONG[k]);
+                    animate(banana[k], BANANA[k], -1);
+                    animate(blueprintByKong[k], BLUEPRINT_BY_KONG[k], -1);
                     found += count(blueprintByKong[k]);
                     weapon[k] = load(f, WEAPON[k]);
                     instrument[k] = load(f, INSTRUMENT[k]);

@@ -234,6 +234,49 @@ namespace {
     }
 }
 
+// The frames of the game's animated sprite that uses a texture (table 7 or 25, file): the
+// sprite table D_global_asm_80755390 holds pointers to sprites { ..., +4 s8 tiles_x, +5 s8
+// tiles_y, +6 s16 codec, +0xD s8 table (0: 7, 1: 25), +0xE s16 width, +0x10 s16 height,
+// +0x12 s16 image_count, +0x14 s16 images[] } (see patches/button_icons.c). Single-image
+// frames only. Null if no sprite uses it (or the game hasn't set the table up yet).
+extern "C" JNIEXPORT jintArray JNICALL
+Java_io_github_bownz_dk64recomp_GameState_nativeSpriteFrames(JNIEnv* env, jclass, jint table, jint file) {
+    const uint8_t* rdram = g_rdram.load();
+    if (rdram == nullptr) {
+        return nullptr;
+    }
+    constexpr uint32_t kSpriteTable = 0x80755390u;
+    for (int i = 0; i < 256; i++) {
+        const uint32_t sprite = read_u32(rdram, kSpriteTable + i * 4);
+        if (sprite < 0x80000000u || sprite >= 0x807FF000u) {
+            continue;
+        }
+        const int sprite_table = read_u8(rdram, sprite + 0xD) ? 25 : 7;
+        const int tiles = read_u8(rdram, sprite + 4) * read_u8(rdram, sprite + 5);
+        const int count = read_u16(rdram, sprite + 0x12);
+        if (sprite_table != table || tiles > 1 || count < 2 || count > 64) {
+            continue;
+        }
+        bool uses = false;
+        for (int j = 0; j < count && !uses; j++) {
+            uses = read_u16(rdram, sprite + 0x14 + j * 2) == static_cast<uint32_t>(file);
+        }
+        if (!uses) {
+            continue;
+        }
+        jint frames[64];
+        for (int j = 0; j < count; j++) {
+            frames[j] = read_u16(rdram, sprite + 0x14 + j * 2);
+        }
+        jintArray out = env->NewIntArray(count);
+        if (out != nullptr) {
+            env->SetIntArrayRegion(out, 0, count, frames);
+        }
+        return out;
+    }
+    return nullptr;
+}
+
 extern "C" JNIEXPORT jint JNICALL
 Java_io_github_bownz_dk64recomp_GameState_nativeHeldBananas(JNIEnv*, jclass, jint kong, jint level) {
     const uint8_t* rdram = g_rdram.load();
