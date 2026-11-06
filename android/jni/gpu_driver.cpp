@@ -263,6 +263,10 @@ extern "C" void dk64_android_ui_sound(int kind) {
     call_activity("playUiSound", "(Ljava/lang/String;)Ljava/lang/String;", &arg);
 }
 
+extern "C" int dk64_android_has_second_screen() {
+    return call_activity("hasSecondScreen", "()Ljava/lang/String;", nullptr) == "0" ? 0 : 1;
+}
+
 extern "C" int dk64_android_touch_controls_mode() {
     const std::string query;   // empty: just read the mode
     const std::string value = call_activity("touchControlsMode", "(Ljava/lang/String;)Ljava/lang/String;", &query);

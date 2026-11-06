@@ -474,6 +474,22 @@ public class DK64Activity extends SDLActivity
         return false;
     }
 
+    /** From native code: "1" if the device has a second screen (for the bottom screen). */
+    public String hasSecondScreen() {
+        try {
+            DisplayManager dm = (DisplayManager) getSystemService(Context.DISPLAY_SERVICE);
+            Display ours = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) ? getDisplay() : getDefaultDisplayLegacy();
+            for (Display display : dm.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION)) {
+                if (ours == null || (display.getDisplayId() != ours.getDisplayId() && display.isValid())) {
+                    return "1";
+                }
+            }
+        } catch (RuntimeException e) {
+            return "1";   // can't tell: keep the options
+        }
+        return "0";
+    }
+
     /** A display other than ours that can host a presentation, if any. */
     private Display findSecondDisplay() {
         Display ours = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)

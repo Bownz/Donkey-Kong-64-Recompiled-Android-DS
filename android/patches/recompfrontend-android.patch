@@ -881,6 +881,45 @@ index c312734..2917814 100644
          }
  
          ~CurlSession()
+diff --git a/recompui/src/composites/ui_mod_discovery_ui.cpp b/recompui/src/composites/ui_mod_discovery_ui.cpp
+index 8d442e6..6699ec4 100644
+--- a/recompui/src/composites/ui_mod_discovery_ui.cpp
++++ b/recompui/src/composites/ui_mod_discovery_ui.cpp
+@@ -176,7 +176,14 @@ namespace recompui
+         search_group->set_align_items(AlignItems::Center);
+         search_group->set_gap(10.0f);
+         search_group->set_flex(0.0f, 0.0f);
++#ifdef __ANDROID__
++        // Android: a proper-sized search box (the 280px one was tiny on a phone screen and
++        // its text ran over the label).
++        search_group->set_width(55.0f, Unit::Percent);
++        search_group->set_gap(14.0f);
++#else
+         search_group->set_width(280.0f, Unit::Px);
++#endif
+ 
+         Label *search_label = context.create_element<Label>(
+             search_group, "Search:", LabelStyle::Small);
+@@ -186,6 +193,19 @@ namespace recompui
+         search_input->set_flex(1.0f, 1.0f);
+         search_input->set_min_width(120.0f);
+         search_input->set_background_color(Color{40, 38, 50, 255});
++#ifdef __ANDROID__
++        search_label->set_flex(0.0f, 0.0f);
++        search_label->set_white_space(WhiteSpace::Nowrap);
++        search_input->set_height(48.0f);
++        search_input->set_font_size(22.0f);
++        search_input->set_line_height(28.0f);
++        search_input->set_padding_left(14.0f);
++        search_input->set_padding_right(14.0f);
++        search_input->set_padding_top(8.0f);
++        search_input->set_padding_bottom(8.0f);
++        search_input->set_border_radius(14.0f);
++        search_input->set_color(Color{255, 244, 214, 255});
++#endif
+         search_input->add_text_changed_callback(
+             [this](const std::string &text)
+             {
 diff --git a/recompui/src/composites/ui_mod_menu.cpp b/recompui/src/composites/ui_mod_menu.cpp
 index 39a7abc..7d403fe 100644
 --- a/recompui/src/composites/ui_mod_menu.cpp
@@ -2451,6 +2490,24 @@ index caa1020..355460f 100644
                      recompui::Color pulse_color = recompui::get_pulse_color(750);
                      focus_style.set_color(pulse_color);
                      focus_style.set_border_color(pulse_color);
+diff --git a/recompui/src/elements/ui_button.cpp b/recompui/src/elements/ui_button.cpp
+index cf2a311..777aa29 100644
+--- a/recompui/src/elements/ui_button.cpp
++++ b/recompui/src/elements/ui_button.cpp
+@@ -112,6 +112,13 @@ namespace recompui {
+             break;
+         case EventType::Focus:
+             set_style_enabled(focus_state, std::get<EventFocus>(e.variant).active);
++#ifdef __ANDROID__
++            // Moving onto a button with a controller scrolls it into view (e.g. the Download
++            // buttons down the Find Mods list).
++            if (std::get<EventFocus>(e.variant).active) {
++                scroll_into_view();
++            }
++#endif
+             break;
+         case EventType::Update:
+             break;
 diff --git a/recompui/src/elements/ui_document.cpp b/recompui/src/elements/ui_document.cpp
 index a60c585..c5f67ab 100644
 --- a/recompui/src/elements/ui_document.cpp
@@ -2741,6 +2798,35 @@ index b8d3783..d136839 100644
          Element *get_active_tab_element() const { return active_tab >= 0 && active_tab < static_cast<int>(tabs.size()) ? tabs[active_tab] : nullptr; };
          int get_active_tab() const { return active_tab; }
          void set_tab_visible(int tab_index, bool is_visible);
+diff --git a/recompui/src/elements/ui_text_input.cpp b/recompui/src/elements/ui_text_input.cpp
+index 42c74e7..9164e73 100644
+--- a/recompui/src/elements/ui_text_input.cpp
++++ b/recompui/src/elements/ui_text_input.cpp
+@@ -1,6 +1,9 @@
+ #include "ui_text_input.h"
+ 
+ #include <cassert>
++#ifdef __ANDROID__
++#include <SDL.h>
++#endif
+ 
+ namespace recompui {
+ 
+@@ -22,6 +25,14 @@ namespace recompui {
+                 focus_callback(event.active);
+             }
+             set_style_enabled(focus_state, event.active);
++#ifdef __ANDROID__
++            // Bring up (and put away) the on-screen keyboard.
++            if (event.active) {
++                SDL_StartTextInput();
++            } else {
++                SDL_StopTextInput();
++            }
++#endif
+             break;
+         }
+         default:
 diff --git a/recompui/src/renderer/rt64_render_context.cpp b/recompui/src/renderer/rt64_render_context.cpp
 index a7954c7..dec1073 100644
 --- a/recompui/src/renderer/rt64_render_context.cpp

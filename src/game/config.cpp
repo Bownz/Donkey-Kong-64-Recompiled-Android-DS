@@ -360,9 +360,13 @@ static void add_gpu_driver_option(recomp::config::Config &config) {
 // Android: the "Dual Screen" tab (the bottom screen on handhelds with two screens).
 extern "C" void dk64_android_set_touch_controls_mode(int mode);
 extern "C" void dk64_android_set_button_icons(int enabled);
+extern "C" int dk64_android_has_second_screen();
 
 static void add_dual_screen_options(recomp::config::Config &config) {
     using EnumOptionVector = const std::vector<recomp::config::ConfigOptionEnumOption>;
+    // Devices with one screen: the bottom screen's options (Bottom Screen, Touch Kong Swap)
+    // aren't shown - there's nowhere to put the bottom screen.
+    const bool one_screen = dk64_android_has_second_screen() == 0;
     // On-screen touch buttons on the game screen: Auto shows them when no controller is
     // connected (DK64Activity keeps the setting; this passes it on).
     static const std::string touch_controls_option = "android_touch_controls";
@@ -398,7 +402,8 @@ static void add_dual_screen_options(recomp::config::Config &config) {
         "Shows health, collectibles and action buttons on the second screen, on devices that have one. "
         "Turn it off to leave the second screen free.",
         bottom_screen_options,
-        1u
+        1u,
+        one_screen
     );
     // This tab applies changes straight away; save them straight away too (the menu only
     // saves when the tab is closed, which doesn't happen if the app is closed from it).
@@ -427,7 +432,8 @@ static void add_dual_screen_options(recomp::config::Config &config) {
         "enable it in the Mods menu and restart the game.<br />"
         "When this is off, tapping a Kong only shows their collectibles.",
         touch_kong_swap_options,
-        0u
+        0u,
+        one_screen
     );
     config.add_option_change_callback(touch_kong_swap_option,
         [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
