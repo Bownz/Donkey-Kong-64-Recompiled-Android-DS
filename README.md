@@ -2,19 +2,41 @@
 
 An **unofficial Android port** of [Donkey Kong 64: Recompiled](https://github.com/Rainchus/Donkey-Kong-64-Recompiled), built for dual-screen Android handhelds such as the **AYN Thor**. The game runs on the top screen; the bottom screen becomes a DK-themed companion with your health, collectibles and touch buttons for moves.
 
-> **Status: beta.** Developed and tested on an AYN Thor (Adreno 740, Android 13). Other devices may work but haven't been tested.
+> **Status: beta.** Tested on an AYN Thor (Adreno 740, Android 13) and a Samsung Galaxy Z Fold 7 (Adreno 830). Other devices may work but haven't been tested.
+
+**[Download the latest APK from Releases](../../releases)**
 
 **This repository and its builds contain no game assets or ROM data.** You need your own NTSC-U 1.0 Donkey Kong 64 ROM. Icons on the bottom screen are read from your ROM on the device; none are shipped.
+
+## Screenshots
+
+AYN Thor: the game on the top screen, the companion on the bottom.
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/thor-gameplay.png" width="400" alt="Gameplay in Jungle Japes with DK's collectibles on the bottom screen"><br>Jungle Japes, with DK's collectibles below</td>
+    <td align="center"><img src="docs/screenshots/thor-launcher.png" width="400" alt="The main menu"><br>The main menu</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/thor-pause.png" width="400" alt="Pause menu with the controller's button icons and every Kong's progress on the bottom screen"><br>Paused: controller button icons, every Kong's progress below</td>
+    <td align="center"><img src="docs/screenshots/thor-configure.png" width="400" alt="Configure Inputs with the detected controller"><br>Configure Inputs, with the detected controller</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/thor-settings.png" width="400" alt="Settings, Input tab"><br>Settings: Video, Input, Audio, Gameplay</td>
+    <td align="center"><img src="docs/screenshots/thor-diddy.png" width="400" alt="Playing as Diddy"><br>Playing as Diddy</td>
+  </tr>
+</table>
 
 ## What the Android port adds
 
 **Running on Android**
 - arm64 APK (Android 9+, Vulkan 1.1), built with Gradle + NDK on top of the desktop CMake project
-- Rendering fixes for Adreno GPUs, and an optional custom Vulkan driver (e.g. Turnip) chosen in *Graphics → GPU Driver*
+- Rendering fixes for Adreno GPUs, and an optional custom Vulkan driver (e.g. Turnip) chosen in *Video → GPU Driver*
 - Gyro aiming with the device's own motion sensors
-- Touch controls on screen when no controller is connected
-- Tester tools: log sharing (*Technical → Share Log*), crash report prompt, version shown on the start screen
-- Optional on-screen frame rate (*Graphics → Show FPS*)
+- Touch controls on screen when no controller is connected, with a second camera stick for the Analog Camera and a layout editor (*Input → Touch → Edit Touch Layout*)
+- Classic and Modern control presets, controller detection with a live controller picture, and in-game button icons that match your controller
+- Tester tools: a crash report prompt after a crash, and the version shown on the start screen
+- Optional on-screen frame rate (*Video → Show FPS*)
 
 **The bottom screen (second display)**
 - Health melons, the current Kong's collectibles for the level (golden bananas, bananas, blueprints, medals, coins) and Kong tabs
@@ -22,8 +44,8 @@ An **unofficial Android port** of [Donkey Kong 64: Recompiled](https://github.co
 - A move button that changes with the Kong: Lanky's Orangstand toggle, Diddy's Chimpy Charge, Chunky's Primate Punch, or *Cancel* while a barrel ability is active
 - While paused: a progress table for every Kong in the level, with fairies, crowns, keys and rainbow coins, and arrows to browse the levels you've reached
 - Small animations when something changes (a collectible spins, a melon shakes when you're hit)
-- **Touch Kong Swap** (*Settings → Dual Screen*): tap a Kong to swap straight to them, using the bundled [Tag Anywhere](https://github.com/Killklli/DK64TagAnywhereRecomp) mod (off by default; enable it in *Mods*)
-- The bottom screen can be switched off in *Settings → Dual Screen*
+- **Touch Kong Swap** (*Input → Touch*): tap a Kong to swap straight to them, using the bundled [Tag Anywhere](https://github.com/Killklli/DK64TagAnywhereRecomp) mod (off by default; enable it in *Mods*)
+- The bottom screen can be switched off in *Input → Touch*
 
 ## Building
 
