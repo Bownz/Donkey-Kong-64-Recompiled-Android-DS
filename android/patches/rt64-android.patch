@@ -124,10 +124,21 @@ index 7006549..cec813b 100644
              return nullptr;
          }
 diff --git a/src/hle/rt64_application.cpp b/src/hle/rt64_application.cpp
-index ee8bc1f..7ba0991 100644
+index ee8bc1f..08fa291 100644
 --- a/src/hle/rt64_application.cpp
 +++ b/src/hle/rt64_application.cpp
-@@ -18,11 +18,13 @@
+@@ -3,6 +3,10 @@
+ //
+ 
+ #include "rt64_application.h"
++
++#if defined(__ANDROID__)
++#   include "plume_vulkan.h"
++#endif
+ #include "rhi/rt64_render_hooks.h"
+ 
+ #include <cinttypes>
+@@ -18,11 +22,13 @@
  
  //#define LOG_DISPLAY_LISTS
  
@@ -142,7 +153,7 @@ index ee8bc1f..7ba0991 100644
      extern std::unique_ptr<RenderInterface> CreateVulkanInterface(RenderWindow renderWindow);
  #else
      extern std::unique_ptr<RenderInterface> CreateVulkanInterface();
-@@ -33,7 +35,7 @@ namespace RT64 {
+@@ -33,7 +39,7 @@ namespace RT64 {
      // Constants
  
      static std::unique_ptr<RenderInterface> CreateVulkanInterfaceWrapper(RenderWindow renderWindow) {
@@ -151,7 +162,32 @@ index ee8bc1f..7ba0991 100644
          return plume::CreateVulkanInterface(renderWindow);
  #else
          return plume::CreateVulkanInterface();
-@@ -325,7 +327,13 @@ namespace RT64 {
+@@ -316,16 +322,38 @@ namespace RT64 {
+         workloadExtrasUploader = std::make_unique<BufferUploader>(device.get());
+         workloadVelocityUploader = std::make_unique<BufferUploader>(device.get());
+         workloadTilesUploader = std::make_unique<BufferUploader>(device.get());
++#   if defined(__ANDROID__)
++        // Android: the game waits on the display-list thread's GPU work (its native-resolution
++        // render for Render to RAM, and texture uploads), so those workers get the high-priority
++        // GPU queue and can run ahead of the full-resolution frames (see plume).
++        plume::vulkanHighPriorityQueueCreation = true;
++#   endif
+         framebufferGraphicsWorker = std::make_unique<RenderWorker>(device.get(), "Framebuffer Graphics", RenderCommandListType::DIRECT);
+         textureDirectWorker = std::make_unique<RenderWorker>(device.get(), "Texture Direct", RenderCommandListType::DIRECT);
+         textureCopyWorker = std::make_unique<RenderWorker>(device.get(), "Texture Copy", RenderCommandListType::COPY);
++#   if defined(__ANDROID__)
++        plume::vulkanHighPriorityQueueCreation = false;
++#   endif
+         workloadGraphicsWorker = std::make_unique<RenderWorker>(device.get(), "Workload Graphics", RenderCommandListType::DIRECT);
+         presentGraphicsWorker = std::make_unique<RenderWorker>(device.get(), "Present Graphics", RenderCommandListType::DIRECT);
++#   if defined(__ANDROID__)
++        fprintf(stdout, "GPU queues: display list %s; texture uploads %s; presentation %s\n",
++            framebufferGraphicsWorker->sharesQueueWith(*workloadGraphicsWorker) ? "shares the renderer's queue" : "has its own high-priority queue",
++            textureDirectWorker->sharesQueueWith(*workloadGraphicsWorker) ? "share the renderer's queue" : "use the high-priority queue",
++            presentGraphicsWorker->sharesQueueWith(*workloadGraphicsWorker) ? "shares the renderer's queue" : "uses another queue");
++        fflush(stdout);
++#   endif
+ 
          // Create the swap chain with the texture count specified from the configuration.
          RenderSwapChainDesc swapChainDesc;
          swapChainDesc.renderWindow = appWindow->windowHandle;
@@ -165,7 +201,7 @@ index ee8bc1f..7ba0991 100644
          swapChainDesc.textureCount = (userConfig.displayBuffering == UserConfiguration::DisplayBuffering::Triple) ? 3 : 2;
  
          // Enable present wait if supported by the device. We specify a max latency of 1 as we use it to wait right before the next
-@@ -441,6 +449,7 @@ namespace RT64 {
+@@ -441,6 +469,7 @@ namespace RT64 {
          stateExt.device = device.get();
          stateExt.swapChain = swapChain.get();
          stateExt.framebufferGraphicsWorker = framebufferGraphicsWorker.get();
@@ -173,7 +209,7 @@ index ee8bc1f..7ba0991 100644
          stateExt.shaderLibrary = shaderLibrary.get();
          stateExt.drawDataUploader = drawDataUploader.get();
          stateExt.transformsUploader = transformsUploader.get();
-@@ -522,6 +531,46 @@ namespace RT64 {
+@@ -522,6 +551,46 @@ namespace RT64 {
          appWindow->sdlCheckFilterInstallation();
          screenApiProfiler.logAndRestart();
          state->updateScreen(core.decodeVI(), false);
