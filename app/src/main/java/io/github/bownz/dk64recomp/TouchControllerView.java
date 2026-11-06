@@ -378,6 +378,9 @@ public final class TouchControllerView extends View {
     protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         super.onSizeChanged(w, h, oldw, oldh);
         layoutControls();
+        if (active || editing) {
+            startPolling();
+        }
     }
 
     private void layoutControls() {
@@ -842,6 +845,16 @@ public final class TouchControllerView extends View {
         }
         layoutControls();
         invalidate();
+    }
+
+    // Folding or unfolding a foldable can take the view off its window and put it back:
+    // start watching the menus and camera type again.
+    @Override
+    protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        if (active || editing) {
+            startPolling();
+        }
     }
 
     @Override

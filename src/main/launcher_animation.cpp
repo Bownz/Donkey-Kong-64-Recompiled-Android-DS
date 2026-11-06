@@ -449,7 +449,11 @@ void dk64::launcher_animation_update(recompui::LauncherMenu *menu) {
     }
 #ifdef __ANDROID__
     {
-        const float logo_drop = std::max(0.0f, 510.0f - bg_height / 2.0f);
+        // Keeps the logo the same distance from the top on every screen shape (moved down on
+        // a short phone screen, up on a tall one such as an opened foldable), and the island
+        // standing on the water at the bottom.
+        const float logo_drop = 510.0f - bg_height / 2.0f;
+        launcher_context.isles_svg.extra_y = std::max(0.0f, bg_height / 2.0f - 400.0f);
         // Start Game: the logo shrinks away (ease in) before the game starts.
         const float leave_scale = 1.0f - launcher_leave * launcher_leave;
         for (AnimatedSvg *logo : { &launcher_context.logo_d_svg, &launcher_context.logo_k_svg, &launcher_context.logo_64_svg, &launcher_context.logo_recomp_svg }) {

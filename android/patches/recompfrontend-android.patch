@@ -398,7 +398,7 @@ index 6de7a94..7e5c496 100644
                      recompui::hide_all_contexts();
                  }
 diff --git a/recompui/src/base/ui_state.cpp b/recompui/src/base/ui_state.cpp
-index 277a421..852be74 100644
+index 277a421..c35eeda 100644
 --- a/recompui/src/base/ui_state.cpp
 +++ b/recompui/src/base/ui_state.cpp
 @@ -278,6 +278,9 @@ public:
@@ -455,7 +455,7 @@ index 277a421..852be74 100644
 +            static float touch_last_y = 0.0f, touch_start_x = 0.0f, touch_start_y = 0.0f;
 +            int win_w = 0, win_h = 1080;
 +            recompui::get_window_size(win_w, win_h);
-+            const float dp = win_h > 0 ? win_h / 1080.0f : 1.0f;
++            const float dp = win_h > 0 ? std::min(float(win_h), float(win_w) * 9.0f / 16.0f) / 1080.0f : 1.0f;
 +            if (cur_event.type == SDL_EventType::SDL_MOUSEBUTTONDOWN && cur_event.button.which == SDL_TOUCH_MOUSEID) {
 +                touch_down = true;
 +                touch_dragging = false;
@@ -551,13 +551,15 @@ index 277a421..852be74 100644
              ui_state->context->ProcessKeyDown(convert_sdl_to_rml(latest_controller_key_pressed), 0);
              next_repeat_time += repeat_rate;
          }
-@@ -870,7 +957,12 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
+@@ -870,7 +957,14 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
          int height = swap_chain_framebuffer->getHeight();
  
          // Scale the UI based on the window size with 1080 vertical resolution as the reference point.
 +#ifdef __ANDROID__
 +        // Bigger on a handheld's small screen (like the Dusklight port's menus).
-+        ui_state->context->SetDensityIndependentPixelRatio((height) / 1080.0f * 1.35f);
++        // Near-square screens (a foldable opened up) size from the width instead, as if the
++        // screen were 16:9, so the menus fit across rather than running off the sides.
++        ui_state->context->SetDensityIndependentPixelRatio(std::min(float(height), float(width) * 9.0f / 16.0f) / 1080.0f * 1.35f);
 +#else
          ui_state->context->SetDensityIndependentPixelRatio((height) / 1080.0f);
 +#endif
