@@ -264,9 +264,23 @@ namespace {
                     continue;
                 }
                 const uint32_t address = 0x80000000u + static_cast<uint32_t>(i ^ 3);
+                // The one we want ends on the Kong you came out as.
+                if (rdram[i] != kong) {
+                    continue;
+                }
                 __android_log_print(ANDROID_LOG_INFO, "DK64Tag", "candidate %08X: %d changes, values %02X, last %u, now %u",
                     address, g_probe_count[i], mask, g_probe_prev[i], rdram[i]);
                 lines++;
+                // What points at the structure it's in (globals and the player): pointers to
+                // up to 0x1000 bytes before it.
+                int pointers = 0;
+                for (uint32_t a = 0x80740000u; a < 0x80800000u && pointers < 6; a += 4) {
+                    const uint32_t v = read_u32(rdram, a);
+                    if (v <= address && address - v < 0x1000u) {
+                        __android_log_print(ANDROID_LOG_INFO, "DK64Tag", "   pointer at %08X = %08X (+0x%X)", a, v, address - v);
+                        pointers++;
+                    }
+                }
             }
             g_probe_prev.clear(); g_probe_prev.shrink_to_fit();
             g_probe_count.clear(); g_probe_count.shrink_to_fit();
