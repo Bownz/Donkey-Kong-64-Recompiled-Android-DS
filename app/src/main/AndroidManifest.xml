@@ -48,7 +48,7 @@
         android:hasFragileUserData="true"
         android:enableOnBackInvokedCallback="false"
         android:requestLegacyExternalStorage="true"
-        android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen">
+        android:theme="@style/DK64.Theme">
         <!-- enableOnBackInvokedCallback=false: SDL 2 handles Back as a key event, which
              predictive back (the default when targeting API 36) would swallow.
              requestLegacyExternalStorage: lets Android 10 use the shared folder with the

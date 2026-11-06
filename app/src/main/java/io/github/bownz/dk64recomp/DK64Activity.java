@@ -104,6 +104,12 @@ public class DK64Activity extends SDLActivity
         // SDLActivity builds its layout (with the game surface) in onCreate. If the native
         // libraries failed to load it shows an error instead and mLayout stays null.
         if (mLayout != null) {
+            // No focus outline around the game (the theme turns it off too; this covers views
+            // SDL made before it applied, such as the game surface).
+            mLayout.setDefaultFocusHighlightEnabled(false);
+            for (int i = 0; i < mLayout.getChildCount(); i++) {
+                mLayout.getChildAt(i).setDefaultFocusHighlightEnabled(false);
+            }
             overlay = new TouchControllerView(this);
             mLayout.addView(overlay, new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
