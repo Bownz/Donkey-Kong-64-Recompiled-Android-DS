@@ -159,8 +159,9 @@ final class RomIcons {
      * running (its sprite table is set up then). Safe to call repeatedly.
      */
     static void ensureAnimations() {
-        if (animationsStarted || !started || GameState.frameCount() <= 0
-                || android.os.SystemClock.uptimeMillis() < retryAt) {
+        // (Called from the pause screen, so the game is running. GameState.frameCount() is -1
+        // unless the FPS counter is on, so it can't be used to tell.)
+        if (animationsStarted || !started || android.os.SystemClock.uptimeMillis() < retryAt) {
             return;
         }
         animationsStarted = true;
