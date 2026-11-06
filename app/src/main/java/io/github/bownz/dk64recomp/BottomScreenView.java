@@ -2035,8 +2035,18 @@ public final class BottomScreenView extends View {
         paint.setStyle(Paint.Style.FILL);
     }
 
+    private static final long ICON_FLIP_MS = 420;
+    private int flipFromKong = GameState.DK;
+
     private void drawActions(Canvas c) {
         int kong = playingKong();
+        // Swapping Kongs, the gun and instrument icons flip over to the new Kong's.
+        Integer before = lastValue.get("actionKong");
+        watch("actionKong", kong, "iconFlip");
+        if (before != null && before != kong) {
+            flipFromKong = before;
+        }
+        float flip = animProgress("iconFlip", ICON_FLIP_MS);
         boolean known = state.inGame();
         GameState.Kong k = state.kongs[kong];
         String[] counts = new String[4];
@@ -2091,10 +2101,17 @@ public final class BottomScreenView extends View {
                 c.translate(0, -(float) Math.abs(Math.sin(t)) * iconR * 0.12f * fade);
                 c.rotate((float) Math.sin(t) * 10f * fade, iconX, iconY);
             }
+            int iconKong = kong;
+            if (flip >= 0 && (move == Move.WEAPON || move == Move.INSTRUMENT)) {
+                // Turns edge-on, then the other Kong's side comes round.
+                float sx = (float) Math.cos(Math.PI * flip);
+                iconKong = flip < 0.5f ? flipFromKong : kong;
+                c.scale(Math.max(Math.abs(sx), 0.04f), 1f + 0.12f * (float) Math.sin(Math.PI * flip), iconX, iconY);
+            }
             switch (move) {
                 case WEAPON:
-                    if (!RomIcons.draw(c, RomIcons.of(RomIcons.weapon, kong), iconX, iconY, iconR)) {
-                        DkIcons.weapon(c, kong, iconX, iconY, iconR);
+                    if (!RomIcons.draw(c, RomIcons.of(RomIcons.weapon, iconKong), iconX, iconY, iconR)) {
+                        DkIcons.weapon(c, iconKong, iconX, iconY, iconR);
                     }
                     break;
                 case ORANGE:
@@ -2103,8 +2120,8 @@ public final class BottomScreenView extends View {
                     }
                     break;
                 case INSTRUMENT:
-                    if (!RomIcons.draw(c, RomIcons.of(RomIcons.instrument, kong), iconX, iconY, iconR)) {
-                        DkIcons.instrument(c, kong, iconX, iconY, iconR);
+                    if (!RomIcons.draw(c, RomIcons.of(RomIcons.instrument, iconKong), iconX, iconY, iconR)) {
+                        DkIcons.instrument(c, iconKong, iconX, iconY, iconR);
                     }
                     break;
                 default:
