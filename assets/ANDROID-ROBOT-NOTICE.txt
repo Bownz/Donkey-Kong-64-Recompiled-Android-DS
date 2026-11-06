@@ -1,0 +1,6 @@
+The Android robot is reproduced or modified from work created and shared by Google and used
+according to terms described in the Creative Commons 3.0 Attribution License
+(https://creativecommons.org/licenses/by/3.0/).
+
+The app's bottom screen draws a modified version of it (peeking from behind the logo) to show
+that this is the Android version. Android is a trademark of Google LLC.

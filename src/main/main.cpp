@@ -48,6 +48,11 @@
 #include "theme.h"
 #include "librecomp/game.hpp"
 #include "librecomp/mods.hpp"
+#if defined(__ANDROID__)
+extern "C" void dk64_android_start_device_motion();
+extern "C" void dk64_android_watch_quit();
+extern "C" void dk64_android_start_perf_monitor();
+#endif
 #include "librecomp/helpers.hpp"
 
 #include "../../patches/graphics.h"
@@ -150,6 +155,15 @@ ultramodern::gfx_callbacks_t::gfx_data_t create_gfx() {
 
     fprintf(stdout, "SDL Video Driver: %s\n", SDL_GetCurrentVideoDriver());
 
+#if defined(__ANDROID__)
+    // Gyro aiming with the device's own motion sensors (android/jni/device_motion.cpp).
+    dk64_android_start_device_motion();
+    // A crash while the game closes shouldn't be offered as a crash report (gpu_driver.cpp).
+    dk64_android_watch_quit();
+    // Where frame time goes, every 5 seconds in the log (android/jni/perf_monitor.cpp).
+    dk64_android_start_perf_monitor();
+#endif
+
     return {};
 }
 
@@ -241,7 +255,8 @@ ultramodern::renderer::WindowHandle create_window(ultramodern::gfx_callbacks_t::
     bool choose_kazooie_icon = (rand() % 2 == 0);
     HICON new_icon = LoadIcon(GetModuleHandle(NULL), choose_kazooie_icon ? MAKEINTRESOURCE(APP_ICON_K) : MAKEINTRESOURCE(APP_ICON_B));
     SendMessage(wmInfo.info.win.window, WM_SETICON, ICON_SMALL2, (LPARAM)(new_icon));
-#elif defined(__linux__)
+#elif defined(__gnu_linux__)
+    // Desktop Linux only (Android also defines __linux__, but has no window icons).
     SetImageAsIcon("icons/app.png", window);
 #endif
 
@@ -330,7 +345,13 @@ void queue_samples(int16_t* audio_data, size_t sample_count) {
 
     // Prevent audio latency from building up by skipping samples in incoming audio when too many samples are already queued.
     // Skip samples based on how many microseconds of samples are queued already.
+#if defined(__ANDROID__)
+    // Android output drains in bursts, so the queue naturally swings by over 100 ms; trimming
+    // at 100 ms (the desktop value) dropped ~20% of chunks on an AYN Thor and garbled audio.
+    uint32_t skip_factor = cur_queued_microseconds / 300000;
+#else
     uint32_t skip_factor = cur_queued_microseconds / 100000;
+#endif
     if (skip_factor != 0) {
         uint32_t skip_ratio = 1 << skip_factor;
         num_bytes_to_queue /= skip_ratio;
@@ -343,6 +364,43 @@ void queue_samples(int16_t* audio_data, size_t sample_count) {
     // Queue the swapped audio data.
     // Offset the data start by only half the discarded frame count as the other half of the discarded frames are at the end of the buffer.
     SDL_QueueAudio(audio_device, samples_to_queue, num_bytes_to_queue);
+
+#if defined(__ANDROID__)
+    // Diagnostics: every 5 s, log how much audio the game generated compared to real time
+    // and how full the output queue ran. Below ~100% means the game is running slower than
+    // the N64 would, so the speaker runs dry and audio breaks up.
+    {
+        static uint64_t window_start_ms = 0;
+        static uint64_t produced_frames = 0;
+        static uint32_t chunks = 0, skipped_chunks = 0;
+        static uint64_t min_queued_us = UINT64_MAX, max_queued_us = 0;
+
+        const uint64_t now_ms = SDL_GetTicks64();
+        if (window_start_ms == 0) {
+            window_start_ms = now_ms;
+        }
+        produced_frames += sample_count / input_channels;
+        chunks++;
+        if (skip_factor != 0) {
+            skipped_chunks++;
+        }
+        min_queued_us = std::min(min_queued_us, cur_queued_microseconds);
+        max_queued_us = std::max(max_queued_us, cur_queued_microseconds);
+
+        const uint64_t elapsed_ms = now_ms - window_start_ms;
+        if (elapsed_ms >= 5000) {
+            const double expected_frames = double(sample_rate) * double(elapsed_ms) / 1000.0;
+            printf("Audio stats: game produced %.0f%% of real time (%u Hz), %u chunks, %u trimmed, queue %llu-%llu ms\n",
+                100.0 * double(produced_frames) / expected_frames, sample_rate, chunks, skipped_chunks,
+                (unsigned long long)(min_queued_us / 1000), (unsigned long long)(max_queued_us / 1000));
+            window_start_ms = now_ms;
+            produced_frames = 0;
+            chunks = skipped_chunks = 0;
+            min_queued_us = UINT64_MAX;
+            max_queued_us = 0;
+        }
+    }
+#endif
 }
 
 size_t get_frames_remaining() {
@@ -392,7 +450,11 @@ bool reset_audio(uint32_t output_freq) {
         .format = AUDIO_F32,
         .channels = (Uint8)output_channels,
         .silence = 0, // calculated
+#if defined(__ANDROID__)
+        .samples = 0x400, // ~21 ms: Android audio needs more headroom than desktop to avoid underruns
+#else
         .samples = 0x100, // Fairly small sample count to reduce the latency of internal buffering
+#endif
         .padding = 0, // unused
         .size = 0, // calculated
         .callback = nullptr,
@@ -646,6 +708,17 @@ void on_launcher_init(recompui::LauncherMenu *menu) {
         recompui::GameOptionsMenuLayout::Center
     );
 
+#ifdef __ANDROID__
+    // Android: Controls lives in Settings > Input > Configure Inputs. The buttons are styled
+    // in launcher_animation.cpp; Settings and Mods get a "›" (they open another menu).
+    game_options_menu->add_start_game_or_load_rom_option();
+    for (auto option : { game_options_menu->add_settings_option(), game_options_menu->add_mods_option() }) {
+        auto arrow = recompui::get_current_context().create_element<recompui::Label>(option, "\u203A", recompui::theme::Typography::LabelLG);
+        arrow->set_font_size(40.0f);
+    }
+    game_options_menu->add_exit_option();
+    game_options_menu->set_width(30, recompui::Unit::Percent);
+#else
     game_options_menu->add_default_options();
     game_options_menu->set_width(30, recompui::Unit::Percent);
 
@@ -658,6 +731,7 @@ void on_launcher_init(recompui::LauncherMenu *menu) {
             style->set_background_color(recompui::theme::color::Transparent);
         }
     }
+#endif
 
     recompui::Element *menu_container = menu->get_menu_container();
     menu_container->set_width(1440);
@@ -675,6 +749,104 @@ void on_launcher_init(recompui::LauncherMenu *menu) {
     menu->remove_default_title();
 
     dk64::launcher_animation_setup(menu);
+}
+
+// The launcher's first update: with "Skip Launcher" on (and a ROM loaded, and no mod game
+// modes to choose from), start the game as the Start Game option would.
+#ifdef __ANDROID__
+extern "C" int dk64_android_experience_chosen();
+extern "C" void dk64_android_apply_experience(int modern);
+extern "C" int dk64_android_last_run_crashed();
+
+// First launch: a Classic or Modern experience? (Settings > General > Experience later.)
+static bool ask_for_experience() {
+    if (dk64_android_experience_chosen()) {
+        return false;
+    }
+    recompui::open_choice_prompt(
+        "How do you want to play?",
+        "Modern: Analog Camera on the right stick, gyro aiming, sharp full-resolution graphics "
+        "with anti-aliasing, and quick Kong swapping. "
+        "Classic: the N64 as it was, with the original controls, camera and resolution. "
+        "You can change this, or any single option, in Settings > General.",
+        "Modern",
+        "Classic",
+        []() { dk64_android_apply_experience(1); },
+        []() { dk64_android_apply_experience(0); },
+        recompui::ButtonStyle::Primary,
+        recompui::ButtonStyle::Secondary,
+        false
+    );
+    return true;
+}
+#endif
+
+#ifdef __ANDROID__
+// Start Game on Android: the launcher's logo shrinks away first (launcher_animation.cpp), then
+// the game starts (on_launcher_update).
+static bool launch_pending = false;
+static std::chrono::steady_clock::time_point launch_started;
+static constexpr float launch_leave_ms = 450.0f;
+extern "C" bool dk64_android_begin_launch() {
+    if (!launch_pending) {
+        launch_pending = true;
+        launch_started = std::chrono::steady_clock::now();
+    }
+    return true;
+}
+#endif
+
+static void on_launcher_update(recompui::LauncherMenu *menu) {
+    static bool skip_checked = false;
+    static bool skip_pending = false;
+    static std::chrono::steady_clock::time_point first_update;
+    const auto &game = supported_games[0];
+    if (!skip_checked) {
+        skip_checked = true;
+        first_update = std::chrono::steady_clock::now();
+#ifdef __ANDROID__
+        if (ask_for_experience()) {
+            dk64::launcher_animation_update(menu);
+            return;   // first launch: no Skip Launcher this time
+        }
+#endif
+        bool crashed_last_run = false;
+#ifdef __ANDROID__
+        // After a crash, always show the launcher so the settings can still be reached.
+        crashed_last_run = dk64_android_last_run_crashed() != 0;
+#endif
+        skip_pending = dk64::get_skip_launcher() && !crashed_last_run && recomp::is_rom_valid(game.game_id)
+            && recomp::mods::game_mode_count(game.mod_game_id, false) == 0;
+        if (skip_pending) {
+            // Skipping: don't show the launcher while waiting to start (just black).
+            menu->set_opacity(0.0f);
+        }
+    }
+#ifdef __ANDROID__
+    if (launch_pending) {
+        const float ms = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - launch_started).count();
+        dk64::set_launcher_leave(ms / launch_leave_ms);
+        if (ms >= launch_leave_ms) {
+            launch_pending = false;
+            recomp::start_game(game.game_id, {});
+            recompui::hide_all_contexts();
+            dk64::set_launcher_leave(0.0f);
+            return;
+        }
+        dk64::launcher_animation_update(menu);
+        return;
+    }
+#endif
+    // Starting the game on the launcher's very first frame crashed it on Android, so the skip
+    // waits until the launcher has been up for a moment (as if Start Game was pressed).
+    if (skip_pending && std::chrono::steady_clock::now() - first_update >= std::chrono::milliseconds(1500)) {
+        skip_pending = false;
+        recompui::update_game_mod_id(game.mod_game_id);
+        recomp::start_game(game.game_id, {});
+        recompui::hide_all_contexts();
+        return;
+    }
+    dk64::launcher_animation_update(menu);
 }
 
 #define REGISTER_FUNC(name) recomp::overlays::register_base_export(#name, name)
@@ -770,7 +942,17 @@ int main(int argc, char** argv) {
     }
 
     // Register fonts.
+#ifdef __ANDROID__
+    // A condensed face like the Dusklight port's menus: more fits on a handheld screen and the
+    // bold labels read clearly. Fira Sans Condensed (OFL, assets/FiraSansCondensed-OFL.txt).
+    recompui::register_primary_font("FiraSansCondensed-Regular.ttf", "Fira Sans Condensed");
+    recompui::register_extra_font("FiraSansCondensed-Bold.ttf");
+    recompui::register_extra_font("InterVariable.ttf");
+    // The bottom screen's chunky title face, for the menu's tabs (Apache 2.0, assets/LuckiestGuy-LICENSE.txt).
+    recompui::register_extra_font("LuckiestGuy-Regular.ttf");
+#else
     recompui::register_primary_font("InterVariable.ttf", "Inter Variable");
+#endif
     recompui::register_extra_font("Suplexmentary Comic NC.ttf");
 
     // Register configuration path.
@@ -796,6 +978,10 @@ int main(int argc, char** argv) {
     REGISTER_FUNC(recomp_get_ui_bounds);
     REGISTER_FUNC(recomp_get_ui_pillar);
     REGISTER_FUNC(recomp_get_gyro_deltas);
+    REGISTER_FUNC(recomp_report_input_handler);
+    REGISTER_FUNC(recomp_report_frame);
+    REGISTER_FUNC(recomp_get_tag_target);
+    REGISTER_FUNC(recomp_fill_button_icon);
     REGISTER_FUNC(recomp_get_mouse_deltas);
     REGISTER_FUNC(recomp_get_inverted_axes);
     REGISTER_FUNC(recomp_get_analog_inverted_axes);
@@ -818,7 +1004,7 @@ int main(int argc, char** argv) {
     dk64::init_config();
 
     recompui::register_launcher_init_callback(on_launcher_init);
-    recompui::register_launcher_update_callback(dk64::launcher_animation_update);
+    recompui::register_launcher_update_callback(on_launcher_update);
 
     recomp::rsp::callbacks_t rsp_callbacks{
         .get_rsp_microcode = get_rsp_microcode,

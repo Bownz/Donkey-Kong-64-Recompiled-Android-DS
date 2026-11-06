@@ -1,0 +1,284 @@
+// Optional custom Vulkan driver (e.g. Mesa Turnip for Adreno) for the renderer.
+//
+// The player installs a driver package in the app (DK64Activity / GpuDrivers.java), which
+// unpacks it into the app's private files. When the renderer starts, plume asks
+// dk64_android_vulkan_loader() (plume Android patch) for a vkGetInstanceProcAddr; this
+// loads the chosen driver through libadrenotools, which redirects the system Vulkan loader
+// to it. With no driver chosen, or if loading fails, it returns null and the system driver
+// is used as usual.
+
+#include <SDL.h>
+#include <android/log.h>
+#include <dlfcn.h>
+#include <jni.h>
+
+#include <atomic>
+#include <string>
+#include <vector>
+
+#include "gpu_driver.h"
+
+#if DK64_HAVE_ADRENOTOOLS
+#include <adrenotools/driver.h>
+#endif
+
+namespace {
+    constexpr const char* log_tag = "DK64Recomp";
+    std::string active_driver = "System driver";
+
+    // Calls a DK64Activity method taking/returning strings (nullptr arg: no argument).
+    std::string call_activity(const char* name, const char* signature, const std::string* arg) {
+        std::string result;
+        JNIEnv* env = static_cast<JNIEnv*>(SDL_AndroidGetJNIEnv());
+        jobject activity = static_cast<jobject>(SDL_AndroidGetActivity());
+        if (env == nullptr || activity == nullptr) {
+            return result;
+        }
+        jclass activity_class = env->GetObjectClass(activity);
+        jmethodID method = env->GetMethodID(activity_class, name, signature);
+        if (method == nullptr) {
+            env->ExceptionClear();
+        }
+        else {
+            jstring jarg = arg != nullptr ? env->NewStringUTF(arg->c_str()) : nullptr;
+            jobject value = arg != nullptr ? env->CallObjectMethod(activity, method, jarg) : env->CallObjectMethod(activity, method);
+            if (env->ExceptionCheck()) {
+                env->ExceptionDescribe();
+                env->ExceptionClear();
+            }
+            else if (value != nullptr) {
+                const char* chars = env->GetStringUTFChars(static_cast<jstring>(value), nullptr);
+                result = chars;
+                env->ReleaseStringUTFChars(static_cast<jstring>(value), chars);
+                env->DeleteLocalRef(value);
+            }
+            if (jarg != nullptr) {
+                env->DeleteLocalRef(jarg);
+            }
+        }
+        env->DeleteLocalRef(activity_class);
+        env->DeleteLocalRef(activity);
+        return result;
+    }
+
+    std::vector<std::string> split(const std::string& all, char sep) {
+        std::vector<std::string> parts;
+        size_t start = 0;
+        while (start <= all.size()) {
+            size_t end = all.find(sep, start);
+            if (end == std::string::npos) {
+                end = all.size();
+            }
+            parts.emplace_back(all.substr(start, end - start));
+            start = end + 1;
+        }
+        return parts;
+    }
+
+    // Asks DK64Activity.getGpuDriver(): null for the system driver, otherwise four lines:
+    // driver directory, driver library name, the app's native library directory (where the
+    // adrenotools hooks are) and a writable temporary directory.
+    std::vector<std::string> driver_from_activity() {
+        std::vector<std::string> parts;
+        JNIEnv* env = static_cast<JNIEnv*>(SDL_AndroidGetJNIEnv());
+        jobject activity = static_cast<jobject>(SDL_AndroidGetActivity());
+        if (env == nullptr || activity == nullptr) {
+            return parts;
+        }
+        jclass activity_class = env->GetObjectClass(activity);
+        jmethodID method = env->GetMethodID(activity_class, "getGpuDriver", "()Ljava/lang/String;");
+        if (method == nullptr) {
+            env->ExceptionClear();
+        }
+        else {
+            auto value = static_cast<jstring>(env->CallObjectMethod(activity, method));
+            if (env->ExceptionCheck()) {
+                env->ExceptionDescribe();
+                env->ExceptionClear();
+            }
+            else if (value != nullptr) {
+                const char* chars = env->GetStringUTFChars(value, nullptr);
+                std::string all = chars;
+                env->ReleaseStringUTFChars(value, chars);
+                env->DeleteLocalRef(value);
+                size_t start = 0;
+                while (start <= all.size()) {
+                    size_t end = all.find('\n', start);
+                    if (end == std::string::npos) {
+                        end = all.size();
+                    }
+                    parts.emplace_back(all.substr(start, end - start));
+                    start = end + 1;
+                }
+            }
+        }
+        env->DeleteLocalRef(activity_class);
+        env->DeleteLocalRef(activity);
+        return parts;
+    }
+}
+
+extern "C" void* dk64_android_vulkan_loader() {
+#if DK64_HAVE_ADRENOTOOLS
+    std::vector<std::string> driver = driver_from_activity();
+    if (driver.size() < 4 || driver[0].empty() || driver[1].empty()) {
+        return nullptr; // System driver.
+    }
+    std::string driver_dir = driver[0];
+    if (driver_dir.back() != '/') {
+        driver_dir += '/';
+    }
+    std::string hook_dir = driver[2];
+    if (!hook_dir.empty() && hook_dir.back() != '/') {
+        hook_dir += '/';
+    }
+    __android_log_print(ANDROID_LOG_INFO, log_tag, "GPU driver: loading %s from %s", driver[1].c_str(), driver_dir.c_str());
+    void* handle = adrenotools_open_libvulkan(RTLD_NOW, ADRENOTOOLS_DRIVER_CUSTOM, driver[3].c_str(), hook_dir.c_str(),
+        driver_dir.c_str(), driver[1].c_str(), nullptr, nullptr);
+    if (handle == nullptr) {
+        __android_log_print(ANDROID_LOG_ERROR, log_tag, "GPU driver: could not load the custom driver; using the system driver");
+        return nullptr;
+    }
+    void* get_instance_proc_addr = dlsym(handle, "vkGetInstanceProcAddr");
+    if (get_instance_proc_addr == nullptr) {
+        __android_log_print(ANDROID_LOG_ERROR, log_tag, "GPU driver: custom driver has no vkGetInstanceProcAddr; using the system driver");
+        return nullptr;
+    }
+    __android_log_print(ANDROID_LOG_INFO, log_tag, "GPU driver: custom driver loaded");
+    active_driver = driver.size() > 4 && !driver[4].empty() ? driver[4] : driver[1];
+    return get_instance_proc_addr;
+#else
+    return nullptr;
+#endif
+}
+
+namespace dk64::android {
+    std::vector<GpuDriverChoice> list_gpu_drivers(std::string& selected_id) {
+        // Lines: selected id, then "id<TAB>label" per installed driver.
+        std::vector<GpuDriverChoice> choices{ { "", "System driver" } };
+        std::vector<std::string> lines = split(call_activity("getGpuDriverList", "()Ljava/lang/String;", nullptr), '\n');
+        selected_id = lines.empty() ? "" : lines[0];
+        for (size_t i = 1; i < lines.size(); i++) {
+            std::vector<std::string> fields = split(lines[i], '\t');
+            if (fields.size() >= 2 && !fields[0].empty()) {
+                choices.push_back({ fields[0], fields[1] });
+            }
+        }
+        return choices;
+    }
+
+    void select_gpu_driver(const std::string& id) {
+        call_activity("selectGpuDriver", "(Ljava/lang/String;)Ljava/lang/String;", &id);
+    }
+
+    void open_gpu_driver_manager() {
+        call_activity("openGpuDriverManager", "()Ljava/lang/String;", nullptr);
+    }
+
+    std::string active_gpu_driver() {
+        return active_driver;
+    }
+
+    void share_log() {
+        call_activity("shareLog", "()Ljava/lang/String;", nullptr);
+    }
+
+    std::string app_version() {
+        return call_activity("getAppVersion", "()Ljava/lang/String;", nullptr);
+    }
+
+    void set_bottom_screen(bool enabled) {
+        const std::string value = enabled ? "1" : "0";
+        call_activity("setBottomScreen", "(Ljava/lang/String;)Ljava/lang/String;", &value);
+    }
+}
+
+// Surface rotation (0-3) of the game's screen, for mapping the device's motion sensors
+// (RecompFrontend Android patch: device gyro).
+extern "C" int dk64_android_display_rotation() {
+    std::string value = call_activity("getDisplayRotation", "()Ljava/lang/String;", nullptr);
+    return value.empty() ? 0 : (value[0] - '0') & 3;
+}
+
+// The game is shutting down (quit from its menu, or SDL told to quit): tell DK64Activity, so
+// a crash while closing isn't offered as a crash report on the next start.
+namespace {
+    int on_sdl_event(void*, SDL_Event* event) {
+        if (event->type == SDL_QUIT || event->type == SDL_APP_TERMINATING) {
+            call_activity("gameClosing", "()Ljava/lang/String;", nullptr);
+        }
+        return 0;
+    }
+}
+
+extern "C" void dk64_android_game_closing() {
+    call_activity("gameClosing", "()Ljava/lang/String;", nullptr);
+}
+
+// Called once after SDL_Init (src/main/main.cpp).
+extern "C" void dk64_android_watch_quit() {
+    SDL_AddEventWatch(on_sdl_event, nullptr);
+}
+
+
+// RecompFrontend's launcher calls this once a ROM has been supplied and stored: the activity
+// restarts the app, since the first game started in that same run crashes (see the patch).
+extern "C" void dk64_android_rom_imported() {
+    JNIEnv* env = static_cast<JNIEnv*>(SDL_AndroidGetJNIEnv());
+    jobject activity = static_cast<jobject>(SDL_AndroidGetActivity());
+    if (env == nullptr || activity == nullptr) {
+        return;
+    }
+    jclass activity_class = env->GetObjectClass(activity);
+    jmethodID method = env->GetMethodID(activity_class, "restartAfterRomImport", "()V");
+    if (method == nullptr) {
+        env->ExceptionClear();
+    } else {
+        env->CallVoidMethod(activity, method);
+        if (env->ExceptionCheck()) {
+            env->ExceptionDescribe();
+            env->ExceptionClear();
+        }
+    }
+    env->DeleteLocalRef(activity_class);
+    env->DeleteLocalRef(activity);
+}
+
+// Touch controls on the main screen (the Controls page's "Touch Controls" button):
+// 0 auto (only without a physical controller), 1 always, 2 never. Kept by the activity.
+extern "C" int dk64_android_last_run_crashed() {
+    return call_activity("lastRunCrashed", "()Ljava/lang/String;", nullptr) == "1" ? 1 : 0;
+}
+
+// Menu sounds (RecompFrontend ui_state.cpp; the Audio tab's Menu Sounds option).
+static std::atomic<bool> ui_sounds_enabled{ true };
+extern "C" void dk64_android_set_ui_sounds(int enabled) {
+    ui_sounds_enabled = enabled != 0;
+}
+extern "C" void dk64_android_ui_sound(int kind) {
+    if (!ui_sounds_enabled) {
+        return;
+    }
+    const std::string arg = std::to_string(kind);
+    call_activity("playUiSound", "(Ljava/lang/String;)Ljava/lang/String;", &arg);
+}
+
+extern "C" int dk64_android_has_second_screen() {
+    return call_activity("hasSecondScreen", "()Ljava/lang/String;", nullptr) == "0" ? 0 : 1;
+}
+
+extern "C" int dk64_android_touch_controls_mode() {
+    const std::string query;   // empty: just read the mode
+    const std::string value = call_activity("touchControlsMode", "(Ljava/lang/String;)Ljava/lang/String;", &query);
+    return value.empty() ? 0 : (value[0] - '0');
+}
+
+// Input > Touch > Edit Touch Layout: the touch controls' layout editor (TouchControllerView).
+extern "C" void dk64_android_edit_touch_layout() {
+    call_activity("editTouchLayout", "()Ljava/lang/String;", nullptr);
+}
+
+extern "C" void dk64_android_set_touch_controls_mode(int mode) {
+    const std::string arg = std::to_string(mode);
+    call_activity("touchControlsMode", "(Ljava/lang/String;)Ljava/lang/String;", &arg);
+}

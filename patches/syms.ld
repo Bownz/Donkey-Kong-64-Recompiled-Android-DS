@@ -78,3 +78,7 @@ osStartThread_recomp = 0x8F000150;
 recomp_run_ui_callbacks = 0x8F000154;
 recomp_get_gyro_inverted_axes = 0x8F000158;
 recomp_get_mouse_inverted_axes = 0x8F00015C;
+recomp_report_input_handler = 0x8F000160;
+recomp_report_frame = 0x8F000164;
+recomp_get_tag_target = 0x8F000168;
+recomp_fill_button_icon = 0x8F00016C;

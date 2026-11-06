@@ -28,5 +28,21 @@ DECLARE_FUNC(void, recomp_get_gyro_inverted_axes, s32* x, s32* y);
 DECLARE_FUNC(void, recomp_get_mouse_inverted_axes, s32* x, s32* y);
 DECLARE_FUNC(void, recomp_get_right_analog_inputs, float* x, float* y);
 DECLARE_FUNC(void, recomp_set_right_analog_suppressed, s32 suppressed);
+DECLARE_FUNC(void, recomp_report_input_handler, u32 index);
+DECLARE_FUNC(void, recomp_report_frame);
+DECLARE_FUNC(s32, recomp_get_tag_target);
+
+// patches/button_icons.c: an in-game button icon drawn for the player's controller.
+typedef struct {
+    s32 sprite_id;
+    s32 width;
+    s32 height;
+    s32 codec;
+    s32 tile_x;
+    s32 tile_y;
+    s32 tiles_x;
+    s32 tiles_y;
+} ButtonIconRequest;
+DECLARE_FUNC(s32, recomp_fill_button_icon, ButtonIconRequest *request, u8 *out);
 
 #endif

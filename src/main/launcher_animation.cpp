@@ -37,6 +37,9 @@ struct AnimatedSvg {
     AnimationData opacity_animation;
     float width = 0;
     float height = 0;
+    // Android: the logo is moved down and shrunk a little so it fits a phone-height screen.
+    float extra_y = 0.0f;
+    float scale_mult = 1.0f;
 };
 
 struct LauncherContext {
@@ -136,8 +139,9 @@ void update_animated_svg(AnimatedSvg &animated_svg, float delta_time, float bg_w
     calculate_2d_from_keyframes(animated_svg.scale_keyframes, animated_svg.scale_animation, delta_time, scale_x, scale_y);
     calculate_rot_from_keyframes(animated_svg.rotation_keyframes, animated_svg.rotation_animation, delta_time, rotation_degrees);
     calculate_rot_from_keyframes(animated_svg.opacity_keyframes, animated_svg.opacity_animation, delta_time, opacity);
-    animated_svg.svg->set_translate_2D(position_x + bg_width / 2.0f - animated_svg.width / 2.0f, position_y + bg_height / 2.0f - animated_svg.height / 2.0f);
-    animated_svg.svg->set_scale_2D(scale_x, scale_y);
+    animated_svg.svg->set_translate_2D(position_x * animated_svg.scale_mult + bg_width / 2.0f - animated_svg.width / 2.0f,
+        position_y + animated_svg.extra_y + bg_height / 2.0f - animated_svg.height / 2.0f);
+    animated_svg.svg->set_scale_2D(scale_x * animated_svg.scale_mult, scale_y * animated_svg.scale_mult);
     animated_svg.svg->set_rotation(rotation_degrees);
     animated_svg.svg->set_opacity(opacity);
 }
@@ -190,14 +194,46 @@ void dk64::launcher_animation_setup(recompui::LauncherMenu *menu) {
 
     // Disable and hide the options.
     for (auto option : menu->get_game_options_menu()->get_options()) {
-        option->set_font_family("Suplexmentary Comic NC");
         option->set_enabled(false);
         option->set_opacity(0.0f);
+#ifdef __ANDROID__
+        // Android: big wooden buttons, easy to tap (the settings menu's DK style). The
+        // selected one turns banana yellow.
+        option->set_font_family("Luckiest Guy");
+        option->set_justify_content(recompui::JustifyContent::SpaceBetween);
+        option->set_padding_top(14.0f);
+        option->set_padding_bottom(8.0f);
+        option->set_padding_left(32.0f);
+        option->set_padding_right(32.0f);
+        option->set_min_height(58.0f);
+        option->set_border_radius(40.0f);
+        option->set_border_width(3.0f);
+        option->set_border_bottom_width(7.0f);
+        option->set_border_color({ 0x3A, 0x1E, 0x06, 0xFF });
+        option->set_background_color({ 0x7A, 0x4E, 0x26, 0xFF });
+        option->set_color({ 0xE8, 0xD5, 0xA8, 0xFF });
+        option->hover_style.set_background_color({ 0x96, 0x62, 0x30, 0xFF });
+        option->hover_style.set_color({ 0xFF, 0xF4, 0xD6, 0xFF });
+        option->focus_style.set_background_color({ 0xF9, 0xD6, 0x48, 0xFF });
+        option->focus_style.set_border_color({ 0xFF, 0xF4, 0xD6, 0xFF });
+        option->focus_style.set_color({ 0x3A, 0x1E, 0x06, 0xFF });
+        auto label = option->get_label();
+        label->set_font_family("Luckiest Guy");
+        label->set_font_weight(400);
+        label->set_font_size(40.0f);
+        label->set_letter_spacing(2.0f);
+        label->set_text_transform(recompui::TextTransform::Uppercase);
+#else
+        option->set_font_family("Suplexmentary Comic NC");
         option->set_padding(24.0f);
         auto label = option->get_label();
         label->set_font_size(56.0f);
         label->set_letter_spacing(4.0f);
+#endif
     }
+#ifdef __ANDROID__
+    menu->get_game_options_menu()->set_gap(16.0f);
+#endif
 
     // The creation order of these is important.
     
@@ -353,9 +389,43 @@ void dk64::launcher_animation_setup(recompui::LauncherMenu *menu) {
     launcher_context.credits_label->set_bottom(4.0f, recompui::Unit::Dp);
     launcher_context.credits_label->set_right(4.0f, recompui::Unit::Dp);
     launcher_context.credits_label->set_font_family("Suplexmentary Comic NC");
+#ifdef __ANDROID__
+    // A dark wooden strip with a gold edge along the bottom, holding the credits.
+    {
+        recompui::Element *strip = context.create_element<recompui::Element>(background_container, 0);
+        strip->set_position(recompui::Position::Absolute);
+        strip->set_left(0);
+        strip->set_right(0);
+        strip->set_bottom(0);
+        strip->set_height(44.0f, recompui::Unit::Dp);
+        strip->set_background_color({ 0x3A, 0x24, 0x10, 0xFF });
+        strip->set_border_top_width(3.0f);
+        strip->set_border_top_color({ 0xCE, 0xA2, 0x46, 0xFF });
+        // Drawn above the strip: re-create the credits after it.
+        launcher_context.credits_label->set_display(recompui::Display::None);
+        launcher_context.credits_label = context.create_element<recompui::Label>(
+            background_container,
+            "DK64 Rekongpiled by Rainchus, Ballaam, KillKlli, Green Bean and UmedMuzl",
+            recompui::LabelStyle::Small
+        );
+        launcher_context.credits_label->set_position(recompui::Position::Absolute);
+        launcher_context.credits_label->set_bottom(12.0f, recompui::Unit::Dp);
+        launcher_context.credits_label->set_right(20.0f, recompui::Unit::Dp);
+        launcher_context.credits_label->set_font_family("Fira Sans Condensed");
+        launcher_context.credits_label->set_font_weight(700);
+        launcher_context.credits_label->set_font_size(18.0f);
+        launcher_context.credits_label->set_color({ 0xE8, 0xD5, 0xA8, 0xFF });
+    }
+#endif
 
     // Install an event watch to skip the launcher animation if a keyboard, mouse or controller input is detected.
     SDL_AddEventWatch(&launcher_event_watch, nullptr);
+}
+
+static float launcher_leave = 0.0f;
+
+void dk64::set_launcher_leave(float progress) {
+    launcher_leave = std::clamp(progress, 0.0f, 1.0f);
 }
 
 void dk64::launcher_animation_update(recompui::LauncherMenu *menu) {
@@ -377,6 +447,26 @@ void dk64::launcher_animation_update(recompui::LauncherMenu *menu) {
     for (size_t i = 0; i < launcher_context.cloud_svgs.size(); i++) {
         update_animated_svg(launcher_context.cloud_svgs[i], delta_time, bg_width, bg_height);
     }
+#ifdef __ANDROID__
+    {
+        // Keeps the logo the same distance from the top on every screen shape (moved down on
+        // a short phone screen, up on a tall one such as an opened foldable), and the island
+        // standing on the water at the bottom.
+        const float logo_drop = 510.0f - bg_height / 2.0f;
+        launcher_context.isles_svg.extra_y = std::max(0.0f, bg_height / 2.0f - 400.0f);
+        // Start Game: the logo shrinks away (ease in) before the game starts.
+        const float leave_scale = 1.0f - launcher_leave * launcher_leave;
+        for (AnimatedSvg *logo : { &launcher_context.logo_d_svg, &launcher_context.logo_k_svg, &launcher_context.logo_64_svg, &launcher_context.logo_recomp_svg }) {
+            logo->extra_y = logo_drop;
+            logo->scale_mult = 0.8f * std::max(0.001f, leave_scale);
+        }
+        if (launcher_leave > 0.0f) {
+            for (auto option : menu->get_game_options_menu()->get_options()) {
+                option->set_opacity(1.0f - launcher_leave);
+            }
+        }
+    }
+#endif
     update_animated_svg(launcher_context.isles_svg, delta_time, bg_width, bg_height);
     update_animated_svg(launcher_context.logo_64_svg, delta_time, bg_width, bg_height);
     update_animated_svg(launcher_context.logo_k_svg, delta_time, bg_width, bg_height);
@@ -411,5 +501,10 @@ void dk64::launcher_animation_update(recompui::LauncherMenu *menu) {
         }
 
         launcher_context.options_enabled = true;
+        // Start Game (or Load ROM) is selected when the menu appears, so a controller can
+        // press A straight away.
+        if (auto start = menu->get_game_options_menu()->get_start_game_option()) {
+            start->focus();
+        }
     }
 }

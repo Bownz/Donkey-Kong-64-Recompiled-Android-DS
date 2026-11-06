@@ -86,12 +86,67 @@ void recomptheme::set_custom_theme() {
     theme::set_theme_color(theme::color::BW75, Color{191, 191, 191, 255});
     theme::set_theme_color(theme::color::BW90, Color{229, 229, 229, 255});
 
+#ifdef __ANDROID__
+    // Android: the bottom screen's DK look - jungle-green glass panels (the frame, wooden tab
+    // bar and option rows are set in the RecompFrontend patch), banana-yellow accent, cream text.
+    {
+        const Color banana{249, 214, 72, 255}, bananaL{255, 236, 150, 255}, bananaD{176, 128, 20, 255};
+        auto alpha = [](Color c, uint8_t a) { c.a = a; return c; };
+        theme::set_theme_color(theme::color::Background1, Color{8, 20, 5, 255});
+        theme::set_theme_color(theme::color::Background2, Color{19, 40, 14, 255});
+        theme::set_theme_color(theme::color::Background3, Color{30, 58, 22, 255});
+        theme::set_theme_color(theme::color::BGOverlay, Color{0, 0, 0, 90});
+        theme::set_theme_color(theme::color::ModalOverlay, Color{14, 26, 10, 226});
+        theme::set_theme_color(theme::color::BGShadow, Color{42, 20, 4, 110});
+        theme::set_theme_color(theme::color::BGShadow2, Color{8, 20, 5, 184});
+        theme::set_theme_color(theme::color::Text, Color{255, 244, 214, 255});
+        theme::set_theme_color(theme::color::TextActive, Color{255, 250, 232, 255});
+        theme::set_theme_color(theme::color::TextDim, Color{232, 213, 168, 255});
+        theme::set_theme_color(theme::color::TextInactive, Color{232, 213, 168, 170});
+        theme::set_theme_color(theme::color::TextA5, Color{255, 244, 214, 13});
+        theme::set_theme_color(theme::color::TextA20, Color{255, 244, 214, 51});
+        theme::set_theme_color(theme::color::TextA30, Color{255, 244, 214, 77});
+        theme::set_theme_color(theme::color::TextA50, Color{255, 244, 214, 128});
+        theme::set_theme_color(theme::color::TextA80, Color{255, 244, 214, 204});
+        theme::set_theme_color(theme::color::Primary, banana);
+        theme::set_theme_color(theme::color::PrimaryL, bananaL);
+        theme::set_theme_color(theme::color::PrimaryD, bananaD);
+        theme::set_theme_color(theme::color::PrimaryA5, alpha(banana, 13));
+        theme::set_theme_color(theme::color::PrimaryA20, alpha(banana, 51));
+        theme::set_theme_color(theme::color::PrimaryA30, alpha(banana, 77));
+        theme::set_theme_color(theme::color::PrimaryA50, alpha(banana, 128));
+        theme::set_theme_color(theme::color::PrimaryA80, alpha(banana, 204));
+        const Color gold{217, 165, 32, 255};
+        theme::set_theme_color(theme::color::Border, alpha(gold, 90));
+        theme::set_theme_color(theme::color::BorderSoft, alpha(gold, 50));
+        theme::set_theme_color(theme::color::BorderHard, alpha(gold, 140));
+        theme::set_theme_color(theme::color::BorderSolid, alpha(gold, 210));
+        const Color wood{122, 78, 38, 255};
+        theme::set_theme_color(theme::color::Elevated, alpha(wood, 150));
+        theme::set_theme_color(theme::color::ElevatedSoft, alpha(wood, 80));
+        theme::set_theme_color(theme::color::ElevatedBorder, alpha(gold, 170));
+        theme::set_theme_color(theme::color::ElevatedBorderHard, gold);
+        theme::set_theme_color(theme::color::A, banana);
+        theme::set_theme_color(theme::color::AL, bananaL);
+        theme::set_theme_color(theme::color::AD, bananaD);
+        theme::set_theme_color(theme::color::AA5, alpha(banana, 13));
+        theme::set_theme_color(theme::color::AA20, alpha(banana, 51));
+        theme::set_theme_color(theme::color::AA30, alpha(banana, 77));
+        theme::set_theme_color(theme::color::AA50, alpha(banana, 128));
+        theme::set_theme_color(theme::color::AA80, alpha(banana, 204));
+    }
+#endif
+
     theme::border::radius_sm = 12.0f;
     theme::border::radius_md = 18.0f;
     theme::border::radius_lg = 24.0f;
 
     const uint32_t header_weight = 700;
+#ifdef __ANDROID__
+    const uint32_t label_weight = 700;   // bold condensed labels, as in Dusklight
+#else
     const uint32_t label_weight = 500;
+#endif
     const uint32_t base_weight = 400;
     theme::set_typography_preset(theme::Typography::Header1, 68.0f, 0.01f, header_weight);
     theme::set_typography_preset(theme::Typography::Header2, 52.0f, 0.01f, header_weight);

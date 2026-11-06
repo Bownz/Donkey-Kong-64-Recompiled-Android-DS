@@ -1,0 +1,2176 @@
+package io.github.bownz.dk64recomp;
+
+import android.content.Context;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.LinearGradient;
+import android.graphics.Paint;
+import android.graphics.Path;
+import android.graphics.RectF;
+import android.graphics.Shader;
+import android.os.Handler;
+import android.os.Looper;
+import android.view.HapticFeedbackConstants;
+import android.view.MotionEvent;
+import android.view.View;
+
+/**
+ * DK64 second screen (e.g. the AYN Thor's lower display), themed after the jungle-and-wood
+ * look of Donkey Kong Country Returns 3D's touch screen:
+ *
+ *  - top-left: first-person view toggle (C-Up) on a barrel lid;
+ *  - top: the game's own bobbing health melons, read live;
+ *  - right column: one-tap Z + C moves for the current Kong, shown once they're bought;
+ *  - centre: a barrel per Kong (with its face once freed) and that Kong's collectibles.
+ *
+ * Buttons drive the shared virtual gamepad ({@link TouchInput}); game values come from
+ * {@link GameState} (read-only); icons from the player's ROM ({@link RomIcons}).
+ */
+public final class BottomScreenView extends View {
+
+    private static final String[] KONG_NAMES = { "Donkey Kong", "Diddy Kong", "Lanky Kong", "Tiny Kong", "Chunky Kong" };
+    private static final String[] KONG_SHORT = { "DK", "Diddy", "Lanky", "Tiny", "Chunky" };
+    private static final int[] KONG_COLORS = {
+        Color.rgb(242, 194, 48), Color.rgb(217, 56, 58), Color.rgb(60, 120, 216),
+        Color.rgb(155, 89, 208), Color.rgb(76, 175, 80),
+    };
+
+    // Jungle and wood palette.
+    private static final int JUNGLE_TOP = Color.rgb(24, 70, 44);
+    private static final int JUNGLE_BOTTOM = Color.rgb(10, 30, 20);
+    private static final int WOOD_LIGHT = Color.rgb(150, 96, 48);
+    private static final int WOOD_DARK = Color.rgb(104, 62, 28);
+    private static final int WOOD_SEAM = Color.rgb(70, 40, 16);
+    private static final int WOOD_EDGE = Color.rgb(52, 29, 10);
+    private static final int WOOD_SHINE = Color.argb(110, 214, 160, 96);
+    private static final int BANANA = Color.rgb(255, 214, 40);
+    private static final int OUTLINE = Color.rgb(58, 30, 6);
+    private static final int CREAM = Color.rgb(255, 244, 214);
+    private static final int COMPLETE = Color.rgb(140, 230, 110);
+
+    // Input timing. DK64 reads input once per game frame (~33 ms at 30 fps), so each step
+    // lasts a few frames: hold Z, press C while Z is still held, then let go.
+    private static final long Z_LEAD_MS = 100;
+    private static final long C_HOLD_MS = 150;
+    private static final long Z_TAIL_MS = 60;
+    private static final long POLL_MS = 150;
+
+    private enum Move { WEAPON, ORANGE, INSTRUMENT, CAMERA, FIRST_PERSON }
+
+    private static final Move[] ACTIONS = { Move.ORANGE, Move.WEAPON, Move.INSTRUMENT, Move.CAMERA };
+
+    private final Handler handler = new Handler(Looper.getMainLooper());
+    private final GameState state = new GameState();
+    private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint text = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+    // Layout, in pixels (computed in onSizeChanged).
+    private final RectF[] actionRects = { new RectF(), new RectF(), new RectF(), new RectF() };
+    /** Tabs: the five Kongs, then shared (non-Kong) collectibles. */
+    private static final int SHARED_TAB = GameState.KONG_COUNT;
+    private static final int TAB_COUNT = GameState.KONG_COUNT;   // shared items are on the pause screen
+    private final RectF[] tabRects = new RectF[TAB_COUNT];
+    private final RectF locationRect = new RectF();
+    private final RectF carryRect = new RectF();
+    private final RectF pauseHeadRect = new RectF(), pausePrevRect = new RectF(), pauseNextRect = new RectF(), pauseTableRect = new RectF();
+    private int pauseLevel = -1;     // pause screen: the level shown (-1: all levels)
+    private boolean wasPaused;
+    private final RectF panelRect = new RectF();
+    private final RectF tmp = new RectF();
+    private final Paint bitmapPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
+    private Bitmap logo;
+    private boolean logoTried;
+    private final RectF tmp2 = new RectF();
+    private final RectF boardRect = new RectF();
+    private final RectF barrelRect = new RectF();
+    private final Path path = new Path();
+    private float fpX, fpY, fpR;
+    private float osX, osY, osR;
+    private float healthX, healthY, melonR;
+    private float unit;
+    private float rowText;
+
+    private Move running;
+    private int selectedKong = -1;   // -1: follow the Kong being played
+    private boolean active;
+
+    private final Runnable poll = new Runnable() {
+        @Override
+        public void run() {
+            int crystalsBefore = state.crystals;
+            boolean changed = state.refresh();
+            if (state.paused && !wasPaused) {
+                pauseLevel = state.level >= 0 ? state.level : -1;   // open on where you are
+            }
+            wasPaused = state.paused;
+            if (state.inGame() && state.crystals < crystalsBefore) {
+                crystalsDrainedAt = android.os.SystemClock.uptimeMillis();
+            }
+            boolean cancelBefore = cancelShown;
+            cancelShown = showCancel();
+            changed |= cancelShown != cancelBefore;
+            updateOrangstand();
+            if (changed) {
+                invalidate();
+            }
+            RomIcons.ensureLoaded(BottomScreenView.this::postInvalidate);
+            if (state.inGame()) {   // the font's metrics are the game's own data
+                GameFont.ensureLoaded(BottomScreenView.this::postInvalidate);
+            }
+            if (active) {
+                handler.postDelayed(this, POLL_MS);
+            }
+        }
+    };
+
+    public BottomScreenView(Context context) {
+        super(context);
+        for (int i = 0; i < tabRects.length; i++) {
+            tabRects[i] = new RectF();
+        }
+        // A chunky cartoon face close to the game's pause-screen lettering (Luckiest Guy,
+        // Apache 2.0, assets/fonts). Falls back to bold sans if it can't be loaded.
+        try {
+            text.setTypeface(android.graphics.Typeface.createFromAsset(context.getAssets(), "fonts/LuckiestGuy-Regular.ttf"));
+        } catch (RuntimeException e) {
+            text.setFakeBoldText(true);
+        }
+        setHapticFeedbackEnabled(true);
+        setContentDescription("DK64 bottom screen: health, collectibles and action buttons");
+    }
+
+    // ------------------------------------------------------------------------------
+    // Lifecycle
+    // ------------------------------------------------------------------------------
+
+    /** Takes or gives up the shared virtual gamepad, and starts or stops reading the game. */
+    public void setActive(boolean active) {
+        if (this.active == active) {
+            return;
+        }
+        this.active = active;
+        if (active) {
+            handler.post(poll);
+        } else {
+            cancel();
+            handler.removeCallbacksAndMessages(null);
+        }
+    }
+
+    /** Stops any move in progress and lets go of every input (e.g. when the app pauses). */
+    public void cancel() {
+        handler.removeCallbacksAndMessages(null);
+        if (running != null) {
+            TouchInput.setN64Buttons(0);
+            running = null;
+            invalidate();
+        }
+        if (swapTarget >= 0) {
+            swapEnd();
+        }
+        if (orangstandBusy || orangstand) {
+            TouchInput.setN64Buttons(0);
+            TouchInput.setHeldN64Buttons(0);
+            orangstandBusy = false;
+            orangstand = false;
+        }
+        if (active) {
+            handler.post(poll);
+        }
+    }
+
+    // ------------------------------------------------------------------------------
+    // Moves
+    // ------------------------------------------------------------------------------
+
+    private void perform(Move move) {
+        if (running != null) {
+            return; // One move at a time; a sequence takes ~0.3 s.
+        }
+        running = move;
+        Haptics.tap(this);
+        startAnim("squash" + move);
+        startAnim("wiggle" + move);
+        invalidate();
+
+        // The buttons press N64 Z and C directly (not through the controller mappings).
+        final int c;
+        switch (move) {
+            case WEAPON:     c = TouchInput.N64_C_LEFT; break;
+            case ORANGE:     c = TouchInput.N64_C_RIGHT; break;
+            case INSTRUMENT: c = TouchInput.N64_C_UP; break;
+            case CAMERA:     c = TouchInput.N64_C_DOWN; break;
+            default:         c = TouchInput.N64_C_UP; break;
+        }
+
+        if (move == Move.CAMERA && state.camera) {
+            // Leaving the camera: C-Down on its own (code_EBBE0.c), then C-Up if that didn't.
+            TouchInput.setN64Buttons(TouchInput.N64_C_DOWN);
+            handler.postDelayed(() -> TouchInput.setN64Buttons(0), C_HOLD_MS);
+            handler.postDelayed(() -> {
+                state.refresh();
+                if (!state.camera) {
+                    running = null;
+                    invalidate();
+                    return;
+                }
+                TouchInput.setN64Buttons(TouchInput.N64_C_UP);
+                handler.postDelayed(() -> {
+                    TouchInput.setN64Buttons(0);
+                    running = null;
+                    invalidate();
+                }, C_HOLD_MS);
+            }, C_HOLD_MS + 250);
+            return;
+        }
+
+        if (move == Move.FIRST_PERSON) {
+            // C-Up on its own enters first-person view, and pressing it again leaves it.
+            TouchInput.setN64Buttons(c);
+            handler.postDelayed(() -> {
+                TouchInput.setN64Buttons(0);
+                running = null;
+                invalidate();
+            }, C_HOLD_MS);
+            return;
+        }
+
+        final int z = TouchInput.N64_Z;
+        // Putting the gun away from first-person aiming: leave first person first (C-Up), then
+        // Z + C-Left as usual, so the view doesn't stay in first person without the gun.
+        final long lead = (move == Move.WEAPON && state.gunOut && state.firstPerson) ? C_HOLD_MS + 250 : 0;
+        if (lead > 0) {
+            TouchInput.setN64Buttons(TouchInput.N64_C_UP);
+            handler.postDelayed(() -> TouchInput.setN64Buttons(0), C_HOLD_MS);
+        }
+        handler.postDelayed(() -> TouchInput.setN64Buttons(z), lead);                       // Z
+        handler.postDelayed(() -> TouchInput.setN64Buttons(z | c), lead + Z_LEAD_MS);       // + C
+        handler.postDelayed(() -> TouchInput.setN64Buttons(z), lead + Z_LEAD_MS + C_HOLD_MS);
+        handler.postDelayed(() -> {
+            TouchInput.setN64Buttons(0);
+            running = null;
+            invalidate();
+        }, lead + Z_LEAD_MS + C_HOLD_MS + Z_TAIL_MS);
+    }
+
+    // ------------------------------------------------------------------------------
+    // Touch Kong Swap (with the Tag Anywhere mod)
+    // ------------------------------------------------------------------------------
+    //
+    // Tag Anywhere swaps to the next / previous freed Kong on D-pad Right / Left. To reach the
+    // tapped Kong, the D-pad is pressed (directly, like the action buttons) in the shorter
+    // direction and held until the Kong changes, released, and repeated until it's the
+    // tapped one. The mod ignores the D-pad while tagging isn't allowed (in the air, holding
+    // something, ...); if the Kong doesn't change in time the swap gives up.
+
+    private static final long SWAP_TICK_MS = 20;
+    private static final long SWAP_STEP_TIMEOUT_MS = 700;
+    private static final long SWAP_RELEASE_MS = 90;
+
+    private int swapTarget = -1;
+    private int swapButton;
+    private int swapFrom;
+    private long swapStepStart;
+    private long swapReleasedAt;
+    private boolean swapPressed;
+    private boolean swapHintShown;
+    private int swapSteps;
+
+    /**
+     * Swaps to Kong {@code k} if Touch Kong Swap is on. Returns false to fall back to just
+     * showing that Kong's tab.
+     */
+    private boolean trySwap(int k, boolean current) {
+        int bits = GameState.kongSwap();
+        if ((bits & GameState.SWAP_SETTING) == 0) {
+            return false;
+        }
+        if ((bits & GameState.SWAP_MOD) == 0) {
+            if (!swapHintShown) {
+                swapHintShown = true;
+                android.widget.Toast.makeText(getContext(),
+                    "Touch Kong Swap needs the Tag Anywhere mod: enable it in Mods, then restart the game.",
+                    android.widget.Toast.LENGTH_LONG).show();
+            }
+            return false;
+        }
+        selectedKong = -1;   // follow the Kong being played
+        if (current || swapTarget >= 0 || running != null) {
+            invalidate();
+            return true;
+        }
+        if ((bits & GameState.SWAP_PLAYING) == 0) {
+            return true;     // paused or in a cutscene: the D-pad would go to a menu
+        }
+        // Count steps each way through the freed Kongs (the mod skips locked ones).
+        int right = 0, left = 0;
+        for (int i = 1, kong = state.currentKong; i <= GameState.KONG_COUNT; i++) {
+            kong = (kong + 1) % GameState.KONG_COUNT;
+            if (!isLocked(kong)) {
+                right++;
+            }
+            if (kong == k) {
+                break;
+            }
+        }
+        for (int i = 1, kong = state.currentKong; i <= GameState.KONG_COUNT; i++) {
+            kong = (kong + GameState.KONG_COUNT - 1) % GameState.KONG_COUNT;
+            if (!isLocked(kong)) {
+                left++;
+            }
+            if (kong == k) {
+                break;
+            }
+        }
+        swapButton = right <= left ? TouchInput.N64_DPAD_RIGHT : TouchInput.N64_DPAD_LEFT;
+        swapTarget = k;
+        swapSteps = 0;
+        // The game counts only the chosen Kong as freed while this runs, so one step of
+        // Tag Anywhere lands straight on them.
+        GameState.setTagTarget(k);
+        Haptics.tap(this);
+        swapPress();
+        handler.postDelayed(swapTick, SWAP_TICK_MS);
+        invalidate();
+        return true;
+    }
+
+    private void swapPress() {
+        if (++swapSteps > GameState.KONG_COUNT) {
+            swapEnd();   // went all the way round without reaching it
+            return;
+        }
+        swapFrom = state.currentKong;
+        swapStepStart = android.os.SystemClock.uptimeMillis();
+        swapPressed = true;
+        TouchInput.setN64Buttons(swapButton);
+    }
+
+    private void swapEnd() {
+        GameState.setTagTarget(-1);
+        TouchInput.setN64Buttons(0);
+        swapPressed = false;
+        swapTarget = -1;
+        invalidate();
+    }
+
+    private final Runnable swapTick = new Runnable() {
+        @Override
+        public void run() {
+            if (swapTarget < 0) {
+                return;
+            }
+            long now = android.os.SystemClock.uptimeMillis();
+            if (state.refresh()) {
+                invalidate();
+            }
+            if (!state.inGame() || (GameState.kongSwap() & GameState.SWAP_PLAYING) == 0 && !swapPressed) {
+                swapEnd();
+                return;
+            }
+            if (swapPressed) {
+                if (state.currentKong != swapFrom) {
+                    // This step worked; let go so the mod sees the next press.
+                    TouchInput.setN64Buttons(0);
+                    swapPressed = false;
+                    swapReleasedAt = now;
+                    if (state.currentKong == swapTarget) {
+                        swapEnd();
+                        return;
+                    }
+                } else if (now - swapStepStart > SWAP_STEP_TIMEOUT_MS) {
+                    swapEnd();   // can't tag here right now
+                    return;
+                }
+            } else if (now - swapReleasedAt >= SWAP_RELEASE_MS) {
+                swapPress();
+            }
+            handler.postDelayed(this, SWAP_TICK_MS);
+        }
+    };
+
+    // ------------------------------------------------------------------------------
+    // Lanky's Orangstand toggle
+    // ------------------------------------------------------------------------------
+    //
+    // A toggle: Z then B (as on a controller) puts Lanky on his hands, and Z stays held to
+    // keep him there, as the game needs. Tapping again lets go of Z. Pressing Z on the
+    // controller takes over (he stays up while it's held). It also lets go when he ends up
+    // back on his feet or in water (Z stays held through the pause menu).
+
+    private boolean orangstand;      // Lanky is on his hands (entered with this button)
+    private boolean orangstandBusy;
+
+    private boolean onFeet() {
+        return state.onFeet;
+    }
+
+    private boolean showOrangstand() {
+        return state.inGame() && state.currentKong == GameState.LANKY
+            && state.kongs[GameState.LANKY].moves >= 1;
+    }
+
+    /** Called on each poll: notice when Lanky is back on his feet (or isn't Lanky). */
+    private void updateOrangstand() {
+        int physicalZ = TouchInput.takePhysicalZ();
+        if (orangstand && !orangstandBusy && (physicalZ & 2) != 0) {
+            // The player pressed Z on the controller: hand over to it. While they hold Z,
+            // Lanky stays on his hands; letting go puts him back on his feet.
+            stopOrangstand();
+            return;
+        }
+        if (orangstand && !orangstandBusy && (!showOrangstand() || (!state.paused && (onFeet() || state.swimming)))) {
+            stopOrangstand();
+        }
+    }
+
+    private void toggleOrangstand() {
+        if (orangstandBusy || running != null || state.paused) {
+            return;
+        }
+        Haptics.tap(this);
+        if (orangstand) {
+            // Letting go of Z puts Lanky back on his feet.
+            stopOrangstand();
+            return;
+        }
+        if (!state.canZMoves || state.gunOut) {
+            return;
+        }
+        // Z, then B while Z is held; Z then stays held to keep him on his hands.
+        orangstandBusy = true;
+        invalidate();
+        final int z = TouchInput.N64_Z, b = TouchInput.N64_B;
+        TouchInput.setHeldN64Buttons(z);
+        handler.postDelayed(() -> TouchInput.setN64Buttons(b), Z_LEAD_MS);
+        handler.postDelayed(() -> TouchInput.setN64Buttons(0), Z_LEAD_MS + C_HOLD_MS);
+        handler.postDelayed(() -> {
+            state.refresh();
+            TouchInput.takePhysicalZ();   // forget Z presses from before he got on his hands
+            orangstandBusy = false;
+            orangstand = !onFeet() && !state.swimming;
+            if (!orangstand) {
+                TouchInput.setHeldN64Buttons(0);   // it didn't take: don't leave Z held
+            }
+            invalidate();
+        }, Z_LEAD_MS + C_HOLD_MS + 350);
+    }
+
+    private void stopOrangstand() {
+        orangstand = false;
+        TouchInput.setHeldN64Buttons(0);
+        invalidate();
+    }
+
+    // ------------------------------------------------------------------------------
+    // Other Z + B moves (same place): Diddy's Chimpy Charge, Chunky's Primate Punch
+    // ------------------------------------------------------------------------------
+    //
+    // Crouching then B (code_E4090.c): Diddy charges once he has his first Cranky move,
+    // Chunky punches once he has his second.
+
+    private boolean zbBusy;
+
+    /** The current Kong's Z + B move, if bought; null if none (Lanky's is the toggle above). */
+    private String zbMoveName() {
+        if (!state.inGame()) {
+            return null;
+        }
+        int k = state.currentKong;
+        if (k == GameState.DIDDY && state.kongs[k].moves >= 1) {
+            return "Charge";
+        }
+        if (k == GameState.CHUNKY && state.kongs[k].moves >= 2) {
+            return "Punch";
+        }
+        return null;
+    }
+
+    private boolean zbMoveUsable() {
+        return !state.paused && !state.swimming && !state.climbing && !state.gunOut;
+    }
+
+    private void performZbMove() {
+        if (zbBusy || running != null || !zbMoveUsable() || !state.canZMoves) {
+            return;
+        }
+        Haptics.tap(this);
+        zbBusy = true;
+        invalidate();
+        final int z = TouchInput.N64_Z, b = TouchInput.N64_B;
+        TouchInput.setN64Buttons(z);
+        handler.postDelayed(() -> TouchInput.setN64Buttons(z | b), Z_LEAD_MS);
+        handler.postDelayed(() -> TouchInput.setN64Buttons(z), Z_LEAD_MS + C_HOLD_MS);
+        handler.postDelayed(() -> {
+            TouchInput.setN64Buttons(0);
+            zbBusy = false;
+            invalidate();
+        }, Z_LEAD_MS + C_HOLD_MS + Z_TAIL_MS);
+    }
+
+    /** A round orange badge with the Kong's face, named after the move. */
+    private void drawZbMoveButton(Canvas c) {
+        String name = zbMoveName();
+        boolean enabled = zbMoveUsable();
+        float r = osR * 0.92f;
+        float cy = osY - osR * 0.08f;
+        int saved = c.saveLayerAlpha(osX - osR * 1.1f, osY - osR * 1.1f, osX + osR * 1.1f, osY + osR * 1.1f, enabled ? 255 : 90);
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(OUTLINE);
+        c.drawCircle(osX, cy, r, paint);
+        int top = zbBusy ? Color.rgb(250, 200, 90) : Color.rgb(200, 130, 50);
+        int bottom = zbBusy ? Color.rgb(200, 120, 30) : Color.rgb(120, 70, 20);
+        paint.setAlpha(255);
+        paint.setShader(new LinearGradient(0, cy - r, 0, cy + r, top, bottom, Shader.TileMode.CLAMP));
+        c.drawCircle(osX, cy, r * 0.87f, paint);
+        paint.setShader(null);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(unit * 0.006f);
+        paint.setColor(zbBusy ? BANANA : Color.argb(140, 255, 255, 255));
+        c.drawCircle(osX, cy, r * 0.87f, paint);
+        paint.setStyle(Paint.Style.FILL);
+        if (!RomIcons.draw(c, RomIcons.face[state.currentKong], osX, cy, r * 0.62f)) {
+            DkIcons.eye(c, osX, cy, r * 0.5f);
+        }
+        tmp.set(osX - osR * 0.95f, osY + osR * 0.58f, osX + osR * 0.95f, osY + osR * 0.98f);
+        tagPlate(c, tmp);
+        text.setTextAlign(Paint.Align.CENTER);
+        text.setTextSize(fitText(name, tmp.width() * 0.8f, tmp.height() * 0.66f));
+        outlined(c, name, tmp.centerX(), tmp.centerY() + text.getTextSize() * 0.36f, CREAM);
+        c.restoreToCount(saved);
+    }
+
+    // ------------------------------------------------------------------------------
+    // Ending a Kong barrel ability (same place as the Orangstand button)
+    // ------------------------------------------------------------------------------
+    //
+    // Mini Monkey, Hunky Chunky, Strong Kong, Rocketbarrel, Baboon Balloon and the like use
+    // up crystal coconuts while they last, and Z + C-Left ends them (code_CEAE0.c). The
+    // button shows while the game reports one, or while crystals are running down.
+
+    private long crystalsDrainedAt;
+    private boolean cancelShown;
+    private boolean cancelBusy;
+
+    private boolean showCancel() {
+        return state.inGame() && (state.transformed || android.os.SystemClock.uptimeMillis() - crystalsDrainedAt < 1500);
+    }
+
+    // ---- Cutscene skip -----------------------------------------------------------------
+
+    private final RectF skipRect = new RectF();
+    private boolean skipBusy;
+
+    private void drawSkipButton(Canvas c) {
+        float w = getWidth(), h = getHeight();
+        float bw = Math.min(w * 0.42f, unit * 0.36f), bh = Math.min(h * 0.14f, unit * 0.115f);
+        float margin = unit * 0.04f;   // bottom-right corner
+        skipRect.set(w - margin - bw, h - margin - bh, w - margin, h - margin);
+        float squash = animProgress("squashskip", SQUASH_MS);
+        int saved = c.save();
+        if (squash >= 0) {
+            float k = 1f - 0.08f * (float) Math.sin(Math.PI * squash);
+            c.scale(k, k, skipRect.centerX(), skipRect.centerY());
+        }
+        float r = bh / 2;
+        paint.setStyle(Paint.Style.FILL);
+        paint.setShader(null);
+        paint.setColor(Color.argb(140, 0, 0, 0));
+        tmp.set(skipRect.left, skipRect.top + bh * 0.08f, skipRect.right, skipRect.bottom + bh * 0.08f);
+        c.drawRoundRect(tmp, r, r, paint);
+        paint.setShader(new android.graphics.LinearGradient(0, skipRect.top, 0, skipRect.bottom,
+            Color.rgb(255, 214, 90), Color.rgb(214, 132, 24), android.graphics.Shader.TileMode.CLAMP));
+        paint.setAlpha(skipBusy ? 150 : 255);
+        c.drawRoundRect(skipRect, r, r, paint);
+        paint.setShader(null);
+        paint.setAlpha(255);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(Math.max(2f, bh * 0.06f));
+        paint.setColor(OUTLINE);
+        c.drawRoundRect(skipRect, r, r, paint);
+        paint.setStyle(Paint.Style.FILL);
+        // Label, then a "skip" arrow pair to its right.
+        String label = "Skip";
+        text.setTextAlign(Paint.Align.CENTER);
+        text.setTextSize(fitText(label, bw * 0.5f, bh * 0.5f));
+        float labelX = skipRect.centerX() - bh * 0.32f;
+        outlined(c, label, labelX, skipRect.centerY() + text.getTextSize() * 0.36f, CREAM);
+        float ax = labelX + textWidth(label) / 2 + bh * 0.22f, ay = skipRect.centerY(), as = bh * 0.2f;
+        android.graphics.Path arrows = new android.graphics.Path();
+        for (int i = 0; i < 2; i++) {
+            float x0 = ax + i * as * 0.95f;
+            arrows.moveTo(x0, ay - as);
+            arrows.lineTo(x0 + as, ay);
+            arrows.lineTo(x0, ay + as);
+            arrows.close();
+        }
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeJoin(Paint.Join.ROUND);
+        paint.setStrokeWidth(Math.max(2f, bh * 0.08f));
+        paint.setColor(OUTLINE);
+        c.drawPath(arrows, paint);
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(CREAM);
+        c.drawPath(arrows, paint);
+        c.restoreToCount(saved);
+    }
+
+    /** Presses Start for a moment, the game's own cutscene skip. */
+    private void skipCutscene() {
+        if (skipBusy) {
+            return;
+        }
+        Haptics.tap(this);
+        startAnim("squashskip");
+        skipBusy = true;
+        TouchInput.setN64Buttons(TouchInput.N64_START);
+        handler.postDelayed(() -> TouchInput.setN64Buttons(0), 120);
+        handler.postDelayed(() -> {
+            skipBusy = false;
+            invalidate();
+        }, 600);
+        invalidate();
+    }
+
+    private void cancelAbility() {
+        if (cancelBusy || running != null || state.paused) {
+            return;
+        }
+        Haptics.tap(this);
+        cancelBusy = true;
+        invalidate();
+        final int z = TouchInput.N64_Z, c = TouchInput.N64_C_LEFT;
+        TouchInput.setN64Buttons(z);
+        handler.postDelayed(() -> TouchInput.setN64Buttons(z | c), Z_LEAD_MS);
+        handler.postDelayed(() -> TouchInput.setN64Buttons(z), Z_LEAD_MS + C_HOLD_MS);
+        handler.postDelayed(() -> {
+            TouchInput.setN64Buttons(0);
+            crystalsDrainedAt = 0;
+        }, Z_LEAD_MS + C_HOLD_MS + Z_TAIL_MS);
+        handler.postDelayed(() -> {
+            cancelBusy = false;
+            invalidate();
+        }, Z_LEAD_MS + C_HOLD_MS + Z_TAIL_MS + 400);
+    }
+
+    /** A round red badge with the Kong's face and a cross: ends the barrel ability. */
+    private void drawCancelButton(Canvas c) {
+        boolean enabled = !state.paused;
+        float r = osR * 0.92f;
+        float cy = osY - osR * 0.08f;
+        int saved = c.saveLayerAlpha(osX - osR * 1.1f, osY - osR * 1.1f, osX + osR * 1.1f, osY + osR * 1.1f, enabled ? 255 : 90);
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(OUTLINE);
+        c.drawCircle(osX, cy, r, paint);
+        int top = cancelBusy ? Color.rgb(255, 140, 120) : Color.rgb(220, 70, 50);
+        int bottom = cancelBusy ? Color.rgb(200, 60, 40) : Color.rgb(120, 20, 15);
+        paint.setAlpha(255);
+        paint.setShader(new LinearGradient(0, cy - r, 0, cy + r, top, bottom, Shader.TileMode.CLAMP));
+        c.drawCircle(osX, cy, r * 0.87f, paint);
+        paint.setShader(null);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(unit * 0.006f);
+        paint.setColor(cancelBusy ? BANANA : Color.argb(140, 255, 255, 255));
+        c.drawCircle(osX, cy, r * 0.87f, paint);
+        paint.setStyle(Paint.Style.FILL);
+        int kong = state.currentKong;
+        if (kong < 0 || kong >= GameState.KONG_COUNT || !RomIcons.draw(c, RomIcons.face[kong], osX, cy, r * 0.55f)) {
+            DkIcons.eye(c, osX, cy, r * 0.45f);
+        }
+        // Cross over the face.
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeCap(Paint.Cap.ROUND);
+        float k = r * 0.42f;
+        paint.setStrokeWidth(r * 0.2f);
+        paint.setColor(OUTLINE);
+        c.drawLine(osX - k, cy - k, osX + k, cy + k, paint);
+        c.drawLine(osX - k, cy + k, osX + k, cy - k, paint);
+        paint.setStrokeWidth(r * 0.12f);
+        paint.setColor(CREAM);
+        c.drawLine(osX - k, cy - k, osX + k, cy + k, paint);
+        c.drawLine(osX - k, cy + k, osX + k, cy - k, paint);
+        paint.setStrokeCap(Paint.Cap.BUTT);
+        paint.setStyle(Paint.Style.FILL);
+        tmp.set(osX - osR * 0.95f, osY + osR * 0.58f, osX + osR * 0.95f, osY + osR * 0.98f);
+        tagPlate(c, tmp);
+        text.setTextAlign(Paint.Align.CENTER);
+        text.setTextSize(fitText("Cancel", tmp.width() * 0.8f, tmp.height() * 0.66f));
+        outlined(c, "Cancel", tmp.centerX(), tmp.centerY() + text.getTextSize() * 0.36f, CREAM);
+        c.restoreToCount(saved);
+    }
+
+    /** A round badge like the first-person one: Lanky's face, upside down. */
+    private void drawOrangstandButton(Canvas c) {
+        boolean pressed = orangstand || orangstandBusy;
+        boolean enabled = !state.paused && (orangstand || (!state.swimming && !state.climbing && !state.gunOut));
+        float r = osR * 0.92f;
+        float cy = osY - osR * 0.08f;
+        int saved = c.saveLayerAlpha(osX - osR * 1.1f, osY - osR * 1.1f, osX + osR * 1.1f, osY + osR * 1.1f, enabled ? 255 : 90);
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(OUTLINE);
+        c.drawCircle(osX, cy, r, paint);
+        int top = pressed ? Color.rgb(250, 200, 90) : Color.rgb(200, 130, 50);
+        int bottom = pressed ? Color.rgb(200, 120, 30) : Color.rgb(120, 70, 20);
+        paint.setAlpha(255);
+        paint.setShader(new LinearGradient(0, cy - r, 0, cy + r, top, bottom, Shader.TileMode.CLAMP));
+        c.drawCircle(osX, cy, r * 0.87f, paint);
+        paint.setShader(null);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(unit * 0.006f);
+        paint.setColor(pressed ? BANANA : Color.argb(140, 255, 255, 255));
+        c.drawCircle(osX, cy, r * 0.87f, paint);
+        paint.setStyle(Paint.Style.FILL);
+        c.save();
+        c.rotate(180f, osX, cy);
+        if (!RomIcons.draw(c, RomIcons.face[GameState.LANKY], osX, cy, r * 0.62f)) {
+            DkIcons.eye(c, osX, cy, r * 0.5f);
+        }
+        c.restore();
+        tmp.set(osX - osR * 0.95f, osY + osR * 0.58f, osX + osR * 0.95f, osY + osR * 0.98f);
+        tagPlate(c, tmp);
+        text.setTextAlign(Paint.Align.CENTER);
+        text.setTextSize(fitText("Orangstand", tmp.width() * 0.86f, tmp.height() * 0.66f));
+        outlined(c, "Orangstand", tmp.centerX(), tmp.centerY() + text.getTextSize() * 0.36f, CREAM);
+        c.restoreToCount(saved);
+    }
+
+    /** The tab being shown: a Kong (0-4) or SHARED_TAB. */
+    private int displayedKong() {
+        if (selectedKong == SHARED_TAB || (selectedKong >= 0 && !isLocked(selectedKong))) {
+            return selectedKong;
+        }
+        return state.inGame() ? state.currentKong : GameState.DK;
+    }
+
+    private int playingKong() {
+        return state.inGame() ? state.currentKong : GameState.DK;
+    }
+
+    /** Kongs not freed yet in the running game (unknown before a game starts: all shown). */
+    private boolean isLocked(int k) {
+        return k < GameState.KONG_COUNT && state.inGame() && !state.isFreed(k);
+    }
+
+    /**
+     * Whether the current Kong has this move at all; buttons for moves not bought yet are
+     * hidden. Before a game is running everything is shown.
+     */
+    private boolean owned(Move move) {
+        if (!state.inGame()) {
+            return true;
+        }
+        GameState.Kong k = state.kongs[state.currentKong];
+        switch (move) {
+            case WEAPON: return k.weapon > 0;
+            case ORANGE: return state.hasOranges() || state.oranges > 0;
+            case INSTRUMENT: return k.instrument > 0;
+            case CAMERA: return state.hasCamera() || state.film > 0;
+            default: return true;
+        }
+    }
+
+    /**
+     * Whether the game takes this move right now. When it doesn't only because of what the
+     * Kong is doing for a moment (jumping, attacking, rolling...), the button looks normal
+     * but does nothing; see {@link #greyed} for when it's greyed out.
+     */
+    private boolean usableNow(Move move) {
+        if (running == move) {
+            return true;
+        }
+        if (move == Move.CAMERA && state.camera) {
+            return true;   // tapping again puts the camera away
+        }
+        switch (move) {
+            case FIRST_PERSON: return state.canFirstPerson || state.firstPerson || state.gunOut;
+            case WEAPON: return state.canZMoves || state.gunOut;
+            default: return state.canZMoves && !state.gunOut;
+        }
+    }
+
+    /**
+     * Greyed out: nothing to use it with (no ammo, oranges, film or instrument energy),
+     * swimming, or (for the other moves) while the gun is out. The gun button stays lit while
+     * the gun is out so it can always be put away, even with no ammo left.
+     */
+    private boolean greyed(Move move) {
+        if (!state.inGame() || running == move) {
+            return false;
+        }
+        if (state.paused) {
+            return true;   // nothing works while the pause menu is open
+        }
+        if (orangstand || orangstandBusy) {
+            return true;   // Lanky is on his hands: none of these work until he's back up
+        }
+        GameState.Kong k = state.kongs[state.currentKong];
+        switch (move) {
+            case FIRST_PERSON: return state.climbing;
+            case WEAPON:
+                if (state.gunOut) {
+                    return false;
+                }
+                return state.swimming || state.climbing || (state.ammo <= 0 && state.homingAmmo <= 0);
+            case ORANGE: return state.swimming || state.climbing || state.gunOut || state.oranges <= 0;
+            // In first person (or the camera) Z + C-Up would just leave the view.
+            case INSTRUMENT: return state.swimming || state.climbing || state.gunOut || state.firstPerson || state.camera
+                || k.instrumentEnergy <= 0;
+            case CAMERA: return !state.camera && (state.swimming || state.climbing || state.gunOut || state.film <= 0);
+            default: return false;
+        }
+    }
+
+    /** A tap on this button does something now. */
+    private boolean available(Move move) {
+        return !state.inGame() || (!greyed(move) && usableNow(move));
+    }
+
+    // ------------------------------------------------------------------------------
+    // Layout
+    // ------------------------------------------------------------------------------
+
+    @Override
+    protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+        super.onSizeChanged(w, h, oldw, oldh);
+        layoutFor(w, h);
+    }
+
+    void layoutFor(int w, int h) {
+        unit = Math.min(w, h);
+        float m = unit * 0.03f;
+
+        // Right column: four action buttons.
+        float colW = Math.min(w * 0.27f, h * 0.27f);
+        float colLeft = w - m - colW;
+        float gap = m * 0.7f;
+        float cellH = (h - 2 * m - 3 * gap) / 4f;
+        for (int i = 0; i < 4; i++) {
+            float top = m + i * (cellH + gap);
+            actionRects[i].set(colLeft, top, w - m, top + cellH);
+        }
+
+        // Left area.
+        float left = m, right = colLeft - m;
+        fpR = Math.min(unit * 0.085f, (right - left) * 0.12f);
+        fpX = left + fpR;
+        fpY = m + fpR;
+
+        melonR = fpR * 0.75f;
+        healthX = fpX + fpR + m * 1.8f + melonR;
+        healthY = fpY;
+
+        // Lanky's Orangstand toggle, at the right end of the top row, after up to 3 melons.
+        float healthRight = healthX + 2 * melonR * 2.4f + melonR * 1.1f;
+        osR = Math.max(fpR * 0.5f, Math.min(fpR * 0.8f, (right - healthRight - m * 0.4f) / 2f));
+        osX = right - osR;
+        osY = fpY;
+
+        // Under the top row: what the Kong is carrying; then the panel; Kong tabs at the bottom.
+        float carryTop = m + 2 * fpR + m;
+        float carryH = unit * 0.1f;
+        carryRect.set(left, carryTop, right, carryTop + carryH);
+        float tabH = unit * 0.13f;
+        float tabsTop = h - m - tabH;
+        float tabGap = m * 0.5f;
+        float tabW = (right - left - tabGap * (TAB_COUNT - 1)) / TAB_COUNT;
+        for (int i = 0; i < TAB_COUNT; i++) {
+            float l = left + i * (tabW + tabGap);
+            tabRects[i].set(l, tabsTop, l + tabW, tabsTop + tabH);
+        }
+        locationRect.setEmpty();
+        panelRect.set(left, carryRect.bottom + m * 0.6f, right, tabsTop - m * 0.6f);
+
+        // Pause screen: header (arrows + level name) and the table under it.
+        float headH = unit * 0.13f;
+        pauseHeadRect.set(m, m, w - m, m + headH);
+        pausePrevRect.set(m, m, m + headH, m + headH);
+        pauseNextRect.set(w - m - headH, m, w - m, m + headH);
+        pauseTableRect.set(m, m + headH + m * 0.6f, w - m, h - m);
+    }
+
+    // ------------------------------------------------------------------------------
+    // Drawing
+    // ------------------------------------------------------------------------------
+
+    @Override
+    protected void onDraw(Canvas canvas) {
+        animating = false;
+        drawContent(canvas);
+        if (animating) {
+            postInvalidateOnAnimation();
+        } else if (titleIdle || (state.inGame() && !state.paused && !state.cutscene)) {
+            // The health melons' gentle idle bob: a light 20 FPS redraw, not every display frame.
+            postInvalidateDelayed(IDLE_FRAME_MS);
+        }
+    }
+
+    private void drawContent(Canvas canvas) {
+        titleIdle = false;
+        drawJungle(canvas, getWidth(), getHeight());
+        if (!state.inGame()) {
+            drawTitle(canvas, getWidth(), getHeight());
+            return;
+        }
+        if (state.paused) {
+            drawPauseProgress(canvas);
+            return;
+        }
+        if (state.cutscene) {
+            // Cutscenes: just the jungle. (DK64 doesn't let Start skip its in-game cutscenes,
+            // so there's no Skip button; drawSkipButton is kept for a real skip later.)
+            return;
+        }
+        watch("kong", state.currentKong, "tab" + state.currentKong);
+        drawFirstPersonButton(canvas);
+        drawHealth(canvas);
+        if (showCancel()) {
+            drawCancelButton(canvas);
+        } else if (showOrangstand()) {
+            drawOrangstandButton(canvas);
+        } else if (zbMoveName() != null) {
+            drawZbMoveButton(canvas);
+        }
+        drawTabs(canvas);
+        drawKongPanel(canvas);
+        drawCarrying(canvas);   // after the panel, so its icons can poke out over it
+        drawActions(canvas);
+    }
+
+    /**
+     * What the Kong is carrying right now: bananas held in this level (what Troff 'n' Scoff
+     * takes), coins and crystal coconuts. The panel below is progress (collected of total).
+     */
+    private void drawCarrying(Canvas c) {
+        RectF r = carryRect;
+        woodPanel(c, r, r.height() * 0.3f, false);
+        int k = playingKong();
+        int crystals = (state.crystals + 149) / 150;   // stored in 150ths (hud.c)
+        Row[] items = {
+            colored(new Row("Bananas", RomIcons.of(RomIcons.banana, k), 0, state.level >= 0 ? state.heldBananas : 0, -1), KONG_COLORS[k]),
+            colored(new Row("Coins", RomIcons.of(RomIcons.coin, k), 1, state.kongs[k].coins, -1), darker(KONG_COLORS[k])),
+            colored(new Row("Crystal Coconuts", RomIcons.crystal, 3, crystals, -1), Color.rgb(200, 80, 160)),
+        };
+        float labelW = r.width() * 0.2f;
+        text.setTextAlign(Paint.Align.CENTER);
+        text.setTextSize(fitText("Carrying", labelW * 0.85f, r.height() * 0.3f));
+        outlined(c, "Carrying", r.left + labelW / 2f + r.height() * 0.15f, r.centerY() + text.getTextSize() * 0.36f, CREAM);
+        float slot = (r.width() - labelW) / items.length;
+        // Just the item, no badge, a little bigger than the bar is tall (it may poke out).
+        float badgeR = r.height() * 0.58f;
+        for (int i = 0; i < items.length; i++) {
+            Row item = items[i];
+            float sx = r.left + labelW + slot * i;
+            float bx = sx + slot * 0.12f + badgeR, cy = r.centerY();
+            String spinKey = "carry" + item.label;
+            watch("carryv" + item.label, item.have, spinKey);
+            float spin = animProgress(spinKey, SPIN_MS);
+            int saved = c.save();
+            if (spin >= 0) {
+                float sxk = (float) Math.cos(2 * Math.PI * spin);
+                float pop = 1f + 0.18f * (float) Math.sin(Math.PI * spin);
+                c.scale(Math.abs(sxk) < 0.08f ? 0.08f : sxk * pop, pop, bx, cy);
+            }
+            itemIcon(c, bx, cy, badgeR, item);
+            c.restoreToCount(saved);
+            String value = String.valueOf(item.have);
+            text.setTextAlign(Paint.Align.LEFT);
+            text.setTextSize(fitText(value, slot - (bx - sx) - badgeR * 1.15f, r.height() * 0.46f));
+            outlined(c, value, bx + badgeR * 1.05f, cy + text.getTextSize() * 0.36f, BANANA);
+        }
+    }
+
+    // ------------------------------------------------------------------------------
+    // Pause screen: everyone's progress for a level
+    // ------------------------------------------------------------------------------
+
+    private static final String[] PAUSE_COLUMNS = { "Golden Bananas", "Bananas", "Blueprints", "Banana Medals", "Coins" };
+
+    private void stepPauseLevel(int dir) {
+        // -1 (all levels), then 0..LEVELS-1, wrapping round; levels not reached yet are skipped.
+        int n = GameState.LEVELS + 1;
+        for (int i = 0; i < n; i++) {
+            pauseLevel = ((pauseLevel + 1 + dir) % n + n) % n - 1;
+            if (state.levelReached(pauseLevel)) {
+                break;
+            }
+        }
+        Haptics.tap(this);
+        invalidate();
+    }
+
+    private Row findRow(java.util.List<Row> rows, String label) {
+        for (Row r : rows) {
+            if (r.label.equals(label)) {
+                return r;
+            }
+        }
+        return null;
+    }
+
+    private void drawPauseProgress(Canvas c) {
+        // Header: arrows either side of the level's name.
+        RectF h = pauseHeadRect;
+        tmp.set(pausePrevRect.right + unit * 0.02f, h.top, pauseNextRect.left - unit * 0.02f, h.bottom);
+        woodPanel(c, tmp, tmp.height() * 0.3f, false);
+        String title = pauseLevel < 0 ? "All Levels" : GameState.LEVEL_NAMES[pauseLevel];
+        text.setTextAlign(Paint.Align.CENTER);
+        text.setTextSize(fitText(title, tmp.width() * 0.86f, tmp.height() * 0.5f));
+        outlined(c, title, tmp.centerX(), tmp.centerY() + text.getTextSize() * 0.36f, BANANA);
+        for (int i = 0; i < 2; i++) {
+            RectF a = i == 0 ? pausePrevRect : pauseNextRect;
+            float r = a.height() / 2f;
+            woodPanel(c, a, r, false);
+            arrow(c, a.centerX(), a.centerY(), r * 0.42f, i == 0 ? -1 : 1);
+        }
+
+        // Table on a wooden board.
+        RectF p = pauseTableRect;
+        woodPanel(c, p, unit * 0.03f, false);
+        float frame = unit * 0.03f;
+        RectF board = boardRect;
+        board.set(p.left + frame, p.top + frame, p.right - frame, p.bottom - frame);
+        float br = unit * 0.02f;
+        paint.setStyle(Paint.Style.FILL);
+        paint.setAlpha(255);
+        paint.setShader(new LinearGradient(0, board.top, 0, board.bottom, Color.rgb(46, 26, 12), Color.rgb(70, 40, 18), Shader.TileMode.CLAMP));
+        c.drawRoundRect(board, br, br, paint);
+        paint.setShader(null);
+
+        float nameW = board.width() * 0.2f;
+        float colW = (board.width() - nameW) / PAUSE_COLUMNS.length;
+        float headRowH = board.height() * 0.13f;
+        float footH = board.height() * 0.15f;
+        float rowH = (board.height() - headRowH - footH) / GameState.KONG_COUNT;
+
+        // Column icons (from DK's rows, so the per-Kong icons show DK's colour).
+        java.util.List<Row> dkRows = rowsFor(GameState.DK, pauseLevel);
+        for (int col = 0; col < PAUSE_COLUMNS.length; col++) {
+            Row r = findRow(dkRows, PAUSE_COLUMNS[col]);
+            if (r == null) {
+                continue;
+            }
+            float x = board.left + nameW + colW * (col + 0.5f), y = board.top + headRowH / 2f;
+            badge(c, x, y, Math.min(headRowH * 0.42f, colW * 0.3f), r);
+        }
+
+        for (int k = 0; k < GameState.KONG_COUNT; k++) {
+            float top = board.top + headRowH + k * rowH;
+            boolean locked = isLocked(k);
+            boolean playing = k == state.currentKong;
+            tmp.set(board.left + unit * 0.01f, top + rowH * 0.08f, board.right - unit * 0.01f, top + rowH * 0.92f);
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(locked ? Color.rgb(40, 34, 30) : Color.rgb(58, 36, 16));
+            c.drawRoundRect(tmp, tmp.height() * 0.25f, tmp.height() * 0.25f, paint);
+            if (playing) {
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setStrokeWidth(unit * 0.006f);
+                paint.setColor(BANANA);
+                c.drawRoundRect(tmp, tmp.height() * 0.25f, tmp.height() * 0.25f, paint);
+                paint.setStyle(Paint.Style.FILL);
+            }
+            // Kong: face and colour.
+            float faceR = Math.min(tmp.height() * 0.4f, nameW * 0.22f);
+            float fx = board.left + nameW * 0.25f, cy = tmp.centerY();
+            paint.setColor(locked ? Color.rgb(70, 64, 60) : KONG_COLORS[k]);
+            c.drawCircle(fx, cy, faceR * 1.1f, paint);
+            if (!locked) {
+                RomIcons.draw(c, RomIcons.face[k], fx, cy, faceR);
+            }
+            String name = GameState.KONG_NAMES[k];
+            text.setTextAlign(Paint.Align.LEFT);
+            text.setTextSize(fitText(name, nameW * 0.52f, tmp.height() * 0.42f));
+            outlined(c, name, fx + faceR * 1.35f, cy + text.getTextSize() * 0.36f, locked ? Color.rgb(140, 130, 120) : CREAM);
+
+            java.util.List<Row> rows = locked ? null : rowsFor(k, pauseLevel);
+            for (int col = 0; col < PAUSE_COLUMNS.length; col++) {
+                Row r = rows == null ? null : findRow(rows, PAUSE_COLUMNS[col]);
+                String value;
+                boolean complete = false;
+                if (r == null || r.total == 0) {
+                    value = "\u2013";
+                } else if (r.total < 0) {
+                    value = String.valueOf(r.have);
+                } else {
+                    value = r.have + "/" + r.total;
+                    complete = r.have >= r.total;
+                }
+                text.setTextAlign(Paint.Align.CENTER);
+                text.setTextSize(fitText(value, colW * 0.86f, tmp.height() * 0.46f));
+                outlined(c, value, board.left + nameW + colW * (col + 0.5f), cy + text.getTextSize() * 0.36f,
+                    locked || r == null || r.total == 0 ? Color.rgb(140, 130, 120) : complete ? COMPLETE : BANANA);
+            }
+        }
+
+        // Items that belong to no Kong: fairies, crowns, keys, rainbow coins.
+        java.util.List<Row> shared = rowsFor(SHARED_TAB, pauseLevel);
+        shared.removeIf(r -> r.total == 0 || r.label.equals("Golden Bananas"));
+        float fy = board.bottom - footH / 2f;
+        float slot = board.width() / Math.max(1, shared.size());
+        for (int i = 0; i < shared.size(); i++) {
+            Row r = shared.get(i);
+            float sx = board.left + slot * i;
+            float bR = Math.min(footH * 0.36f, slot * 0.14f);
+            float bx = sx + slot * 0.12f + bR;
+            String value = r.have + "/" + r.total;
+            tmp.set(bx + bR * 0.4f, fy - bR * 0.6f, sx + slot * 0.92f, fy + bR * 0.6f);
+            tag(c, tmp, value, r.have >= r.total);
+            badge(c, bx, fy, bR, r);
+        }
+    }
+
+        /**
+     * Shown until a save is loaded: just the game's name over the jungle. (Our own lettering;
+     * the official logo artwork isn't something this app ships.)
+     */
+    private void drawTitle(Canvas c, int w, int h) {
+        // Once the game has started (Start Game), the logo shrinks away and the screen is just
+        // the jungle until a save is loaded.
+        final boolean started = GameState.frameCount() > 0;
+        float shrink = 1f;
+        float duck = 0f;   // 0..1: the Android ducking down behind the logo
+        if (started) {
+            if (titleGone) {
+                return;
+            }
+            if (!titleLeaving) {
+                titleLeaving = true;
+                startAnim("titleOut");
+            }
+            float p = animProgress("titleOut", DUCK_MS + TITLE_OUT_MS);
+            if (p < 0) {
+                titleGone = true;
+                return;
+            }
+            // First the Android ducks down behind the logo, then the logo shrinks away.
+            final float t = p * (DUCK_MS + TITLE_OUT_MS);
+            duck = Math.min(1f, t / DUCK_MS);
+            final float out = Math.max(0f, (t - DUCK_MS) / TITLE_OUT_MS);
+            shrink = 1f - out * out;   // ease in
+        } else {
+            titleGone = false;
+            titleLeaving = false;
+            titleIdle = true;   // the Android peeking over the logo bobs gently
+        }
+        final long now = android.os.SystemClock.uptimeMillis();
+        if (titleShownAt == 0) {
+            titleShownAt = now;
+        }
+        final float since = (now - titleShownAt) / 1000f;
+        // Intro: the logo pops in (overshoots, settles), then the Android pops up behind it.
+        // After that the logo gently breathes and sways.
+        final float pop = backOut(Math.min(1f, since / 0.6f));
+        final float robotPop = backOut(Math.max(0f, Math.min(1f, (since - 0.45f) / 0.45f)));
+        if (since < 1.0f) {
+            animating = true;   // smooth for the intro; the idle sway runs at the idle rate
+        }
+        final float breathe = 1f + (float) Math.sin(now / 900.0) * 0.015f;
+        final float sway = (float) Math.sin(now / 1400.0) * 1.5f;
+
+        Bitmap logo = logo();
+        if (logo != null) {
+            float scale = Math.min(w * 0.78f / logo.getWidth(), h * 0.62f / logo.getHeight());
+            float lw = logo.getWidth() * scale, lh = logo.getHeight() * scale;
+            int saved = c.save();
+            c.scale(shrink * pop * breathe, shrink * pop * breathe, w / 2f, h / 2f);
+            c.rotate(sway, w / 2f, h / 2f);
+            int alpha = Math.round(255 * Math.min(1f, shrink * 1.4f));
+            tmp.set((w - lw) / 2, (h - lh) / 2, (w + lw) / 2, (h + lh) / 2);
+            // The Android robot peeks out from behind the logo's top right: drawn first, so the
+            // logo covers its lower half.
+            float bob = (float) Math.sin(android.os.SystemClock.uptimeMillis() / 600.0) * lh * 0.02f;
+            if (robotPop > 0f && duck < 1f) {
+                // Rises up from behind the logo (and ducks back down when the game starts:
+                // a little hop up, then down out of sight).
+                float hop = duck < 0.25f ? -(float) Math.sin(duck / 0.25f * Math.PI) * lh * 0.04f : 0f;
+                float down = duck > 0.25f ? (duck - 0.25f) / 0.75f : 0f;
+                float rise = (1f - robotPop) * lh * 0.3f + hop + down * down * lh * 0.45f;
+                drawAndroidRobot(c, tmp.right - lw * 0.10f, tmp.top - lh * 0.06f + bob + rise, lh * 0.34f * Math.max(0.01f, robotPop), 20f, alpha);
+            }
+            bitmapPaint.setAlpha(alpha);
+            c.drawBitmap(logo, null, tmp, bitmapPaint);
+            bitmapPaint.setAlpha(255);
+            c.restoreToCount(saved);
+        }
+        if (started) {
+            return;
+        }
+        // Build version, small, for bug reports.
+        if (version == null) {
+            version = getContext() != null ? Diagnostics.version(getContext()) : "";
+        }
+        if (!version.isEmpty()) {
+            text.setTextAlign(Paint.Align.CENTER);
+            text.setTextSize(unit * 0.035f);
+            outlined(c, "v" + version, w / 2f, h - unit * 0.04f, CREAM);
+        }
+    }
+
+    private static final long TITLE_OUT_MS = 550, DUCK_MS = 450;
+    private long titleShownAt;
+
+    /** Ease out with a little overshoot (0..1 -> 0..1). */
+    private static float backOut(float t) {
+        final float k = 1.70158f;
+        final float u = t - 1f;
+        return 1f + u * u * ((k + 1f) * u + k);
+    }
+    private boolean titleIdle, titleLeaving, titleGone;
+    private static final int ANDROID_GREEN = Color.rgb(61, 220, 132);
+
+    /**
+     * The Android robot (Google, CC BY 3.0 - see assets/ANDROID-ROBOT-NOTICE.txt), drawn with
+     * its head centred at (cx, cy), head width s, tilted by deg, waving its near arm.
+     */
+    private void drawAndroidRobot(Canvas c, float cx, float cy, float s, float deg, int alpha) {
+        int saved = c.save();
+        c.rotate(deg, cx, cy);
+        paint.setStyle(Paint.Style.FILL);
+        paint.setShader(null);
+        // A dark outline first (slightly bigger shapes), then the green.
+        for (int pass = 0; pass < 2; pass++) {
+            float o = pass == 0 ? s * 0.06f : 0f;
+            paint.setColor(pass == 0 ? OUTLINE : ANDROID_GREEN);
+            paint.setAlpha(alpha);
+            // Head: a half disc.
+            tmp2.set(cx - s / 2 - o, cy - s / 2 - o, cx + s / 2 + o, cy + s / 2 + o);
+            c.drawArc(tmp2, 180, 180, true, paint);
+            // Antennae.
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeCap(Paint.Cap.ROUND);
+            paint.setStrokeWidth(s * 0.07f + o * 2);
+            c.drawLine(cx - s * 0.2f, cy - s * 0.36f, cx - s * 0.32f, cy - s * 0.6f, paint);
+            c.drawLine(cx + s * 0.2f, cy - s * 0.36f, cx + s * 0.32f, cy - s * 0.6f, paint);
+            paint.setStyle(Paint.Style.FILL);
+            // Body.
+            tmp2.set(cx - s / 2 - o, cy + s * 0.06f - o, cx + s / 2 + o, cy + s * 0.9f + o);
+            c.drawRoundRect(tmp2, s * 0.12f, s * 0.12f, paint);
+            // Waving arm (raised, beside the head).
+            float wave = (float) Math.sin(android.os.SystemClock.uptimeMillis() / 220.0) * 12f;
+            int armSaved = c.save();
+            c.rotate(-150 + wave, cx + s * 0.62f, cy + s * 0.14f);
+            tmp2.set(cx + s * 0.52f - o, cy + s * 0.08f - o, cx + s * 0.72f + o, cy + s * 0.62f + o);
+            c.drawRoundRect(tmp2, s * 0.1f, s * 0.1f, paint);
+            c.restoreToCount(armSaved);
+        }
+        // A red tie (knot, then the blade), with a dark outline.
+        for (int pass = 0; pass < 2; pass++) {
+            float o = pass == 0 ? s * 0.035f : 0f;
+            paint.setColor(pass == 0 ? OUTLINE : Color.rgb(214, 40, 40));
+            paint.setAlpha(alpha);
+            path.reset();
+            path.moveTo(cx - s * 0.09f - o, cy + s * 0.06f - o);
+            path.lineTo(cx + s * 0.09f + o, cy + s * 0.06f - o);
+            path.lineTo(cx + s * 0.06f + o, cy + s * 0.17f + o);
+            path.lineTo(cx - s * 0.06f - o, cy + s * 0.17f + o);
+            path.close();
+            c.drawPath(path, paint);
+            path.reset();
+            path.moveTo(cx - s * 0.05f - o, cy + s * 0.17f);
+            path.lineTo(cx + s * 0.05f + o, cy + s * 0.17f);
+            path.lineTo(cx + s * 0.11f + o, cy + s * 0.58f);
+            path.lineTo(cx, cy + s * 0.7f + o);
+            path.lineTo(cx - s * 0.11f - o, cy + s * 0.58f);
+            path.close();
+            c.drawPath(path, paint);
+        }
+        // Eyes.
+        paint.setColor(Color.WHITE);
+        paint.setAlpha(alpha);
+        c.drawCircle(cx - s * 0.2f, cy - s * 0.2f, s * 0.05f, paint);
+        c.drawCircle(cx + s * 0.2f, cy - s * 0.2f, s * 0.05f, paint);
+        paint.setAlpha(255);
+        c.restoreToCount(saved);
+    }
+
+    private String version;
+
+    /** The app's logo, from the APK's assets (the same one the launcher shows). */
+    private Bitmap logo() {
+        if (logo == null && !logoTried) {
+            logoTried = true;
+            try (java.io.InputStream in = getContext().getAssets().open("game/assets/Logo.png")) {
+                logo = android.graphics.BitmapFactory.decodeStream(in);
+            } catch (Exception | LinkageError e) {
+                logo = null;
+            }
+        }
+        return logo;
+    }
+
+    /** Deep jungle backdrop with big leaves around the edges. */
+    private void drawJungle(Canvas c, int w, int h) {
+        paint.setStyle(Paint.Style.FILL);
+        paint.setAlpha(255);
+        paint.setShader(new LinearGradient(0, 0, 0, h, JUNGLE_TOP, JUNGLE_BOTTOM, Shader.TileMode.CLAMP));
+        c.drawRect(0, 0, w, h, paint);
+        paint.setShader(null);
+        // Soft light from above, through the canopy.
+        paint.setAlpha(255);
+        paint.setShader(new LinearGradient(0, 0, 0, h * 0.5f, Color.argb(60, 190, 230, 120), Color.argb(0, 190, 230, 120), Shader.TileMode.CLAMP));
+        c.drawRect(0, 0, w, h * 0.5f, paint);
+        paint.setShader(null);
+        float s = unit;
+        leaf(c, w * 0.02f, h * 1.02f, s * 0.42f, -60, Color.argb(120, 20, 96, 46));
+        leaf(c, w * 0.30f, h * 1.05f, s * 0.34f, -100, Color.argb(100, 30, 110, 50));
+        leaf(c, w * 0.62f, h * 1.03f, s * 0.38f, -75, Color.argb(110, 16, 84, 40));
+        leaf(c, w * 1.01f, h * 0.55f, s * 0.40f, -160, Color.argb(90, 26, 100, 48));
+        leaf(c, w * 0.50f, -h * 0.03f, s * 0.30f, 115, Color.argb(80, 40, 120, 56));
+        leaf(c, -w * 0.01f, h * 0.30f, s * 0.30f, 10, Color.argb(80, 24, 92, 44));
+    }
+
+    /** A jungle leaf from (x, y), length len, pointing at angle degrees, with a midrib. */
+    private void leaf(Canvas c, float x, float y, float len, float angle, int color) {
+        int saved = c.save();
+        c.translate(x, y);
+        c.rotate(angle);
+        float wdt = len * 0.32f;
+        path.reset();
+        path.moveTo(0, 0);
+        path.quadTo(len * 0.35f, -wdt, len, 0);
+        path.quadTo(len * 0.35f, wdt, 0, 0);
+        path.close();
+        paint.setColor(color);
+        c.drawPath(path, paint);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(len * 0.012f);
+        paint.setColor(Color.argb(Color.alpha(color) / 2, 160, 210, 120));
+        c.drawLine(0, 0, len * 0.95f, 0, paint);
+        for (int i = 1; i <= 4; i++) {
+            float vx = len * i * 0.18f;
+            c.drawLine(vx, 0, vx + len * 0.12f, -wdt * 0.55f * (1 - i * 0.15f), paint);
+            c.drawLine(vx, 0, vx + len * 0.12f, wdt * 0.55f * (1 - i * 0.15f), paint);
+        }
+        paint.setStyle(Paint.Style.FILL);
+        c.restoreToCount(saved);
+    }
+
+    /** A wooden board: planks with seams and grain, a dark edge and nails. */
+    private void woodPanel(Canvas c, RectF r, float radius, boolean lit) {
+        paint.setStyle(Paint.Style.FILL);
+        paint.setAlpha(255);
+        paint.setShader(new LinearGradient(0, r.top, 0, r.bottom,
+            lit ? Color.rgb(186, 124, 64) : WOOD_LIGHT, lit ? Color.rgb(136, 84, 40) : WOOD_DARK, Shader.TileMode.CLAMP));
+        c.drawRoundRect(r, radius, radius, paint);
+        paint.setShader(null);
+
+        int saved = c.save();
+        path.reset();
+        path.addRoundRect(r, radius, radius, Path.Direction.CW);
+        c.clipPath(path);
+        // Planks, about a tenth of the screen tall.
+        int planks = Math.max(1, Math.round(r.height() / (unit * 0.1f)));
+        float plankH = r.height() / planks;
+        paint.setStyle(Paint.Style.STROKE);
+        for (int i = 0; i < planks; i++) {
+            float top = r.top + i * plankH;
+            if (i > 0) {
+                paint.setStrokeWidth(unit * 0.005f);
+                paint.setColor(WOOD_SEAM);
+                c.drawLine(r.left, top, r.right, top, paint);
+            }
+            // Grain: a couple of long, faint streaks per plank, placed by a stable hash.
+            paint.setStrokeWidth(unit * 0.0025f);
+            paint.setColor(Color.argb(45, 40, 20, 6));
+            int seed = (int) (r.left * 7 + top * 13);
+            for (int g = 0; g < 2; g++) {
+                float gy = top + plankH * (0.3f + 0.4f * g) + ((seed >> (g * 3)) & 7) * plankH * 0.02f;
+                float gx0 = r.left + r.width() * (((seed >> (g * 5)) & 15) / 40f);
+                c.drawLine(gx0, gy, gx0 + r.width() * 0.55f, gy + plankH * 0.04f, paint);
+            }
+        }
+        paint.setStyle(Paint.Style.FILL);
+        c.restoreToCount(saved);
+
+        // Edge, highlight and corner nails.
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(unit * 0.011f);
+        paint.setColor(lit ? BANANA : WOOD_EDGE);
+        c.drawRoundRect(r, radius, radius, paint);
+        float inset = unit * 0.011f;
+        tmp.set(r.left + inset, r.top + inset, r.right - inset, r.bottom - inset);
+        paint.setStrokeWidth(unit * 0.004f);
+        paint.setColor(WOOD_SHINE);
+        c.drawRoundRect(tmp, radius * 0.8f, radius * 0.8f, paint);
+        paint.setStyle(Paint.Style.FILL);
+        float n = Math.max(radius * 0.55f, unit * 0.022f);
+        nail(c, r.left + n, r.top + n);
+        nail(c, r.right - n, r.top + n);
+        nail(c, r.left + n, r.bottom - n);
+        nail(c, r.right - n, r.bottom - n);
+    }
+
+    private void nail(Canvas c, float x, float y) {
+        float r = unit * 0.008f;
+        paint.setColor(Color.rgb(60, 52, 44));
+        c.drawCircle(x, y, r, paint);
+        paint.setColor(Color.rgb(170, 160, 146));
+        c.drawCircle(x - r * 0.25f, y - r * 0.25f, r * 0.45f, paint);
+    }
+
+    // Off: the glyphs came out wrong on device. GameFont still loads and logs its metrics so
+    // the mapping can be worked out from a log.
+    private static final boolean USE_GAME_FONT = false;
+
+    /** Chunky banana-yellow text with a dark outline, DKC style. */
+    private void outlined(Canvas c, String s, float x, float y, int fill) {
+        if (USE_GAME_FONT && GameFont.ready()) {
+            // The game's own pause-screen lettering, decoded from the ROM (GameFont).
+            GameFont.draw(c, s, x, y, text, fill, OUTLINE);
+            return;
+        }
+        text.setStyle(Paint.Style.STROKE);
+        text.setStrokeWidth(text.getTextSize() * 0.16f);
+        text.setStrokeJoin(Paint.Join.ROUND);
+        text.setColor(OUTLINE);
+        c.drawText(s, x, y, text);
+        text.setStyle(Paint.Style.FILL);
+        text.setColor(fill);
+        c.drawText(s, x, y, text);
+    }
+
+    /** A DK barrel (front view) filling r: bulging staves, two iron hoops. */
+    private void barrel(Canvas c, RectF r, boolean lit, boolean locked, int litColor) {
+        float bulge = r.width() * 0.07f;
+        path.reset();
+        path.moveTo(r.left + bulge, r.top);
+        path.lineTo(r.right - bulge, r.top);
+        path.quadTo(r.right + bulge, r.centerY(), r.right - bulge, r.bottom);
+        path.lineTo(r.left + bulge, r.bottom);
+        path.quadTo(r.left - bulge, r.centerY(), r.left + bulge, r.top);
+        path.close();
+        paint.setStyle(Paint.Style.FILL);
+        if (locked) {
+            paint.setColor(Color.rgb(58, 56, 52));
+        } else {
+            paint.setAlpha(255);
+            paint.setShader(new LinearGradient(r.left, 0, r.right, 0,
+                new int[] { WOOD_DARK, lit ? Color.rgb(196, 132, 66) : WOOD_LIGHT, WOOD_DARK }, null, Shader.TileMode.CLAMP));
+        }
+        c.drawPath(path, paint);
+        paint.setShader(null);
+
+        // Staves.
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(unit * 0.003f);
+        paint.setColor(locked ? Color.rgb(44, 42, 40) : WOOD_SEAM);
+        for (int i = 1; i < 4; i++) {
+            float x = r.left + r.width() * i / 4f;
+            c.drawLine(x, r.top, x, r.bottom, paint);
+        }
+        // Hoops.
+        paint.setStrokeWidth(r.height() * 0.07f);
+        paint.setColor(locked ? Color.rgb(72, 72, 72) : Color.rgb(58, 58, 64));
+        float h1 = r.top + r.height() * 0.17f, h2 = r.bottom - r.height() * 0.17f;
+        c.drawLine(r.left + bulge * 0.2f, h1, r.right - bulge * 0.2f, h1, paint);
+        c.drawLine(r.left + bulge * 0.2f, h2, r.right - bulge * 0.2f, h2, paint);
+        // Outline (the Kong's colour when selected).
+        paint.setStrokeWidth(unit * (lit ? 0.011f : 0.007f));
+        paint.setColor(lit ? litColor : (locked ? Color.rgb(34, 34, 34) : WOOD_EDGE));
+        c.drawPath(path, paint);
+        paint.setStyle(Paint.Style.FILL);
+    }
+
+    /**
+     * First-person view: a round badge (like the item badges) with the game's aiming
+     * crosshair, and a small wooden tag naming it.
+     */
+    private void drawFirstPersonButton(Canvas c) {
+        boolean pressed = running == Move.FIRST_PERSON || state.firstPerson;
+        boolean enabled = !greyed(Move.FIRST_PERSON);
+        int saved = c.saveLayerAlpha(fpX - fpR * 1.1f, fpY - fpR * 1.1f, fpX + fpR * 1.1f, fpY + fpR * 1.1f, enabled ? 255 : 90);
+        float r = fpR * 0.92f;
+        float cy = fpY - fpR * 0.08f;
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(OUTLINE);
+        c.drawCircle(fpX, cy, r, paint);
+        int top = pressed ? Color.rgb(120, 200, 230) : Color.rgb(70, 150, 190);
+        int bottom = pressed ? Color.rgb(40, 120, 160) : Color.rgb(24, 80, 120);
+        paint.setAlpha(255);
+        paint.setShader(new LinearGradient(0, cy - r, 0, cy + r, top, bottom, Shader.TileMode.CLAMP));
+        c.drawCircle(fpX, cy, r * 0.87f, paint);
+        paint.setShader(null);
+        paint.setColor(Color.argb(60, 255, 255, 255));
+        tmp2.set(fpX - r * 0.55f, cy - r * 0.8f, fpX + r * 0.55f, cy - r * 0.12f);
+        c.drawOval(tmp2, paint);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(unit * 0.006f);
+        paint.setColor(pressed ? BANANA : Color.argb(140, 255, 255, 255));
+        c.drawCircle(fpX, cy, r * 0.87f, paint);
+        paint.setStyle(Paint.Style.FILL);
+        if (!RomIcons.draw(c, RomIcons.crosshair, fpX, cy, r * 0.62f)) {
+            DkIcons.eye(c, fpX, cy, r * 0.5f);
+        }
+        // Name tag across the bottom.
+        tmp.set(fpX - fpR * 0.78f, fpY + fpR * 0.58f, fpX + fpR * 0.78f, fpY + fpR * 0.98f);
+        tagPlate(c, tmp);
+        text.setTextAlign(Paint.Align.CENTER);
+        text.setTextSize(fitText("1st Person", tmp.width() * 0.84f, tmp.height() * 0.66f));
+        outlined(c, "1st Person", tmp.centerX(), tmp.centerY() + text.getTextSize() * 0.36f, CREAM);
+        c.restoreToCount(saved);
+    }
+
+    private void drawHealth(Canvas c) {
+        text.setTextAlign(Paint.Align.LEFT);
+        if (!state.inGame()) {
+            String hint = "Start a game to see health";
+            float hintX = healthX - melonR;
+            text.setTextSize(fitText(hint, tabRects[TAB_COUNT - 1].right - hintX, melonR * 0.55f));
+            outlined(c, hint, hintX, healthY + melonR * 0.2f, CREAM);
+            return;
+        }
+        // A hit shakes the melon that lost a quarter; healing makes the one that gained pulse.
+        Integer before = lastValue.put("health", state.health);
+        if (before != null && before != state.health) {
+            healthHurt = state.health < before;
+            healthMelon = Math.max(0, Math.min(state.melons - 1, (healthHurt ? state.health : state.health - 1) / 4));
+            startAnim("melon");
+        }
+        float hp = animProgress("melon", MELON_MS);
+        float x = healthX;
+        int remaining = state.health;
+        for (int i = 0; i < state.melons; i++) {
+            int saved = c.save();
+            idleSway(c, x, healthY, melonR, i * 211);   // a gentle bob, all the time
+            if (hp >= 0 && i == healthMelon) {
+                if (healthHurt) {
+                    c.translate((float) Math.sin(hp * Math.PI * 6) * melonR * 0.18f * (1 - hp), 0);
+                } else {
+                    float pulse = 1f + 0.25f * (float) Math.sin(Math.PI * hp);
+                    c.scale(pulse, pulse, x, healthY);
+                }
+            }
+            drawMelon(c, x, healthY, melonR, Math.max(0, Math.min(4, remaining)));
+            c.restoreToCount(saved);
+            remaining -= 4;
+            x += melonR * 2.4f;
+        }
+    }
+
+    /**
+     * One health melon, as the game's HUD and pause screen show it (code_10D2D0.c): the full
+     * melon drawn faintly, the remaining quarters on top. Falls back to our own drawing.
+     */
+    private void drawMelon(Canvas c, float cx, float cy, float r, int quarters) {
+        Bitmap full = RomIcons.healthMelon[3];
+        if (full == null) {
+            DkIcons.melon(c, cx, cy, r, quarters);
+            return;
+        }
+        int faint = c.saveLayerAlpha(cx - r * 1.2f, cy - r * 1.2f, cx + r * 1.2f, cy + r * 1.2f, 80);
+        RomIcons.draw(c, full, cx, cy, r);
+        c.restoreToCount(faint);
+        if (quarters > 0) {
+            RomIcons.draw(c, RomIcons.healthMelon[quarters - 1], cx, cy, r);
+        }
+    }
+
+    // ------------------------------------------------------------------------------
+    // Event animations: played once when something changes, then still
+    // ------------------------------------------------------------------------------
+
+    private static final long IDLE_FRAME_MS = 50, IDLE_PERIOD_MS = 3200, WIGGLE_MS = 900;
+
+    /**
+     * Applies a slow, small bob and tilt to the canvas around (x, y) for an item icon, each
+     * icon out of step with the others (by {@code seed}) so they don't move in unison.
+     */
+    private void idleSway(Canvas c, float x, float y, float r, int seed) {
+        long now = android.os.SystemClock.uptimeMillis();
+        double t = 2 * Math.PI * ((now + (seed & 0x7FFF) * 37L) % IDLE_PERIOD_MS) / IDLE_PERIOD_MS;
+        c.translate(0, (float) Math.sin(t) * r * 0.06f);
+        c.rotate((float) Math.sin(t * 0.5 + 1.3) * 5f, x, y);
+    }
+
+    private static final long SPIN_MS = 520, MELON_MS = 420, SQUASH_MS = 160, BUMP_MS = 300, HOP_MS = 360;
+    private final java.util.HashMap<String, Long> animStart = new java.util.HashMap<>();
+    private final java.util.HashMap<String, Integer> lastValue = new java.util.HashMap<>();
+    private boolean animating;      // some animation is running: keep redrawing
+    private boolean healthHurt;
+    private int healthMelon;
+
+    private void startAnim(String key) {
+        animStart.put(key, android.os.SystemClock.uptimeMillis());
+        postInvalidateOnAnimation();
+    }
+
+    /** 0..1 through the animation, or -1 when it isn't running. */
+    private float animProgress(String key, long durationMs) {
+        Long start = animStart.get(key);
+        if (start == null) {
+            return -1f;
+        }
+        float p = (android.os.SystemClock.uptimeMillis() - start) / (float) durationMs;
+        if (p >= 1f) {
+            animStart.remove(key);
+            return -1f;
+        }
+        animating = true;
+        return p;
+    }
+
+    /** Starts the animation when a watched value changes (not the first time it's seen). */
+    private void watch(String key, int value, String animKey) {
+        Integer before = lastValue.put(key, value);
+        if (before != null && before != value) {
+            startAnim(animKey);
+        }
+    }
+
+    private void drawTabs(Canvas c) {
+        int shown = displayedKong();
+        int playing = state.inGame() ? state.currentKong : -1;
+        text.setTextAlign(Paint.Align.CENTER);
+        for (int i = 0; i < tabRects.length; i++) {
+            // Barrels keep a barrel's proportions however wide the tab is.
+            RectF t = tabRects[i];
+            float bw = Math.min(t.width(), t.height() * 0.95f);
+            RectF r = barrelRect;
+            r.set(t.centerX() - bw / 2, t.top, t.centerX() + bw / 2, t.bottom);
+            boolean locked = isLocked(i);
+            boolean lit = !locked && i == shown;
+            float hop = animProgress("tab" + i, HOP_MS);
+            int tabSaved = c.save();
+            if (hop >= 0) {
+                c.translate(0, -(float) Math.sin(Math.PI * hop) * r.height() * 0.14f);
+            }
+            barrel(c, r, lit, locked, i < KONG_COLORS.length ? KONG_COLORS[i] : BANANA);
+            if (locked) {
+                c.restoreToCount(tabSaved);
+                continue; // Greyed out, no face or name, until the Kong is freed.
+            }
+            float faceR = Math.min(r.height(), r.width()) * 0.36f;
+            if (i == SHARED_TAB) {
+                // Shared collectibles: a banana fairy (or a golden banana) on the barrel.
+                Bitmap icon = RomIcons.fairy != null ? RomIcons.fairy : RomIcons.goldenBanana;
+                if (!RomIcons.draw(c, icon, r.centerX(), r.centerY(), faceR)) {
+                    DkIcons.banana(c, r.centerX(), r.centerY(), faceR * 0.8f);
+                }
+                c.restoreToCount(tabSaved);
+                continue;
+            }
+            Bitmap face = RomIcons.of(RomIcons.face, i);
+            if (face != null) {
+                tmp.set(r.centerX() - faceR, r.centerY() - faceR, r.centerX() + faceR, r.centerY() + faceR);
+                path.reset();
+                path.addOval(tmp, Path.Direction.CW);
+                int saved = c.save();
+                c.clipPath(path);
+                RomIcons.draw(c, face, r.centerX(), r.centerY(), faceR);
+                c.restoreToCount(saved);
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setStrokeWidth(unit * 0.005f);
+                paint.setColor(lit ? BANANA : WOOD_EDGE);
+                c.drawOval(tmp, paint);
+                paint.setStyle(Paint.Style.FILL);
+            } else {
+                text.setTextSize(fitText(KONG_SHORT[i], r.width() * 0.8f, r.height() * 0.3f));
+                outlined(c, KONG_SHORT[i], r.centerX(), r.centerY() + text.getTextSize() * 0.35f, KONG_COLORS[i]);
+            }
+            if (i == playing) {
+                // A little banana marks the Kong you're playing.
+                DkIcons.banana(c, r.right - r.width() * 0.16f, r.top + r.height() * 0.17f, r.height() * 0.14f);
+            }
+            c.restoreToCount(tabSaved);
+        }
+    }
+
+    /** One line of the collectibles panel. total < 0: just a count (no "of"). */
+    private static final class Row {
+        final String label;
+        final Bitmap icon;
+        final int fallback;   // drawn icon if the ROM one is missing: 0 banana, 1 coin, 2 star
+        final int have, total;
+        int color = Color.rgb(90, 160, 60);
+
+        Row(String label, Bitmap icon, int fallback, int have, int total) {
+            this.label = label;
+            this.icon = icon;
+            this.fallback = fallback;
+            this.have = have;
+            this.total = total;
+        }
+    }
+
+    /** The level the location bar is on, or -1 for the whole game. */
+    private int shownLevel() {
+        return state.level < 0 ? -1 : state.level;
+    }
+
+    private static Row colored(Row r, int color) {
+        r.color = color;
+        return r;
+    }
+
+    private java.util.List<Row> rowsFor(int tab, int level) {
+        java.util.List<Row> rows = new java.util.ArrayList<>();
+        boolean all = level < 0;
+        if (tab == SHARED_TAB) {
+            int[][][] lists = { GameState.FAIRY_FLAGS, GameState.CROWN_FLAGS, GameState.KEY_FLAGS, GameState.RAINBOW_COIN_FLAGS };
+            int[] colors = { Color.rgb(226, 90, 170), Color.rgb(200, 60, 50), Color.rgb(70, 110, 200), Color.rgb(130, 70, 200) };
+            String[] labels = { "Banana Fairies", "Battle Crowns", "Boss Keys", "Rainbow Coins" };
+            Bitmap[] icons = { RomIcons.fairy, RomIcons.crown, RomIcons.key, RomIcons.rainbowCoin };
+            for (int i = 0; i < lists.length; i++) {
+                int have = 0, total = 0;
+                for (int l = 0; l < GameState.LEVELS; l++) {
+                    if ((all && state.levelReached(l)) || l == level) {
+                        have += state.countFlags(lists[i][l]);
+                        total += lists[i][l].length;
+                    }
+                }
+                rows.add(colored(new Row(labels[i], icons[i], 2, have, total), colors[i]));
+            }
+            if (all) {
+                int golden = 0;
+                for (GameState.Kong k : state.kongs) {
+                    golden += k.goldenBananas;
+                }
+                rows.add(0, colored(new Row("Golden Bananas", RomIcons.goldenBanana, 0, golden, 201), Color.rgb(60, 150, 60)));
+            }
+            return rows;
+        }
+
+        GameState.Kong kong = state.kongs[tab];
+        int golden = 0, goldenTotal = 0, coloured = 0, colouredTotal = 0;
+        int prints = 0, printsTotal = 0, medals = 0, medalsTotal = 0;
+        for (int l = 0; l < GameState.LEVELS; l++) {
+            if (!all && l != level) {
+                continue;
+            }
+            if (all && !state.levelReached(l)) {
+                continue;   // places not reached yet don't count towards the totals
+            }
+            golden += state.goldenByLevel[tab][l];
+            coloured += state.colouredByLevel[tab][l];
+            goldenTotal += l <= GameState.ISLES ? 5 : 0;        // 5 per Kong per level and Isles
+            colouredTotal += l < GameState.ISLES ? 100 : 0;     // 100 per Kong per level
+            int bp = GameState.blueprintFlag(tab, l), md = GameState.medalFlag(tab, l);
+            if (bp >= 0) {
+                printsTotal++;
+                prints += state.flag(bp) ? 1 : 0;
+            }
+            if (md >= 0) {
+                medalsTotal++;
+                medals += state.flag(md) ? 1 : 0;
+            }
+        }
+        if (all) {
+            // Includes the odd one out (Rareware) where the per-level split doesn't.
+            golden = kong.goldenBananas;
+            coloured = kong.colouredBananas;
+        }
+        rows.add(colored(new Row("Golden Bananas", RomIcons.goldenBanana, 0, golden, goldenTotal), Color.rgb(60, 150, 60)));
+        rows.add(colored(new Row("Bananas", RomIcons.of(RomIcons.banana, tab), 0, coloured, colouredTotal), KONG_COLORS[tab]));
+        rows.add(colored(new Row("Blueprints", RomIcons.of(RomIcons.blueprintByKong, tab) != null ? RomIcons.of(RomIcons.blueprintByKong, tab) : RomIcons.blueprint, 2, prints, printsTotal), Color.rgb(60, 120, 200)));
+        rows.add(colored(new Row("Banana Medals", RomIcons.of(RomIcons.medalByKong, tab), 2, medals, medalsTotal), darker(KONG_COLORS[tab])));
+        rows.add(colored(new Row("Coins", RomIcons.of(RomIcons.coin, tab), 1, kong.coins, -1), darker(KONG_COLORS[tab])));
+        return rows;
+    }
+
+    /**
+     * Collectibles as a grid of round badges with wooden value tags, in the style of DKC
+     * Returns 3D's item screen: a wooden frame around a dark inset board.
+     */
+    private void drawKongPanel(Canvas c) {
+        RectF p = panelRect;
+        woodPanel(c, p, unit * 0.03f, false);
+
+        int tab = displayedKong();
+        java.util.List<Row> rows = rowsFor(tab, shownLevel());
+        rows.removeIf(r -> r.total == 0);   // nothing of that kind here (e.g. bananas in Helm)
+        rows.removeIf(r -> r.label.equals("Coins"));   // shown under Carrying
+
+        // Dark inset board.
+        float frame = unit * 0.035f;
+        RectF board = boardRect;
+        board.set(p.left + frame, p.top + frame, p.right - frame, p.bottom - frame);
+        float br = unit * 0.02f;
+        paint.setStyle(Paint.Style.FILL);
+        paint.setAlpha(255);
+        paint.setShader(new LinearGradient(0, board.top, 0, board.bottom, Color.rgb(46, 26, 12), Color.rgb(70, 40, 18), Shader.TileMode.CLAMP));
+        c.drawRoundRect(board, br, br, paint);
+        paint.setShader(null);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(unit * 0.008f);
+        paint.setColor(Color.rgb(30, 16, 6));
+        c.drawRoundRect(board, br, br, paint);
+        paint.setStyle(Paint.Style.FILL);
+
+        // The level the counts are for, as a title across the top of the board.
+        int level = shownLevel();
+        float titleH = 0;
+        if (level >= 0 && level < GameState.LEVEL_NAMES.length) {
+            titleH = Math.min(board.height() * 0.2f, unit * 0.085f);
+            String title = GameState.LEVEL_NAMES[level];
+            text.setTextAlign(Paint.Align.CENTER);
+            text.setTextSize(fitText(title, board.width() * 0.8f, titleH * 0.62f));
+            outlined(c, title, board.centerX(), board.top + titleH * 0.6f + text.getTextSize() * 0.36f, BANANA);
+        }
+
+        int cols = 2;
+        int lines = (rows.size() + cols - 1) / cols;
+        float cellW = board.width() / cols;
+        float rowsTop = board.top + titleH;
+        float cellH = (board.bottom - rowsTop) / Math.max(lines, 1);
+        float badgeR = Math.min(cellH * 0.34f, cellW * 0.17f);
+        for (int i = 0; i < rows.size(); i++) {
+            Row r = rows.get(i);
+            float cx = board.left + (i % cols) * cellW, cy = rowsTop + (i / cols) * cellH + cellH / 2;
+            float bx = cx + cellW * 0.08f + badgeR;
+            String value = r.total < 0 ? String.valueOf(r.have) : r.have + "/" + r.total;
+            boolean complete = r.total > 0 && r.have >= r.total;
+            // Tag first, so the badge overlaps its left end.
+            tmp.set(bx + badgeR * 0.4f, cy - badgeR * 0.55f, cx + cellW * 0.93f, cy + badgeR * 0.55f);
+            tag(c, tmp, value, complete);
+            // Spins once (like the item in the game) when its count changes.
+            String spinKey = "spin" + tab + r.label;
+            watch("row" + tab + ":" + shownLevel() + ":" + r.label, r.have, spinKey);
+            float spin = animProgress(spinKey, SPIN_MS);
+            if (spin >= 0) {
+                int saved = c.save();
+                float sx = (float) Math.cos(2 * Math.PI * spin);
+                float pop = 1f + 0.18f * (float) Math.sin(Math.PI * spin);
+                c.scale(Math.abs(sx) < 0.08f ? 0.08f : sx * pop, pop, bx, cy);
+                badge(c, bx, cy, badgeR, r);
+                c.restoreToCount(saved);
+            } else {
+                badge(c, bx, cy, badgeR, r);
+            }
+        }
+    }
+
+    /** The item's icon on its own (no badge), fitted into a square of radius r. */
+    private void itemIcon(Canvas c, float x, float y, float r, Row row) {
+        drawItemIcon(c, x, y, r, row);
+    }
+
+    private void drawItemIcon(Canvas c, float x, float y, float r, Row row) {
+        if (!RomIcons.draw(c, row.icon, x, y, r)) {
+            switch (row.fallback) {
+                case 0: DkIcons.banana(c, x, y, r * 0.85f); break;
+                case 1: DkIcons.coin(c, x, y, r * 0.8f); break;
+                case 3: crystal(c, x, y, r * 0.85f); break;
+                default: DkIcons.star(c, x, y, r * 0.85f); break;
+            }
+        }
+    }
+
+    /** A round coloured badge with the item's icon. */
+    private void badge(Canvas c, float x, float y, float r, Row row) {
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(OUTLINE);
+        c.drawCircle(x, y, r, paint);
+        int base = row.color;
+        paint.setAlpha(255);
+        paint.setShader(new LinearGradient(0, y - r, 0, y + r, lighten(base), base, Shader.TileMode.CLAMP));
+        c.drawCircle(x, y, r * 0.86f, paint);
+        paint.setShader(null);
+        // Gloss.
+        paint.setColor(Color.argb(70, 255, 255, 255));
+        tmp2.set(x - r * 0.55f, y - r * 0.78f, x + r * 0.55f, y - r * 0.1f);
+        c.drawOval(tmp2, paint);
+        if (!RomIcons.draw(c, row.icon, x, y, r * 0.62f)) {
+            switch (row.fallback) {
+                case 0: DkIcons.banana(c, x, y, r * 0.55f); break;
+                case 1: DkIcons.coin(c, x, y, r * 0.5f); break;
+                case 3: crystal(c, x, y, r * 0.55f); break;
+                default: DkIcons.star(c, x, y, r * 0.55f); break;
+            }
+        }
+    }
+
+    /** A crystal coconut: a faceted pink gem. */
+    private void crystal(Canvas c, float x, float y, float r) {
+        path.reset();
+        path.moveTo(x, y - r);
+        path.lineTo(x + r * 0.75f, y - r * 0.2f);
+        path.lineTo(x, y + r);
+        path.lineTo(x - r * 0.75f, y - r * 0.2f);
+        path.close();
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(Color.rgb(255, 190, 235));
+        c.drawPath(path, paint);
+        paint.setColor(Color.rgb(230, 120, 200));
+        path.reset();
+        path.moveTo(x, y - r);
+        path.lineTo(x + r * 0.75f, y - r * 0.2f);
+        path.lineTo(x, y + r);
+        path.close();
+        c.drawPath(path, paint);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeJoin(Paint.Join.ROUND);
+        paint.setStrokeWidth(r * 0.14f);
+        paint.setColor(OUTLINE);
+        path.reset();
+        path.moveTo(x, y - r);
+        path.lineTo(x + r * 0.75f, y - r * 0.2f);
+        path.lineTo(x, y + r);
+        path.lineTo(x - r * 0.75f, y - r * 0.2f);
+        path.close();
+        c.drawPath(path, paint);
+        paint.setStyle(Paint.Style.FILL);
+    }
+
+    /** An orange wooden plate (the item tags and the first-person label). */
+    private void tagPlate(Canvas c, RectF r) {
+        float rad = r.height() * 0.3f;
+        paint.setStyle(Paint.Style.FILL);
+        paint.setAlpha(255);
+        paint.setShader(new LinearGradient(0, r.top, 0, r.bottom, Color.rgb(240, 150, 50), Color.rgb(184, 96, 26), Shader.TileMode.CLAMP));
+        c.drawRoundRect(r, rad, rad, paint);
+        paint.setShader(null);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(unit * 0.006f);
+        paint.setColor(OUTLINE);
+        c.drawRoundRect(r, rad, rad, paint);
+        paint.setStyle(Paint.Style.FILL);
+    }
+
+    /** An orange wooden tag with a value on it. */
+    private void tag(Canvas c, RectF r, String value, boolean complete) {
+        float rad = r.height() * 0.3f;
+        paint.setStyle(Paint.Style.FILL);
+        paint.setAlpha(255);
+        paint.setShader(new LinearGradient(0, r.top, 0, r.bottom, Color.rgb(240, 150, 50), Color.rgb(184, 96, 26), Shader.TileMode.CLAMP));
+        c.drawRoundRect(r, rad, rad, paint);
+        paint.setShader(null);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(unit * 0.0025f);
+        paint.setColor(Color.argb(70, 90, 40, 6));
+        c.drawLine(r.left + rad, r.top + r.height() * 0.3f, r.right - rad, r.top + r.height() * 0.34f, paint);
+        c.drawLine(r.left + rad * 2, r.top + r.height() * 0.72f, r.right - rad * 1.5f, r.top + r.height() * 0.7f, paint);
+        paint.setStrokeWidth(unit * 0.007f);
+        paint.setColor(OUTLINE);
+        c.drawRoundRect(r, rad, rad, paint);
+        paint.setStyle(Paint.Style.FILL);
+        text.setTextAlign(Paint.Align.CENTER);
+        float textLeft = r.left + r.height() * 0.55f;   // clear of the badge
+        text.setTextSize(fitText(value, r.right - textLeft - rad, r.height() * 0.68f));
+        outlined(c, value, (textLeft + r.right) / 2, r.centerY() + text.getTextSize() * 0.36f, complete ? COMPLETE : CREAM);
+    }
+
+    private static int darker(int color) {
+        return Color.rgb(((color >> 16) & 0xFF) * 3 / 5, ((color >> 8) & 0xFF) * 3 / 5, (color & 0xFF) * 3 / 5);
+    }
+
+    private static int lighten(int color) {
+        int r = Math.min(255, ((color >> 16) & 0xFF) + 70);
+        int g = Math.min(255, ((color >> 8) & 0xFF) + 70);
+        int b = Math.min(255, (color & 0xFF) + 70);
+        return Color.rgb(r, g, b);
+    }
+
+        /** A chunky outlined triangle pointing left (dir -1) or right (dir 1). */
+    private void arrow(Canvas c, float cx, float cy, float r, int dir) {
+        path.reset();
+        path.moveTo(cx + dir * r, cy);
+        path.lineTo(cx - dir * r * 0.7f, cy - r);
+        path.lineTo(cx - dir * r * 0.7f, cy + r);
+        path.close();
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(BANANA);
+        c.drawPath(path, paint);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeJoin(Paint.Join.ROUND);
+        paint.setStrokeWidth(r * 0.25f);
+        paint.setColor(OUTLINE);
+        c.drawPath(path, paint);
+        paint.setStyle(Paint.Style.FILL);
+    }
+
+    private void drawActions(Canvas c) {
+        int kong = playingKong();
+        boolean known = state.inGame();
+        GameState.Kong k = state.kongs[kong];
+        String[] counts = new String[4];
+        for (int i = 0; i < 4; i++) {
+            int n;
+            switch (ACTIONS[i]) {
+                case ORANGE: n = state.oranges; break;
+                case WEAPON: n = state.ammo; break;
+                case INSTRUMENT: n = k.instrumentEnergy; break;
+                default: n = state.film; break;
+            }
+            counts[i] = known ? String.valueOf(n) : "";
+        }
+
+        for (int i = 0; i < 4; i++) {
+            Move move = ACTIONS[i];
+            RectF r = actionRects[i];
+            if (!owned(move)) {
+                // Not bought yet: just an empty notch in the wood.
+                paint.setColor(Color.argb(70, 0, 0, 0));
+                c.drawRoundRect(r, r.height() * 0.18f, r.height() * 0.18f, paint);
+                continue;
+            }
+            // The gun and camera buttons stay lit while the gun is out / the camera is up.
+            boolean pressed = running == move || (move == Move.WEAPON && state.gunOut)
+                || (move == Move.CAMERA && state.camera);
+            boolean enabled = !greyed(move);
+
+            int saved = c.saveLayerAlpha(r.left - unit * 0.02f, r.top - unit * 0.02f,
+                r.right + unit * 0.02f, r.bottom + unit * 0.02f, enabled ? 255 : 90);
+            float squash = animProgress("squash" + move, SQUASH_MS);
+            if (squash >= 0) {
+                float sq = 1f - 0.08f * (float) Math.sin(Math.PI * squash);
+                c.scale(sq, sq, r.centerX(), r.centerY());
+            }
+            woodPanel(c, r, r.height() * 0.18f, pressed);
+
+            // Icon, with the count beside it.
+            boolean hasCount = !counts[i].isEmpty();
+            float iconR = Math.min(r.height() * 0.36f, r.width() * (hasCount ? 0.22f : 0.3f));
+            float iconX = hasCount ? r.left + r.width() * 0.1f + iconR : r.centerX();
+            float iconY = r.centerY();
+            // The icon sways for a moment when it's used (pressed, or its count changes).
+            if (hasCount) {
+                watch("wigglecount" + move, parseCount(counts[i]), "wiggle" + move);
+            }
+            int iconSaved = c.save();
+            float wiggle = animProgress("wiggle" + move, WIGGLE_MS);
+            if (wiggle >= 0) {
+                float fade = 1f - wiggle;
+                double t = 2 * Math.PI * wiggle * 2.5;
+                c.translate(0, -(float) Math.abs(Math.sin(t)) * iconR * 0.12f * fade);
+                c.rotate((float) Math.sin(t) * 10f * fade, iconX, iconY);
+            }
+            switch (move) {
+                case WEAPON:
+                    if (!RomIcons.draw(c, RomIcons.of(RomIcons.weapon, kong), iconX, iconY, iconR)) {
+                        DkIcons.weapon(c, kong, iconX, iconY, iconR);
+                    }
+                    break;
+                case ORANGE:
+                    if (!RomIcons.draw(c, RomIcons.orange, iconX, iconY, iconR)) {
+                        DkIcons.orange(c, iconX, iconY, iconR);
+                    }
+                    break;
+                case INSTRUMENT:
+                    if (!RomIcons.draw(c, RomIcons.of(RomIcons.instrument, kong), iconX, iconY, iconR)) {
+                        DkIcons.instrument(c, kong, iconX, iconY, iconR);
+                    }
+                    break;
+                default:
+                    if (!RomIcons.draw(c, RomIcons.film, iconX, iconY, iconR)) {
+                        DkIcons.camera(c, iconX, iconY, iconR);
+                    }
+                    break;
+            }
+            c.restoreToCount(iconSaved);
+            if (hasCount) {
+                float countLeft = iconX + iconR * 1.2f;
+                float countRight = r.right - r.width() * 0.1f;
+                text.setTextAlign(Paint.Align.RIGHT);
+                text.setTextSize(fitText("000", countRight - countLeft, r.height() * 0.36f));
+                // The count bumps when it changes (an orange thrown, ammo used or picked up).
+                watch("count" + move, parseCount(counts[i]), "bump" + move);
+                float bump = animProgress("bump" + move, BUMP_MS);
+                int countSaved = c.save();
+                if (bump >= 0) {
+                    float grow = 1f + 0.3f * (float) Math.sin(Math.PI * bump);
+                    c.scale(grow, grow, countRight - textWidth(counts[i]) / 2f, iconY);
+                }
+                outlined(c, counts[i], countRight, iconY + text.getTextSize() * 0.36f, BANANA);
+                c.restoreToCount(countSaved);
+            }
+            c.restoreToCount(saved);
+        }
+    }
+
+    private static int parseCount(String s) {
+        try {
+            return Integer.parseInt(s);
+        } catch (NumberFormatException e) {
+            return -1;
+        }
+    }
+
+    /** Largest text size up to {@code max} at which {@code s} fits in {@code width}. */
+    /** Width of {@code s} at the current text size, in whichever font outlined() will use. */
+    private float textWidth(String s) {
+        return USE_GAME_FONT && GameFont.ready() ? GameFont.measure(s, text.getTextSize(), text) : text.measureText(s);
+    }
+
+    private float fitText(String s, float width, float max) {
+        text.setTextSize(max);
+        float measured = textWidth(s);
+        return measured <= width ? max : max * width / measured;
+    }
+
+    // ------------------------------------------------------------------------------
+    // Touch
+    // ------------------------------------------------------------------------------
+
+    @Override
+    public boolean onTouchEvent(MotionEvent event) {
+        if (!active || !state.inGame()) {
+            return false;
+        }
+        int action = event.getActionMasked();
+        if (action != MotionEvent.ACTION_DOWN && action != MotionEvent.ACTION_POINTER_DOWN) {
+            return true;
+        }
+        int index = event.getActionIndex();
+        float x = event.getX(index), y = event.getY(index);
+        if (state.paused) {
+            if (pausePrevRect.contains(x, y)) {
+                stepPauseLevel(-1);
+            } else if (pauseNextRect.contains(x, y)) {
+                stepPauseLevel(1);
+            }
+            return true;
+        }
+
+        if (state.cutscene) {
+            return true;   // nothing to tap during a cutscene
+        }
+
+        float ox = x - osX, oy = y - osY;
+        if (showCancel() && ox * ox + oy * oy <= osR * osR * 1.3f) {
+            cancelAbility();
+            return true;
+        }
+        if (showOrangstand() && ox * ox + oy * oy <= osR * osR * 1.3f) {
+            toggleOrangstand();
+            return true;
+        }
+        if (zbMoveName() != null && ox * ox + oy * oy <= osR * osR * 1.3f) {
+            performZbMove();
+            return true;
+        }
+        float dx = x - fpX, dy = y - fpY;
+        if (dx * dx + dy * dy <= fpR * fpR * 1.3f) {
+            if (available(Move.FIRST_PERSON)) {
+                perform(Move.FIRST_PERSON);
+            }
+            return true;
+        }
+        for (int i = 0; i < 4; i++) {
+            if (actionRects[i].contains(x, y)) {
+                if (owned(ACTIONS[i]) && available(ACTIONS[i])) {
+                    perform(ACTIONS[i]);
+                }
+                return true;
+            }
+        }
+
+        for (int i = 0; i < tabRects.length; i++) {
+            if (tabRects[i].contains(x, y)) {
+                if (isLocked(i)) {
+                    return true;
+                }
+                boolean current = state.inGame() && i == state.currentKong;
+                if (i < GameState.KONG_COUNT && trySwap(i, current)) {
+                    return true;
+                }
+                // Tapping the Kong you're playing (or the one already shown) goes back to
+                // following whoever you play as.
+                selectedKong = (current || i == selectedKong) ? -1 : i;
+                Haptics.tap(this);
+                invalidate();
+                return true;
+            }
+        }
+        return true;
+    }
+}

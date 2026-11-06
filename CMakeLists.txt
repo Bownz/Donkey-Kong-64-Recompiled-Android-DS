@@ -4,7 +4,41 @@ if(NOT DEFINED ENV{VCPKG_ROOT})
     set(ENV{VCPKG_ROOT} ${CMAKE_SOURCE_DIR}/lib/vcpkg)
 endif()
 
-include($ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake)
+# Android: the Android Gradle plugin (or android/build-native.sh) passes the NDK's
+# toolchain file. Route it through vcpkg so curl/freetype are built for Android too:
+# vcpkg becomes the toolchain and chain-loads the NDK's. This must happen before project().
+if(DEFINED ANDROID_ABI)
+    if(NOT CMAKE_TOOLCHAIN_FILE MATCHES "vcpkg\\.cmake$")
+        set(VCPKG_CHAINLOAD_TOOLCHAIN_FILE "${CMAKE_TOOLCHAIN_FILE}" CACHE FILEPATH "NDK toolchain, loaded by vcpkg" FORCE)
+        set(CMAKE_TOOLCHAIN_FILE "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" CACHE FILEPATH "" FORCE)
+    endif()
+
+    if(NOT DEFINED VCPKG_TARGET_TRIPLET)
+        if(ANDROID_ABI STREQUAL "arm64-v8a")
+            set(VCPKG_TARGET_TRIPLET "arm64-android" CACHE STRING "")
+        elseif(ANDROID_ABI STREQUAL "x86_64")
+            set(VCPKG_TARGET_TRIPLET "x64-android" CACHE STRING "")
+        else()
+            message(FATAL_ERROR "Unsupported ANDROID_ABI '${ANDROID_ABI}' (use arm64-v8a).")
+        endif()
+    endif()
+
+    # vcpkg's Android triplets find the NDK through ANDROID_NDK_HOME.
+    if(NOT DEFINED ENV{ANDROID_NDK_HOME})
+        if(DEFINED CMAKE_ANDROID_NDK)
+            set(ENV{ANDROID_NDK_HOME} "${CMAKE_ANDROID_NDK}")
+        elseif(DEFINED ANDROID_NDK)
+            set(ENV{ANDROID_NDK_HOME} "${ANDROID_NDK}")
+        elseif(VCPKG_CHAINLOAD_TOOLCHAIN_FILE MATCHES "build/cmake/android\\.toolchain\\.cmake$")
+            # <ndk>/build/cmake/android.toolchain.cmake -> <ndk>
+            get_filename_component(_ndk_dir "${VCPKG_CHAINLOAD_TOOLCHAIN_FILE}" DIRECTORY)
+            get_filename_component(_ndk_dir "${_ndk_dir}/../.." ABSOLUTE)
+            set(ENV{ANDROID_NDK_HOME} "${_ndk_dir}")
+        endif()
+    endif()
+elseif(NOT CMAKE_TOOLCHAIN_FILE MATCHES "vcpkg\\.cmake$")
+    include($ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake)
+endif()
 
 if (APPLE)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum OS X deployment version")
@@ -57,6 +91,11 @@ add_compile_definitions(__PRFCHWINTRIN_H)
 
 if (RECOMP_FLATPAK)
     add_compile_definitions(RECOMP_FLATPAK)
+endif()
+
+if (ANDROID)
+    # SDL2 from source, the nfd replacement and libmain.so setup. Must come before RT64.
+    include(${CMAKE_SOURCE_DIR}/android/cmake/android.cmake)
 endif()
 
 add_subdirectory(${CMAKE_SOURCE_DIR}/lib/rt64 ${CMAKE_BINARY_DIR}/rt64)
@@ -148,8 +187,13 @@ add_custom_command(OUTPUT
                    DEPENDS ${CMAKE_SOURCE_DIR}/patches/patches.elf
 )
 
-# Main executable
-add_executable(DK64Recompiled)
+# Main executable (on Android: libmain.so, loaded by SDLActivity)
+if (ANDROID)
+    add_library(DK64Recompiled SHARED)
+    dk64_configure_android_target(DK64Recompiled)
+else()
+    add_executable(DK64Recompiled)
+endif()
 
 set (SOURCES
     ${CMAKE_SOURCE_DIR}/src/main/launcher_animation.cpp
@@ -321,25 +365,29 @@ set (DXC_CS_OPTS "${DXC_COMMON_OPTS}" "-E" "CSMain" "-T cs_6_0")
 set (DXC_GS_OPTS "${DXC_COMMON_OPTS}" "-E" "GSMain" "-T gs_6_0")
 set (DXC_RT_OPTS "${DXC_COMMON_OPTS}" "-D" "RT_SHADER" "-T" "lib_6_3" "-fspv-target-env=vulkan1.1spirv1.4" "-fspv-extension=SPV_KHR_ray_tracing" "-fspv-extension=SPV_EXT_descriptor_indexing")
 
-if (${WIN32})
+# DXC runs on the build machine, so pick its binary by the HOST platform. For native
+# builds host == target, so this matches the previous behaviour; for cross-compiles
+# (Android) it avoids trying to run an ARM64 dxc on an x86_64 build machine.
+if (CMAKE_HOST_WIN32)
     set (DXC "${PROJECT_SOURCE_DIR}/lib/rt64/src/contrib/dxc/bin/x64/dxc.exe")
-    add_compile_definitions(NOMINMAX)
-else()
-    if (APPLE)
-        # Apple's binary is universal, so it'll work on both x86_64 and arm64
-        set (DXC "DYLD_LIBRARY_PATH=${PROJECT_SOURCE_DIR}/lib/rt64/src/contrib/dxc/lib/arm64" "${PROJECT_SOURCE_DIR}/lib/rt64/src/contrib/dxc/bin/arm64/dxc-macos")
-        if(CMAKE_SIZEOF_VOID_P EQUAL 8 AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|AMD64")
-            set(SPIRVCROSS "DYLD_LIBRARY_PATH=${PROJECT_SOURCE_DIR}/lib/rt64/src/contrib/spirv-cross/lib/x64" "${PROJECT_SOURCE_DIR}/lib/rt64//src/contrib/spirv-cross/bin/x64/spirv-cross")
-        else()
-            set(SPIRVCROSS "DYLD_LIBRARY_PATH=${PROJECT_SOURCE_DIR}/lib/rt64/src/contrib/spirv-cross/lib/arm64" "${PROJECT_SOURCE_DIR}/lib/rt64//src/contrib/spirv-cross/bin/x64/spirv-cross")
-        endif()
+elseif (CMAKE_HOST_APPLE)
+    # Apple's binary is universal, so it'll work on both x86_64 and arm64
+    set (DXC "DYLD_LIBRARY_PATH=${PROJECT_SOURCE_DIR}/lib/rt64/src/contrib/dxc/lib/arm64" "${PROJECT_SOURCE_DIR}/lib/rt64/src/contrib/dxc/bin/arm64/dxc-macos")
+    if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|AMD64")
+        set(SPIRVCROSS "DYLD_LIBRARY_PATH=${PROJECT_SOURCE_DIR}/lib/rt64/src/contrib/spirv-cross/lib/x64" "${PROJECT_SOURCE_DIR}/lib/rt64//src/contrib/spirv-cross/bin/x64/spirv-cross")
     else()
-        if(CMAKE_SIZEOF_VOID_P EQUAL 8 AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|AMD64")
-            set (DXC "LD_LIBRARY_PATH=${PROJECT_SOURCE_DIR}/lib/rt64/src/contrib/dxc/lib/x64" "${PROJECT_SOURCE_DIR}/lib/rt64/src/contrib/dxc/bin/x64/dxc-linux")
-        else()
-            set (DXC "LD_LIBRARY_PATH=${PROJECT_SOURCE_DIR}/lib/rt64/src/contrib/dxc/lib/arm64" "${PROJECT_SOURCE_DIR}/lib/rt64/src/contrib/dxc/bin/arm64/dxc-linux")
-        endif()
+        set(SPIRVCROSS "DYLD_LIBRARY_PATH=${PROJECT_SOURCE_DIR}/lib/rt64/src/contrib/spirv-cross/lib/arm64" "${PROJECT_SOURCE_DIR}/lib/rt64//src/contrib/spirv-cross/bin/x64/spirv-cross")
     endif()
+else()
+    if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|AMD64")
+        set (DXC "LD_LIBRARY_PATH=${PROJECT_SOURCE_DIR}/lib/rt64/src/contrib/dxc/lib/x64" "${PROJECT_SOURCE_DIR}/lib/rt64/src/contrib/dxc/bin/x64/dxc-linux")
+    else()
+        set (DXC "LD_LIBRARY_PATH=${PROJECT_SOURCE_DIR}/lib/rt64/src/contrib/dxc/lib/arm64" "${PROJECT_SOURCE_DIR}/lib/rt64/src/contrib/dxc/bin/arm64/dxc-linux")
+    endif()
+endif()
+
+if (WIN32)
+    add_compile_definitions(NOMINMAX)
 endif()
 
 set(RECOMP_FRONTEND_N64MODERNRUNTIME_PATH ${CMAKE_SOURCE_DIR}/lib/N64ModernRuntime)
