@@ -93,6 +93,16 @@ public final class BottomScreenView extends View {
 
     private Move running;
     private int selectedKong = -1;   // -1: follow the Kong being played
+    private boolean buttonsShown = true;   // Bottom Screen Buttons (Input > Touch)
+
+    /** Looking at another Kong goes back to the one being played after this long. */
+    private static final long LOOK_TIMEOUT_MS = 60_000;
+    private final Runnable lookTimeout = () -> {
+        if (selectedKong != -1) {
+            selectedKong = -1;
+            invalidate();
+        }
+    };
     private boolean active;
 
     private final Runnable poll = new Runnable() {
@@ -102,6 +112,9 @@ public final class BottomScreenView extends View {
             boolean changed = state.refresh();
             if (state.paused && !wasPaused) {
                 pauseLevel = state.level >= 0 ? state.level : -1;   // open on where you are
+                pauseSlideFrom = NO_LEVEL;   // the table slides in from the right
+                pauseSlideDir = 1;
+                startAnim("pauseSlide");
             }
             wasPaused = state.paused;
             if (state.inGame() && state.crystals < crystalsBefore) {
@@ -737,14 +750,24 @@ public final class BottomScreenView extends View {
 
     /** The tab being shown: a Kong (0-4) or SHARED_TAB. */
     private int displayedKong() {
+        // In a Tag Barrel: whoever you're looking at.
+        int tag = state.inGame() ? GameState.tagBarrelKong() : -1;
+        if (tag >= 0 && !isLocked(tag)) {
+            return tag;
+        }
         if (selectedKong == SHARED_TAB || (selectedKong >= 0 && !isLocked(selectedKong))) {
             return selectedKong;
         }
         return state.inGame() ? state.currentKong : GameState.DK;
     }
 
+    /** The Kong you play as; in a Tag Barrel, the one you're looking at. */
     private int playingKong() {
-        return state.inGame() ? state.currentKong : GameState.DK;
+        if (!state.inGame()) {
+            return GameState.DK;
+        }
+        int tag = GameState.tagBarrelKong();
+        return tag >= 0 && !isLocked(tag) ? tag : state.currentKong;
     }
 
     /** Kongs not freed yet in the running game (unknown before a game starts: all shown). */
@@ -760,7 +783,7 @@ public final class BottomScreenView extends View {
         if (!state.inGame()) {
             return true;
         }
-        GameState.Kong k = state.kongs[state.currentKong];
+        GameState.Kong k = state.kongs[playingKong()];
         switch (move) {
             case WEAPON: return k.weapon > 0;
             case ORANGE: return state.hasOranges() || state.oranges > 0;
@@ -840,24 +863,35 @@ public final class BottomScreenView extends View {
         unit = Math.min(w, h);
         float m = unit * 0.03f;
 
-        // Right column: four action buttons.
-        float colW = Math.min(w * 0.27f, h * 0.27f);
-        float colLeft = w - m - colW;
-        float gap = m * 0.7f;
-        float cellH = (h - 2 * m - 3 * gap) / 4f;
-        for (int i = 0; i < 4; i++) {
-            float top = m + i * (cellH + gap);
-            actionRects[i].set(colLeft, top, w - m, top + cellH);
+        buttonsShown = GameState.bottomButtons();
+        float left = m, right;
+        if (buttonsShown) {
+            // Right column: four action buttons.
+            float colW = Math.min(w * 0.27f, h * 0.27f);
+            float colLeft = w - m - colW;
+            float gap = m * 0.7f;
+            float cellH = (h - 2 * m - 3 * gap) / 4f;
+            for (int i = 0; i < 4; i++) {
+                float top = m + i * (cellH + gap);
+                actionRects[i].set(colLeft, top, w - m, top + cellH);
+            }
+            right = colLeft - m;
+        } else {
+            // Bottom Screen Buttons off: no button column; everything else spreads across.
+            for (RectF r : actionRects) {
+                r.setEmpty();
+            }
+            right = w - m;
         }
 
-        // Left area.
-        float left = m, right = colLeft - m;
+        // Left area (the whole width without the buttons).
         fpR = Math.min(unit * 0.085f, (right - left) * 0.12f);
         fpX = left + fpR;
         fpY = m + fpR;
 
         melonR = fpR * 0.75f;
-        healthX = fpX + fpR + m * 1.8f + melonR;
+        // Without the first-person button the melons start at the left edge.
+        healthX = buttonsShown ? fpX + fpR + m * 1.8f + melonR : left + melonR;
         healthY = fpY;
 
         // Lanky's Orangstand toggle, at the right end of the top row, after up to 3 melons.
@@ -870,7 +904,8 @@ public final class BottomScreenView extends View {
         float carryTop = m + 2 * fpR + m;
         float carryH = unit * 0.1f;
         carryRect.set(left, carryTop, right, carryTop + carryH);
-        float tabH = unit * 0.13f;
+        // Bigger barrels when they have the whole width.
+        float tabH = unit * (buttonsShown ? 0.13f : 0.17f);
         float tabsTop = h - m - tabH;
         float tabGap = m * 0.5f;
         float tabW = (right - left - tabGap * (TAB_COUNT - 1)) / TAB_COUNT;
@@ -893,10 +928,35 @@ public final class BottomScreenView extends View {
     // Drawing
     // ------------------------------------------------------------------------------
 
+    // Cutscenes: the bottom screen dims down (and back up afterwards) so it doesn't draw the
+    // eye while there's nothing on it.
+    private static final float CUTSCENE_DIM = 0.72f;     // how dark, 0-1
+    private static final float DIM_FADE_MS = 700f;
+    private float dim = 0f;
+    private long dimTime = 0;
+
+    private void drawDim(Canvas canvas) {
+        long now = android.os.SystemClock.uptimeMillis();
+        float dt = dimTime == 0 ? 0f : Math.min(100f, now - dimTime);
+        dimTime = now;
+        float target = state.inGame() && state.cutscene && !state.paused ? 1f : 0f;
+        if (dim != target) {
+            float step = dt / DIM_FADE_MS;
+            dim = target > dim ? Math.min(target, dim + step) : Math.max(target, dim - step);
+            animating = true;
+        }
+        if (dim > 0f) {
+            // Ease in and out.
+            float e = dim * dim * (3f - 2f * dim);
+            canvas.drawColor(Color.argb(Math.round(255 * CUTSCENE_DIM * e), 0, 0, 0));
+        }
+    }
+
     @Override
     protected void onDraw(Canvas canvas) {
         animating = false;
         drawContent(canvas);
+        drawDim(canvas);
         if (animating) {
             postInvalidateOnAnimation();
         } else if (titleIdle || (state.inGame() && !state.paused && !state.cutscene)) {
@@ -922,19 +982,28 @@ public final class BottomScreenView extends View {
             return;
         }
         watch("kong", state.currentKong, "tab" + state.currentKong);
-        drawFirstPersonButton(canvas);
+        if (GameState.bottomButtons() != buttonsShown) {
+            layoutFor(getWidth(), getHeight());   // the setting changed
+        }
+        if (buttonsShown) {
+            drawFirstPersonButton(canvas);
+        }
         drawHealth(canvas);
-        if (showCancel()) {
-            drawCancelButton(canvas);
-        } else if (showOrangstand()) {
-            drawOrangstandButton(canvas);
-        } else if (zbMoveName() != null) {
-            drawZbMoveButton(canvas);
+        if (buttonsShown) {
+            if (showCancel()) {
+                drawCancelButton(canvas);
+            } else if (showOrangstand()) {
+                drawOrangstandButton(canvas);
+            } else if (zbMoveName() != null) {
+                drawZbMoveButton(canvas);
+            }
         }
         drawTabs(canvas);
         drawKongPanel(canvas);
         drawCarrying(canvas);   // after the panel, so its icons can poke out over it
-        drawActions(canvas);
+        if (buttonsShown) {
+            drawActions(canvas);
+        }
     }
 
     /**
@@ -947,7 +1016,8 @@ public final class BottomScreenView extends View {
         int k = playingKong();
         int crystals = (state.crystals + 149) / 150;   // stored in 150ths (hud.c)
         Row[] items = {
-            colored(new Row("Bananas", RomIcons.of(RomIcons.banana, k), 0, state.level >= 0 ? state.heldBananas : 0, -1), KONG_COLORS[k]),
+            colored(new Row("Bananas", RomIcons.of(RomIcons.banana, k), 0,
+                state.level < 0 ? 0 : k == state.currentKong ? state.heldBananas : GameState.heldBananas(k, state.level), -1), KONG_COLORS[k]),
             colored(new Row("Coins", RomIcons.of(RomIcons.coin, k), 1, state.kongs[k].coins, -1), darker(KONG_COLORS[k])),
             colored(new Row("Crystal Coconuts", RomIcons.crystal, 3, crystals, -1), Color.rgb(200, 80, 160)),
         };
@@ -986,7 +1056,15 @@ public final class BottomScreenView extends View {
 
     private static final String[] PAUSE_COLUMNS = { "Golden Bananas", "Bananas", "Blueprints", "Banana Medals", "Coins" };
 
+    private static final int NO_LEVEL = Integer.MIN_VALUE;
+    private static final long PAUSE_SLIDE_MS = 320;
+    private int pauseSlideFrom = NO_LEVEL;   // the table sliding out (NO_LEVEL: none)
+    private int pauseSlideDir = 1;           // +1: the new one comes in from the right
+
     private void stepPauseLevel(int dir) {
+        pauseSlideFrom = pauseLevel;
+        pauseSlideDir = dir;
+        startAnim("pauseSlide");
         // -1 (all levels), then 0..LEVELS-1, wrapping round; levels not reached yet are skipped.
         int n = GameState.LEVELS + 1;
         for (int i = 0; i < n; i++) {
@@ -1037,21 +1115,57 @@ public final class BottomScreenView extends View {
         c.drawRoundRect(board, br, br, paint);
         paint.setShader(null);
 
+        // The table: slides out / in sideways when the level changes (and in when the pause
+        // screen opens).
+        float slide = animProgress("pauseSlide", PAUSE_SLIDE_MS);
+        if (slide < 0f) {
+            drawPauseTable(c, board, pauseLevel);
+        } else {
+            float e = 1f - (1f - slide) * (1f - slide) * (1f - slide);   // ease out
+            float w = board.width();
+            int saved = c.save();
+            c.clipRect(board);
+            if (pauseSlideFrom != NO_LEVEL) {
+                c.translate(-pauseSlideDir * e * w, 0);
+                drawPauseTable(c, board, pauseSlideFrom);
+                c.translate(pauseSlideDir * w, 0);
+            } else {
+                c.translate(pauseSlideDir * (1f - e) * w, 0);
+            }
+            drawPauseTable(c, board, pauseLevel);
+            c.restoreToCount(saved);
+        }
+    }
+
+    /** An item's sprite on its own (no badge), animated like in the game when it can be. */
+    private void sprite(Canvas c, float x, float y, float r, Row row) {
+        RomIcons.ensureAnimations();
+        Bitmap b = RomIcons.frame(row.icon, android.os.SystemClock.uptimeMillis(), 12);
+        if (RomIcons.hasAnimation(row.icon)) {
+            animating = true;
+        }
+        if (!RomIcons.draw(c, b, x, y, r)) {
+            badge(c, x, y, r * 0.9f, row);
+        }
+    }
+
+    /** The pause screen's table (one level, or all of them) on its board. */
+    private void drawPauseTable(Canvas c, RectF board, int level) {
         float nameW = board.width() * 0.2f;
         float colW = (board.width() - nameW) / PAUSE_COLUMNS.length;
-        float headRowH = board.height() * 0.13f;
-        float footH = board.height() * 0.15f;
+        float headRowH = board.height() * 0.17f;
+        float footH = board.height() * 0.18f;
         float rowH = (board.height() - headRowH - footH) / GameState.KONG_COUNT;
 
         // Column icons (from DK's rows, so the per-Kong icons show DK's colour).
-        java.util.List<Row> dkRows = rowsFor(GameState.DK, pauseLevel);
+        java.util.List<Row> dkRows = rowsFor(GameState.DK, level);
         for (int col = 0; col < PAUSE_COLUMNS.length; col++) {
             Row r = findRow(dkRows, PAUSE_COLUMNS[col]);
             if (r == null) {
                 continue;
             }
             float x = board.left + nameW + colW * (col + 0.5f), y = board.top + headRowH / 2f;
-            badge(c, x, y, Math.min(headRowH * 0.42f, colW * 0.3f), r);
+            sprite(c, x, y, Math.min(headRowH * 0.5f, colW * 0.4f), r);
         }
 
         for (int k = 0; k < GameState.KONG_COUNT; k++) {
@@ -1082,7 +1196,7 @@ public final class BottomScreenView extends View {
             text.setTextSize(fitText(name, nameW * 0.52f, tmp.height() * 0.42f));
             outlined(c, name, fx + faceR * 1.35f, cy + text.getTextSize() * 0.36f, locked ? Color.rgb(140, 130, 120) : CREAM);
 
-            java.util.List<Row> rows = locked ? null : rowsFor(k, pauseLevel);
+            java.util.List<Row> rows = locked ? null : rowsFor(k, level);
             for (int col = 0; col < PAUSE_COLUMNS.length; col++) {
                 Row r = rows == null ? null : findRow(rows, PAUSE_COLUMNS[col]);
                 String value;
@@ -1103,23 +1217,23 @@ public final class BottomScreenView extends View {
         }
 
         // Items that belong to no Kong: fairies, crowns, keys, rainbow coins.
-        java.util.List<Row> shared = rowsFor(SHARED_TAB, pauseLevel);
+        java.util.List<Row> shared = rowsFor(SHARED_TAB, level);
         shared.removeIf(r -> r.total == 0 || r.label.equals("Golden Bananas"));
         float fy = board.bottom - footH / 2f;
         float slot = board.width() / Math.max(1, shared.size());
         for (int i = 0; i < shared.size(); i++) {
             Row r = shared.get(i);
             float sx = board.left + slot * i;
-            float bR = Math.min(footH * 0.36f, slot * 0.14f);
+            float bR = Math.min(footH * 0.48f, slot * 0.2f);
             float bx = sx + slot * 0.12f + bR;
             String value = r.have + "/" + r.total;
             tmp.set(bx + bR * 0.4f, fy - bR * 0.6f, sx + slot * 0.92f, fy + bR * 0.6f);
             tag(c, tmp, value, r.have >= r.total);
-            badge(c, bx, fy, bR, r);
+            sprite(c, bx, fy, bR, r);
         }
-    }
+        }
 
-        /**
+    /**
      * Shown until a save is loaded: just the game's name over the jungle. (Our own lettering;
      * the official logo artwork isn't something this app ships.)
      */
@@ -1431,6 +1545,14 @@ public final class BottomScreenView extends View {
 
     /** A DK barrel (front view) filling r: bulging staves, two iron hoops. */
     private void barrel(Canvas c, RectF r, boolean lit, boolean locked, int litColor) {
+        barrel(c, r, lit, locked, litColor, false);
+    }
+
+    /**
+     * strong: the Kong you're playing as. A thick outline in the Kong's colour with a glow;
+     * a Kong you're only looking at gets a thinner outline and no glow.
+     */
+    private void barrel(Canvas c, RectF r, boolean lit, boolean locked, int litColor, boolean strong) {
         float bulge = r.width() * 0.07f;
         path.reset();
         path.moveTo(r.left + bulge, r.top);
@@ -1465,7 +1587,17 @@ public final class BottomScreenView extends View {
         c.drawLine(r.left + bulge * 0.2f, h1, r.right - bulge * 0.2f, h1, paint);
         c.drawLine(r.left + bulge * 0.2f, h2, r.right - bulge * 0.2f, h2, paint);
         // Outline (the Kong's colour when selected).
-        paint.setStrokeWidth(unit * (lit ? 0.011f : 0.007f));
+        if (lit && strong) {
+            paint.setStrokeWidth(unit * 0.036f);
+            paint.setColor(litColor);
+            paint.setAlpha(70);
+            c.drawPath(path, paint);
+            paint.setStrokeWidth(unit * 0.022f);
+            paint.setAlpha(120);
+            c.drawPath(path, paint);
+            paint.setAlpha(255);
+        }
+        paint.setStrokeWidth(unit * (lit ? (strong ? 0.013f : 0.006f) : 0.007f));
         paint.setColor(lit ? litColor : (locked ? Color.rgb(34, 34, 34) : WOOD_EDGE));
         c.drawPath(path, paint);
         paint.setStyle(Paint.Style.FILL);
@@ -1619,7 +1751,7 @@ public final class BottomScreenView extends View {
 
     private void drawTabs(Canvas c) {
         int shown = displayedKong();
-        int playing = state.inGame() ? state.currentKong : -1;
+        int playing = state.inGame() ? playingKong() : -1;   // in a Tag Barrel: the one you'd tag to
         text.setTextAlign(Paint.Align.CENTER);
         for (int i = 0; i < tabRects.length; i++) {
             // Barrels keep a barrel's proportions however wide the tab is.
@@ -1628,13 +1760,17 @@ public final class BottomScreenView extends View {
             RectF r = barrelRect;
             r.set(t.centerX() - bw / 2, t.top, t.centerX() + bw / 2, t.bottom);
             boolean locked = isLocked(i);
-            boolean lit = !locked && i == shown;
+            // The Kong you're playing as stands out most; one you're only looking at
+            // (tapped, with Touch Kong Swap off) gets a lighter outline.
+            boolean isPlaying = i == playing;
+            boolean lit = !locked && (i == shown || isPlaying);
             float hop = animProgress("tab" + i, HOP_MS);
             int tabSaved = c.save();
             if (hop >= 0) {
                 c.translate(0, -(float) Math.sin(Math.PI * hop) * r.height() * 0.14f);
             }
-            barrel(c, r, lit, locked, i < KONG_COLORS.length ? KONG_COLORS[i] : BANANA);
+            barrel(c, r, lit, locked, i < KONG_COLORS.length ? KONG_COLORS[i] : BANANA,
+                isPlaying || (playing < 0 && i == shown));
             if (locked) {
                 c.restoreToCount(tabSaved);
                 continue; // Greyed out, no face or name, until the Kong is freed.
@@ -1771,11 +1907,37 @@ public final class BottomScreenView extends View {
      * Collectibles as a grid of round badges with wooden value tags, in the style of DKC
      * Returns 3D's item screen: a wooden frame around a dark inset board.
      */
+    private static final long PANEL_OPEN_MS = 340;
+
     private void drawKongPanel(Canvas c) {
+        int tab = displayedKong();
+        // Switching Kongs: the panel grows out of that Kong's barrel...
+        watch("panelTab", tab, "panelOpen");
+        // ...and when you go to another level (DK Isles into Jungle Japes, say).
+        watch("panelLevel", shownLevel(), "panelOpen");
+        float open = animProgress("panelOpen", PANEL_OPEN_MS);
+        if (open < 0f || tab < 0 || tab >= tabRects.length) {
+            drawKongPanelContents(c, tab);
+            return;
+        }
+        RectF p = panelRect;
+        float e = backOut(open);
+        float fromX = tabRects[tab].centerX(), fromY = tabRects[tab].centerY();
+        float x = fromX + (p.centerX() - fromX) * e, y = fromY + (p.centerY() - fromY) * e;
+        float scale = 0.12f + 0.88f * e;
+        int alpha = Math.round(255 * Math.min(1f, open * 3f));
+        int saved = c.saveLayerAlpha(null, alpha);
+        c.translate(x, y);
+        c.scale(scale, scale);
+        c.translate(-p.centerX(), -p.centerY());
+        drawKongPanelContents(c, tab);
+        c.restoreToCount(saved);
+    }
+
+    private void drawKongPanelContents(Canvas c, int tab) {
         RectF p = panelRect;
         woodPanel(c, p, unit * 0.03f, false);
 
-        int tab = displayedKong();
         java.util.List<Row> rows = rowsFor(tab, shownLevel());
         rows.removeIf(r -> r.total == 0);   // nothing of that kind here (e.g. bananas in Helm)
         rows.removeIf(r -> r.label.equals("Coins"));   // shown under Carrying
@@ -1978,8 +2140,18 @@ public final class BottomScreenView extends View {
         paint.setStyle(Paint.Style.FILL);
     }
 
+    private static final long ICON_FLIP_MS = 420;
+    private int flipFromKong = GameState.DK;
+
     private void drawActions(Canvas c) {
         int kong = playingKong();
+        // Swapping Kongs, the gun and instrument icons flip over to the new Kong's.
+        Integer before = lastValue.get("actionKong");
+        watch("actionKong", kong, "iconFlip");
+        if (before != null && before != kong) {
+            flipFromKong = before;
+        }
+        float flip = animProgress("iconFlip", ICON_FLIP_MS);
         boolean known = state.inGame();
         GameState.Kong k = state.kongs[kong];
         String[] counts = new String[4];
@@ -2034,10 +2206,17 @@ public final class BottomScreenView extends View {
                 c.translate(0, -(float) Math.abs(Math.sin(t)) * iconR * 0.12f * fade);
                 c.rotate((float) Math.sin(t) * 10f * fade, iconX, iconY);
             }
+            int iconKong = kong;
+            if (flip >= 0 && (move == Move.WEAPON || move == Move.INSTRUMENT)) {
+                // Turns edge-on, then the other Kong's side comes round.
+                float sx = (float) Math.cos(Math.PI * flip);
+                iconKong = flip < 0.5f ? flipFromKong : kong;
+                c.scale(Math.max(Math.abs(sx), 0.04f), 1f + 0.12f * (float) Math.sin(Math.PI * flip), iconX, iconY);
+            }
             switch (move) {
                 case WEAPON:
-                    if (!RomIcons.draw(c, RomIcons.of(RomIcons.weapon, kong), iconX, iconY, iconR)) {
-                        DkIcons.weapon(c, kong, iconX, iconY, iconR);
+                    if (!RomIcons.draw(c, RomIcons.of(RomIcons.weapon, iconKong), iconX, iconY, iconR)) {
+                        DkIcons.weapon(c, iconKong, iconX, iconY, iconR);
                     }
                     break;
                 case ORANGE:
@@ -2046,8 +2225,8 @@ public final class BottomScreenView extends View {
                     }
                     break;
                 case INSTRUMENT:
-                    if (!RomIcons.draw(c, RomIcons.of(RomIcons.instrument, kong), iconX, iconY, iconR)) {
-                        DkIcons.instrument(c, kong, iconX, iconY, iconR);
+                    if (!RomIcons.draw(c, RomIcons.of(RomIcons.instrument, iconKong), iconX, iconY, iconR)) {
+                        DkIcons.instrument(c, iconKong, iconX, iconY, iconR);
                     }
                     break;
                 default:
@@ -2126,6 +2305,9 @@ public final class BottomScreenView extends View {
         }
 
         float ox = x - osX, oy = y - osY;
+        if (!buttonsShown) {
+            ox = oy = Float.MAX_VALUE / 4;   // no touch buttons: only the Kong barrels
+        }
         if (showCancel() && ox * ox + oy * oy <= osR * osR * 1.3f) {
             cancelAbility();
             return true;
@@ -2139,7 +2321,7 @@ public final class BottomScreenView extends View {
             return true;
         }
         float dx = x - fpX, dy = y - fpY;
-        if (dx * dx + dy * dy <= fpR * fpR * 1.3f) {
+        if (buttonsShown && dx * dx + dy * dy <= fpR * fpR * 1.3f) {
             if (available(Move.FIRST_PERSON)) {
                 perform(Move.FIRST_PERSON);
             }
@@ -2166,6 +2348,10 @@ public final class BottomScreenView extends View {
                 // Tapping the Kong you're playing (or the one already shown) goes back to
                 // following whoever you play as.
                 selectedKong = (current || i == selectedKong) ? -1 : i;
+                removeCallbacks(lookTimeout);
+                if (selectedKong != -1) {
+                    postDelayed(lookTimeout, LOOK_TIMEOUT_MS);
+                }
                 Haptics.tap(this);
                 invalidate();
                 return true;

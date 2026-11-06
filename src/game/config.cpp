@@ -318,69 +318,28 @@ int dk64::get_sfx_volume() {
 }
 
 #if defined(__ANDROID__)
-// Android: which Vulkan driver the renderer loads (the device's own, or a custom one such
-// as Turnip installed through the "DK64 Graphics Driver" screen). The choice is kept by the
-// Android side and takes effect the next time the game starts.
-static const std::string gpu_driver_option = "android_gpu_driver";
-
+#include "ultramodern/ultramodern.hpp"
+// Video > Graphics Driver: a button that opens the driver menu (pick, install, remove).
+// The driver loads when the app starts, so changing it restarts the app, which is only
+// offered on the main menu.
 static void add_gpu_driver_option(recomp::config::Config &config) {
-    static std::vector<dk64::android::GpuDriverChoice> drivers;
-    static std::vector<recomp::config::ConfigOptionEnumOption> options;
-    std::string selected;
-    drivers = dk64::android::list_gpu_drivers(selected);
-    options.clear();
-    uint32_t selected_index = 0;
-    for (uint32_t i = 0; i < drivers.size(); i++) {
-        options.emplace_back(i, drivers[i].id.empty() ? std::string("system") : drivers[i].id, drivers[i].label);
-        if (drivers[i].id == selected) {
-            selected_index = i;
+    recompui::config::LayoutEntry button;
+    button.kind = recompui::config::LayoutEntry::Kind::Button;
+    button.text = "Graphics Driver";
+    button.description = "Choose the Vulkan driver used for rendering: the device's own, or a custom one such as Turnip. "
+        "Install and remove drivers here too. Changing the driver restarts the app, so it can only be done from the main menu. "
+        "In use now: " + dk64::android::active_gpu_driver() + ". App version: " + dk64::android::app_version() + ".";
+    button.on_press = []() {
+        if (ultramodern::is_game_started()) {
+            recompui::open_info_prompt("Graphics Driver",
+                "The graphics driver can only be changed from the main menu, because the app restarts to use it. "
+                "Use QUIT > Main Menu, then open Settings > Video > Graphics Driver.",
+                "OK", []() {});
+            return;
         }
-    }
-    const uint32_t install_index = static_cast<uint32_t>(drivers.size());
-    options.emplace_back(install_index, "install", "Install or remove drivers...");
-
-    config.add_enum_option(
-        gpu_driver_option,
-        "GPU Driver",
-        "The Vulkan driver used for rendering: the device's own, or a custom one (e.g. Turnip). "
-        "Takes effect the next time the game starts. In use now: " + dk64::android::active_gpu_driver() + ". "
-        "App version: " + dk64::android::app_version() + ".",
-        options,
-        selected_index
-    );
-    config.add_option_change_callback(gpu_driver_option,
-        [install_index](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
-            const uint32_t index = std::get<uint32_t>(cur);
-            std::string selected_now;
-            dk64::android::list_gpu_drivers(selected_now);
-            uint32_t actual = 0;
-            for (uint32_t i = 0; i < drivers.size(); i++) {
-                if (drivers[i].id == selected_now) {
-                    actual = i;
-                }
-            }
-            if (context == recomp::config::OptionChangeContext::Load) {
-                // The Android side keeps the choice (it can also change outside the game);
-                // show its value without marking the tab as changed.
-                if (index != actual) {
-                    recompui::config::get_graphics_config().set_option_value(gpu_driver_option, actual);
-                    recompui::config::get_graphics_config().apply_option_value(gpu_driver_option);
-                    recompui::config::get_graphics_config().modified_options.clear();
-                }
-                return;
-            }
-            if (context != recomp::config::OptionChangeContext::Permanent) {
-                return;
-            }
-            if (index == install_index) {
-                // Opens the driver manager; the shown value is corrected on the next start.
-                dk64::android::open_gpu_driver_manager();
-                return;
-            }
-            if (index < drivers.size()) {
-                dk64::android::select_gpu_driver(drivers[index].id);
-            }
-        });
+        dk64::android::open_gpu_driver_manager();
+    };
+    recompui::config::add_page_button(config, std::move(button));
 }
 #endif
 
@@ -491,6 +450,29 @@ static void add_dual_screen_options(recomp::config::Config &config) {
             if (context != recomp::config::OptionChangeContext::Temporary) {
                 dk64_android_set_button_icons(static_cast<int>(std::get<uint32_t>(cur)));
             }
+            if (context == recomp::config::OptionChangeContext::Permanent) {
+                recompui::config::get_config("dual_screen").save_config();
+            }
+        });
+
+    // The bottom screen's touch buttons (gun, instrument, oranges, camera, first person...).
+    static const std::string bottom_buttons_option = "android_bottom_buttons";
+    static EnumOptionVector bottom_buttons_options = {
+        {0u, "Off", "Off"},
+        {1u, "On", "On"},
+    };
+    config.add_enum_option(
+        bottom_buttons_option,
+        "Bottom Screen Buttons",
+        "The touch buttons on the bottom screen (oranges, gun, instrument, camera, first person). "
+        "Turn them off to give the Kong barrels and collectibles the whole screen.",
+        bottom_buttons_options,
+        1u,
+        one_screen
+    );
+    config.add_option_change_callback(bottom_buttons_option,
+        [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
+            dk64::android::set_bottom_buttons(std::get<uint32_t>(cur) == 1u);
             if (context == recomp::config::OptionChangeContext::Permanent) {
                 recompui::config::get_config("dual_screen").save_config();
             }
@@ -772,6 +754,7 @@ void dk64::init_config() {
             option(d, "android_touch_controls"),
             edit_touch,
             option(d, "android_bottom_screen"),
+            option(d, "android_bottom_buttons"),
             option(d, "android_touch_kong_swap"),
             option(d, "android_touch_feedback"),
             option(d, "android_touch_feedback_strength"),
@@ -979,6 +962,11 @@ extern "C" void dk64_android_apply_experience(int modern) {
         static_cast<uint32_t>(modern ? ultramodern::renderer::Resolution::Auto : ultramodern::renderer::Resolution::Original));
     graphics.update_option_value(recompui::config::graphics::options::msaa_option,
         static_cast<uint32_t>(modern ? ultramodern::renderer::Antialiasing::MSAA2X : ultramodern::renderer::Antialiasing::None));
+    // Classic keeps the N64's 4:3 picture and HUD; Modern fills a widescreen.
+    graphics.update_option_value(recompui::config::graphics::options::ar_option,
+        static_cast<uint32_t>(modern ? ultramodern::renderer::AspectRatio::Expand : ultramodern::renderer::AspectRatio::Original));
+    graphics.update_option_value(recompui::config::graphics::options::hr_option,
+        static_cast<uint32_t>(modern ? ultramodern::renderer::HUDRatioMode::Clamp16x9 : ultramodern::renderer::HUDRatioMode::Original));
     graphics.save_config();
 
     recomp::mods::enable_mod("dk64_tag_anywhere", modern != 0);

@@ -133,6 +133,46 @@ final class GameState {
     private static native int nativeOverlay();
     private static native boolean nativeFontMetrics(byte[] out);
     private static native int nativeTouchFeedback();
+    private static native boolean nativeBottomButtons();
+    private static native int nativeTagBarrelKong();
+    private static native int nativeHeldBananas(int kong, int level);
+    private static native int[] nativeSpriteFrames(int table, int file, int width, int height);
+
+    /** The texture files of the game's animated sprite that uses this one, or null. */
+    static int[] spriteFrames(int table, int file, int width, int height) {
+        try {
+            return nativeSpriteFrames(table, file, width, height);
+        } catch (UnsatisfiedLinkError e) {
+            return null;
+        }
+    }
+
+    /** Coloured bananas a Kong holds in a level (not yet fed to Troff 'n' Scoff). */
+    static int heldBananas(int kong, int level) {
+        try {
+            return nativeHeldBananas(kong, level);
+        } catch (UnsatisfiedLinkError e) {
+            return 0;
+        }
+    }
+
+    /** In a Tag Barrel: the Kong you're looking at (0-4), else -1. */
+    static int tagBarrelKong() {
+        try {
+            return nativeTagBarrelKong();
+        } catch (UnsatisfiedLinkError e) {
+            return -1;
+        }
+    }
+
+    /** Bottom Screen Buttons (Input > Touch): false hides the touch buttons. */
+    static boolean bottomButtons() {
+        try {
+            return nativeBottomButtons();
+        } catch (UnsatisfiedLinkError e) {
+            return true;
+        }
+    }
     private static native int nativeDisplayFrameCount();
 
     /** Frames shown on screen (with the Framerate setting's in-between frames), or -1. */

@@ -672,6 +672,38 @@ public class DK64Activity extends SDLActivity
         });
     }
 
+    private static final String PREFS_LAUNCH = "launch";
+    private static final String KEY_SHOW_LAUNCHER_ONCE = "show_launcher_once";
+
+    /**
+     * From native code (Gameplay > Return to Main Menu): restarts the app and shows the
+     * launcher once, even with Skip Launcher on. The game can't go back to the launcher while
+     * it runs, so the app starts over.
+     */
+    @SuppressWarnings("unused")
+    public String restartToLauncher() {
+        Log.i(TAG, "Returning to the main menu: restarting the app");
+        getSharedPreferences(PREFS_LAUNCH, MODE_PRIVATE).edit().putBoolean(KEY_SHOW_LAUNCHER_ONCE, true).commit();
+        Diagnostics.markLeaving(this);
+        runOnUiThread(() -> new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+            // The short wait lets a save the game just made reach the file.
+            startActivity(new Intent(this, RestartActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            overridePendingTransition(0, 0);
+        }, 400));
+        return null;
+    }
+
+    /** From native code at startup: "1" once after restartToLauncher (then cleared). */
+    @SuppressWarnings("unused")
+    public String takeShowLauncherOnce() {
+        android.content.SharedPreferences prefs = getSharedPreferences(PREFS_LAUNCH, MODE_PRIVATE);
+        boolean once = prefs.getBoolean(KEY_SHOW_LAUNCHER_ONCE, false);
+        if (once) {
+            prefs.edit().remove(KEY_SHOW_LAUNCHER_ONCE).apply();
+        }
+        return once ? "1" : "0";
+    }
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         if (storage != null && storage.onActivityResult(requestCode, resultCode, data)) {

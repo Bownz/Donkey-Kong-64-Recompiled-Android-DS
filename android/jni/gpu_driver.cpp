@@ -250,6 +250,14 @@ extern "C" int dk64_android_last_run_crashed() {
     return call_activity("lastRunCrashed", "()Ljava/lang/String;", nullptr) == "1" ? 1 : 0;
 }
 
+// Gameplay > Return to Main Menu: restart the app, showing the launcher once.
+extern "C" void dk64_android_restart_to_launcher() {
+    call_activity("restartToLauncher", "()Ljava/lang/String;", nullptr);
+}
+extern "C" int dk64_android_take_show_launcher_once() {
+    return call_activity("takeShowLauncherOnce", "()Ljava/lang/String;", nullptr) == "1" ? 1 : 0;
+}
+
 // Menu sounds (RecompFrontend ui_state.cpp; the Audio tab's Menu Sounds option).
 static std::atomic<bool> ui_sounds_enabled{ true };
 extern "C" void dk64_android_set_ui_sounds(int enabled) {

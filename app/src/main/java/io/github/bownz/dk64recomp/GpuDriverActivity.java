@@ -59,57 +59,97 @@ public final class GpuDriverActivity extends Activity {
             .show();
     }
 
+    /**
+     * The driver menu (Settings > Video > Graphics Driver): the system driver and each
+     * installed one, with Apply (restarts the app to use it), Install and Remove.
+     */
     private void showChooser() {
         List<GpuDrivers.Driver> drivers = GpuDrivers.installed(this);
         GpuDrivers.Driver current = GpuDrivers.selected(this);
         String[] labels = new String[drivers.size() + 1];
-        labels[0] = "System driver (default)";
+        labels[0] = "System driver" + (current == null ? "  (in use)" : "");
         int checked = 0;
         for (int i = 0; i < drivers.size(); i++) {
-            labels[i + 1] = drivers.get(i).label();
-            if (current != null && current.id.equals(drivers.get(i).id)) {
+            boolean inUse = current != null && current.id.equals(drivers.get(i).id);
+            labels[i + 1] = drivers.get(i).label() + (inUse ? "  (in use)" : "");
+            if (inUse) {
                 checked = i + 1;
             }
         }
         final int[] choice = { checked };
-        new AlertDialog.Builder(this)
-            .setTitle("Graphics driver")
-            .setSingleChoiceItems(labels, checked, (dialog, which) -> choice[0] = which)
-            .setPositiveButton("Use", (dialog, which) -> {
+        AlertDialog dialog = new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle("Graphics Driver")
+            .setSingleChoiceItems(labels, checked, (d, which) -> {
+                choice[0] = which;
+                updateButtons((AlertDialog) d, which, drivers, GpuDrivers.selected(this));
+            })
+            .setPositiveButton("Apply", (d, which) -> {
                 GpuDrivers.Driver picked = choice[0] == 0 ? null : drivers.get(choice[0] - 1);
                 GpuDrivers.Driver before = GpuDrivers.selected(this);
+                boolean differs = (before == null) != (picked == null) || (before != null && !before.id.equals(picked.id));
+                if (!differs) {
+                    finish();
+                    return;
+                }
                 GpuDrivers.select(this, picked);
-                changed = (before == null) != (picked == null) || (before != null && !before.id.equals(picked.id));
-                finishWithRestart();
+                restartGame();
             })
-            .setNeutralButton("Install .zip…", (dialog, which) -> pickZip())
-            .setNegativeButton(drivers.isEmpty() ? "Close" : "Remove…", (dialog, which) -> {
-                if (drivers.isEmpty()) {
-                    finishWithRestart();
+            .setNeutralButton("Install…", (d, which) -> pickZip())
+            .setNegativeButton("Remove", (d, which) -> {
+                if (choice[0] == 0) {
+                    showChooser();
+                    return;
+                }
+                confirmRemove(drivers.get(choice[0] - 1));
+            })
+            .setOnCancelListener(d -> finish())
+            .create();
+        dialog.setOnShowListener(d -> updateButtons(dialog, choice[0], drivers, current));
+        dialog.show();
+    }
+
+    /** Apply only for a different driver; Remove only for an installed one. */
+    private static void updateButtons(AlertDialog dialog, int which, List<GpuDrivers.Driver> drivers, GpuDrivers.Driver current) {
+        GpuDrivers.Driver picked = which == 0 ? null : drivers.get(which - 1);
+        boolean differs = (current == null) != (picked == null) || (current != null && !current.id.equals(picked.id));
+        android.widget.Button apply = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+        android.widget.Button remove = dialog.getButton(AlertDialog.BUTTON_NEGATIVE);
+        if (apply != null) {
+            apply.setEnabled(differs);
+            apply.setText(differs ? "Apply & restart" : "Apply");
+        }
+        if (remove != null) {
+            remove.setEnabled(which != 0);
+        }
+    }
+
+    private void confirmRemove(GpuDrivers.Driver driver) {
+        GpuDrivers.Driver current = GpuDrivers.selected(this);
+        boolean inUse = current != null && current.id.equals(driver.id);
+        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle("Remove " + driver.label() + "?")
+            .setMessage(inUse ? "It's the driver in use: the app goes back to the system driver and restarts." : "It's removed from the app.")
+            .setPositiveButton("Remove", (d, which) -> {
+                GpuDrivers.remove(this, driver);
+                if (inUse) {
+                    GpuDrivers.select(this, null);
+                    restartGame();
                 } else {
-                    showRemove(drivers);
+                    showChooser();
                 }
             })
-            .setOnCancelListener(dialog -> finishWithRestart())
+            .setNegativeButton("Cancel", (d, which) -> showChooser())
+            .setOnCancelListener(d -> showChooser())
             .show();
     }
 
-    private void showRemove(List<GpuDrivers.Driver> drivers) {
-        String[] labels = new String[drivers.size()];
-        for (int i = 0; i < drivers.size(); i++) {
-            labels[i] = drivers.get(i).label();
-        }
-        new AlertDialog.Builder(this)
-            .setTitle("Remove a driver")
-            .setItems(labels, (dialog, which) -> {
-                GpuDrivers.Driver d = drivers.get(which);
-                boolean wasSelected = GpuDrivers.selected(this) != null && GpuDrivers.selected(this).id.equals(d.id);
-                GpuDrivers.remove(this, d);
-                changed |= wasSelected;
-                showChooser();
-            })
-            .setOnCancelListener(dialog -> showChooser())
-            .show();
+    /** Uses the new driver: restarts the game's process, back on the main menu. */
+    private void restartGame() {
+        Toast.makeText(this, "Restarting with the new graphics driver…", Toast.LENGTH_SHORT).show();
+        // Back to the main menu even with Skip Launcher on (DK64Activity.takeShowLauncherOnce).
+        getSharedPreferences("launch", MODE_PRIVATE).edit().putBoolean("show_launcher_once", true).commit();
+        startActivity(new Intent(this, RestartActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        finish();
     }
 
     private void pickZip() {

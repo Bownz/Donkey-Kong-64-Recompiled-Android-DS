@@ -11,6 +11,7 @@
 #include <atomic>
 #include <chrono>
 #include <string>
+#include <vector>
 
 #include "librecomp/mods.hpp"
 #include "gpu_driver.h"
@@ -20,6 +21,7 @@ namespace {
     std::atomic<uint8_t*> g_rdram{nullptr};
     std::atomic<bool> g_touch_kong_swap{false};
     std::atomic<bool> g_touch_feedback{true};
+    std::atomic<bool> g_bottom_buttons{true};
     std::atomic<int> g_touch_feedback_strength{2};
     // patches/android_hooks.c reports each input-handler set the game runs; a frame can run
     // several (e.g. a mode's own set plus shared ones). They're collected per frame.
@@ -215,9 +217,116 @@ namespace {
     }
 }
 
+// The Tag Barrel (player control state 66): which Kong you're looking at. Found on a
+// device: the barrel actor keeps it at +0x17E (0 DK ... 4 Chunky; the current Kong only
+// changes when you leave). The barrel is found in the loaded-actor array (entries of
+// Actor*, type), as the actor whose type is a Tag Barrel's.
+namespace {
+    constexpr int kTagBarrelState = 66;
+    constexpr uint32_t kLoadedActors = 0x807FB930u;        // { Actor*, s32 type }[64]
+    constexpr int kLoadedActorSlots = 64;
+    constexpr uint32_t kActorType = 0x58;                  // s32 in the actor (unk58)
+    constexpr uint32_t kTagBarrelLooking = 0x17E;          // u8 in the Tag Barrel actor
+    bool g_tag_logged = false;
+
+    bool is_actor_pointer(uint32_t p) {
+        return p >= 0x80000000u && p < 0x807FF000u && (p & 3) == 0;
+    }
+}
+
+// The frames of the game's animated sprite that uses a texture (table 7 or 25, file, of
+// width x height). The game's sprites are structs { ..., +4 s8 tiles_x, +5 s8 tiles_y,
+// +6 s16 codec, +0xD s8 table (0: 7, 1: 25), +0xE s16 width, +0x10 s16 height, +0x12 s16
+// image_count, +0x14 s16 images[] } (see patches/button_icons.c) in the game's data (e.g.
+// the Kong blueprints at 0x80720A34): the data is searched for one of that size whose
+// images include the file. Single-image frames only. Null if none is found.
+extern "C" JNIEXPORT jintArray JNICALL
+Java_io_github_bownz_dk64recomp_GameState_nativeSpriteFrames(JNIEnv* env, jclass, jint table, jint file, jint width, jint height) {
+    const uint8_t* rdram = g_rdram.load();
+    if (rdram == nullptr) {
+        return nullptr;
+    }
+    for (uint32_t sprite = 0x80700000u; sprite < 0x80760000u; sprite += 4) {
+        if (read_u16(rdram, sprite + 0xE) != static_cast<uint32_t>(width) || read_u16(rdram, sprite + 0x10) != static_cast<uint32_t>(height)) {
+            continue;
+        }
+        const uint8_t table_byte = read_u8(rdram, sprite + 0xD);
+        if (table_byte > 1 || (table_byte ? 25 : 7) != table || read_u16(rdram, sprite + 6) > 3) {
+            continue;
+        }
+        if (read_u8(rdram, sprite + 4) > 1 || read_u8(rdram, sprite + 5) > 1) {
+            continue;
+        }
+        const int count = read_u16(rdram, sprite + 0x12);
+        if (count < 2 || count > 64) {
+            continue;
+        }
+        bool uses = false;
+        jint frames[64];
+        for (int j = 0; j < count; j++) {
+            frames[j] = read_u16(rdram, sprite + 0x14 + j * 2);
+            uses = uses || frames[j] == file;
+        }
+        if (!uses) {
+            continue;
+        }
+        __android_log_print(ANDROID_LOG_INFO, "DK64Recomp", "Sprite for texture %d/%d: %08X, %d frames", table, file, sprite, count);
+        jintArray out = env->NewIntArray(count);
+        if (out != nullptr) {
+            env->SetIntArrayRegion(out, 0, count, frames);
+        }
+        return out;
+    }
+    return nullptr;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_io_github_bownz_dk64recomp_GameState_nativeHeldBananas(JNIEnv*, jclass, jint kong, jint level) {
+    const uint8_t* rdram = g_rdram.load();
+    if (rdram == nullptr || kong < 0 || kong >= 5 || level < 0 || level >= kLevels) {
+        return 0;
+    }
+    return read_u16(rdram, kPlayerProgress + kong * kCharacterProgressSize + kCpColouredBananas + level * 2);
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_io_github_bownz_dk64recomp_GameState_nativeTagBarrelKong(JNIEnv*, jclass) {
+    const uint8_t* rdram = g_rdram.load();
+    if (rdram == nullptr) {
+        return -1;
+    }
+    const uint32_t player = read_u32(rdram, kPlayerPointer);
+    if (!is_actor_pointer(player) || read_u8(rdram, player + kPlayerControlState) != kTagBarrelState) {
+        g_tag_logged = false;
+        return -1;
+    }
+    int found = -1;
+    for (int i = 0; i < kLoadedActorSlots; i++) {
+        const uint32_t actor = read_u32(rdram, kLoadedActors + i * 8);
+        if (!is_actor_pointer(actor)) {
+            continue;
+        }
+        const uint32_t type = read_u32(rdram, actor + kActorType);
+        const uint8_t looking = read_u8(rdram, actor + kTagBarrelLooking);
+        if (!g_tag_logged) {
+            __android_log_print(ANDROID_LOG_INFO, "DK64Tag", "loaded actor %d: %08X type %u, +0x17E %u",
+                i, actor, type, looking);
+        }
+        if ((type == 98 || type == 136 || type == 137) && looking < 5 && found < 0) {
+            found = looking;
+        }
+    }
+    if (!g_tag_logged) {
+        __android_log_print(ANDROID_LOG_INFO, "DK64Tag", "Tag Barrel: looking at %d", found);
+        g_tag_logged = true;
+    }
+    return found;
+}
+
 extern "C" JNIEXPORT jboolean JNICALL
 Java_io_github_bownz_dk64recomp_GameState_nativeRead(JNIEnv* env, jclass, jintArray out) {
     const uint8_t* rdram = g_rdram.load();
+
     constexpr jsize kCount = 8 + 5 * 6 + 2 + 5 * kLevelSlots * 2 + 1 + 1;
     if (rdram == nullptr || out == nullptr || env->GetArrayLength(out) < kCount) {
         return JNI_FALSE;
@@ -373,6 +482,15 @@ Java_io_github_bownz_dk64recomp_GameState_nativeReadFlags(JNIEnv* env, jclass, j
 
 void dk64::android::set_touch_kong_swap(bool enabled) {
     g_touch_kong_swap.store(enabled);
+}
+
+void dk64::android::set_bottom_buttons(bool shown) {
+    g_bottom_buttons.store(shown);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_io_github_bownz_dk64recomp_GameState_nativeBottomButtons(JNIEnv*, jclass) {
+    return g_bottom_buttons.load() ? JNI_TRUE : JNI_FALSE;
 }
 
 void dk64::android::set_touch_feedback(bool enabled) {
