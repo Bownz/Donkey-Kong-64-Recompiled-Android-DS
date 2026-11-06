@@ -69,6 +69,27 @@ index 79dfc38..ff188ea 100644
  
  # Add any Apple-specific source files and libraries
  if (APPLE)
+diff --git a/src/common/rt64_emulator_configuration.cpp b/src/common/rt64_emulator_configuration.cpp
+index 303113d..237cb09 100644
+--- a/src/common/rt64_emulator_configuration.cpp
++++ b/src/common/rt64_emulator_configuration.cpp
+@@ -10,7 +10,15 @@ namespace RT64 {
+     EmulatorConfiguration::EmulatorConfiguration() {
+         dither.postBlendNoise = true;
+         dither.postBlendNoiseNegative = false;
++#   if defined(__ANDROID__)
++        // Android: off. Render to RAM draws every frame a second time at native resolution and
++        // makes the game wait for it; with this GPU's per-draw cost that's ~11 ms per game frame
++        // in busy scenes (Angry Aztec's dust storm), enough to drop below 30 game frames/s.
++        // A game can still turn it on where it needs it (gEXSetRenderToRAM).
++        framebuffer.renderToRAM = false;
++#   else
+         framebuffer.renderToRAM = true;
++#   endif
+         framebuffer.copyWithGPU = true;
+     }
+ };
+\ No newline at end of file
 diff --git a/src/common/rt64_thread.cpp b/src/common/rt64_thread.cpp
 index c4b080b..45e070a 100644
 --- a/src/common/rt64_thread.cpp
