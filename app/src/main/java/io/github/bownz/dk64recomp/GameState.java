@@ -135,6 +135,16 @@ final class GameState {
     private static native int nativeTouchFeedback();
     private static native boolean nativeBottomButtons();
     private static native int nativeTagBarrelKong();
+    private static native int nativeHeldBananas(int kong, int level);
+
+    /** Coloured bananas a Kong holds in a level (not yet fed to Troff 'n' Scoff). */
+    static int heldBananas(int kong, int level) {
+        try {
+            return nativeHeldBananas(kong, level);
+        } catch (UnsatisfiedLinkError e) {
+            return 0;
+        }
+    }
 
     /** In a Tag Barrel: the Kong you're looking at (0-4), else -1. */
     static int tagBarrelKong() {

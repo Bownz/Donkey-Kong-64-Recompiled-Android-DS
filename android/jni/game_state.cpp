@@ -235,6 +235,15 @@ namespace {
 }
 
 extern "C" JNIEXPORT jint JNICALL
+Java_io_github_bownz_dk64recomp_GameState_nativeHeldBananas(JNIEnv*, jclass, jint kong, jint level) {
+    const uint8_t* rdram = g_rdram.load();
+    if (rdram == nullptr || kong < 0 || kong >= 5 || level < 0 || level >= kLevels) {
+        return 0;
+    }
+    return read_u16(rdram, kPlayerProgress + kong * kCharacterProgressSize + kCpColouredBananas + level * 2);
+}
+
+extern "C" JNIEXPORT jint JNICALL
 Java_io_github_bownz_dk64recomp_GameState_nativeTagBarrelKong(JNIEnv*, jclass) {
     const uint8_t* rdram = g_rdram.load();
     if (rdram == nullptr) {

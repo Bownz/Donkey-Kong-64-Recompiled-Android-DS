@@ -758,8 +758,13 @@ public final class BottomScreenView extends View {
         return state.inGame() ? state.currentKong : GameState.DK;
     }
 
+    /** The Kong you play as; in a Tag Barrel, the one you're looking at. */
     private int playingKong() {
-        return state.inGame() ? state.currentKong : GameState.DK;
+        if (!state.inGame()) {
+            return GameState.DK;
+        }
+        int tag = GameState.tagBarrelKong();
+        return tag >= 0 && !isLocked(tag) ? tag : state.currentKong;
     }
 
     /** Kongs not freed yet in the running game (unknown before a game starts: all shown). */
@@ -775,7 +780,7 @@ public final class BottomScreenView extends View {
         if (!state.inGame()) {
             return true;
         }
-        GameState.Kong k = state.kongs[state.currentKong];
+        GameState.Kong k = state.kongs[playingKong()];
         switch (move) {
             case WEAPON: return k.weapon > 0;
             case ORANGE: return state.hasOranges() || state.oranges > 0;
@@ -983,7 +988,8 @@ public final class BottomScreenView extends View {
         int k = playingKong();
         int crystals = (state.crystals + 149) / 150;   // stored in 150ths (hud.c)
         Row[] items = {
-            colored(new Row("Bananas", RomIcons.of(RomIcons.banana, k), 0, state.level >= 0 ? state.heldBananas : 0, -1), KONG_COLORS[k]),
+            colored(new Row("Bananas", RomIcons.of(RomIcons.banana, k), 0,
+                state.level < 0 ? 0 : k == state.currentKong ? state.heldBananas : GameState.heldBananas(k, state.level), -1), KONG_COLORS[k]),
             colored(new Row("Coins", RomIcons.of(RomIcons.coin, k), 1, state.kongs[k].coins, -1), darker(KONG_COLORS[k])),
             colored(new Row("Crystal Coconuts", RomIcons.crystal, 3, crystals, -1), Color.rgb(200, 80, 160)),
         };
@@ -1673,7 +1679,7 @@ public final class BottomScreenView extends View {
 
     private void drawTabs(Canvas c) {
         int shown = displayedKong();
-        int playing = state.inGame() ? state.currentKong : -1;
+        int playing = state.inGame() ? playingKong() : -1;   // in a Tag Barrel: the one you'd tag to
         text.setTextAlign(Paint.Align.CENTER);
         for (int i = 0; i < tabRects.length; i++) {
             // Barrels keep a barrel's proportions however wide the tab is.
