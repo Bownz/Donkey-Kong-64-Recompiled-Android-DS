@@ -153,14 +153,12 @@ public class DK64Activity extends SDLActivity
             } else {
                 if (fpsLastFrames >= 0 && now > fpsLastTime && frames >= fpsLastFrames) {
                     float fps = (frames - fpsLastFrames) * 1000f / (now - fpsLastTime);
-                    // Frames on screen (what the Framerate setting changes) and, when that's
-                    // higher, the game's own rate (30 at most, as on the N64).
+                    // Frames on screen (what the Framerate setting changes); the game's own
+                    // rate if that isn't known.
                     float screenFps = (displayed >= 0 && fpsLastShown >= 0 && displayed >= fpsLastShown)
                         ? (displayed - fpsLastShown) * 1000f / (now - fpsLastTime) : -1f;
                     int shown = GameState.overlay();
-                    String fpsText = screenFps >= 0 && Math.round(screenFps) > Math.round(fps) + 1
-                        ? String.format(java.util.Locale.US, "%.0f FPS (game %.0f)", screenFps, fps)
-                        : String.format(java.util.Locale.US, "%.0f FPS", fps);
+                    String fpsText = String.format(java.util.Locale.US, "%.0f FPS", screenFps >= 0 ? screenFps : fps);
                     String areaText = "area " + GameState.areaLabel();
                     fpsView.setText((shown & 3) == 3 ? fpsText + "  \u00B7  " + areaText : (shown & 2) != 0 ? areaText : fpsText);
                     fpsView.setVisibility(View.VISIBLE);
