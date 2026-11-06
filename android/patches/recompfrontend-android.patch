@@ -1149,14 +1149,14 @@ index 56a0b70..fd57e2c 100644
 +    }
 +}
 diff --git a/recompui/src/config/ui_config.cpp b/recompui/src/config/ui_config.cpp
-index 6c84c05..0ef2068 100644
+index 6c84c05..5cc91e0 100644
 --- a/recompui/src/config/ui_config.cpp
 +++ b/recompui/src/config/ui_config.cpp
 @@ -107,6 +107,50 @@ namespace recompui {
          return new_config;
      }
  
-+    static std::vector<std::pair<const recomp::config::Config *, std::vector<LayoutEntry>>> page_button_registry;
++    static std::vector<std::pair<const recomp::config::Config *, std::vector<config::LayoutEntry>>> page_button_registry;
 +
 +    void config::add_page_button(recomp::config::Config &config, LayoutEntry button) {
 +        for (auto &[cfg, buttons] : page_button_registry) {
@@ -1168,8 +1168,8 @@ index 6c84c05..0ef2068 100644
 +        page_button_registry.push_back({ &config, { std::move(button) } });
 +    }
 +
-+    const std::vector<LayoutEntry> &config::page_buttons(const recomp::config::Config *config) {
-+        static const std::vector<LayoutEntry> none;
++    const std::vector<config::LayoutEntry> &config::page_buttons(const recomp::config::Config *config) {
++        static const std::vector<config::LayoutEntry> none;
 +        for (auto &[cfg, buttons] : page_button_registry) {
 +            if (cfg == config) {
 +                return buttons;
