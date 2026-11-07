@@ -191,6 +191,11 @@ public final class TouchControllerView extends View {
     private boolean drawerOpen = false;
     private float drawerProgress = 0f;   // 0 closed .. 1 open
     private long drawerAnimAt;
+    // It closes by itself this long after the last tap on it, unless something it started is
+    // still going (gun out, camera up, first person, Lanky on his hands), so that can be put
+    // away from the same place.
+    private static final long DRAWER_AUTO_CLOSE_MS = 3000;
+    private long drawerUsedAt;
 
     // The moves (action buttons, first person, dynamic), shared with the bottom screen.
     private final TouchMoves moves = TouchMoves.get();
@@ -472,8 +477,28 @@ public final class TouchControllerView extends View {
 
     private void toggleDrawer() {
         drawerOpen = !drawerOpen;
-        drawerAnimAt = android.os.SystemClock.uptimeMillis();
+        drawerAnimAt = drawerUsedAt = android.os.SystemClock.uptimeMillis();
         invalidate();
+    }
+
+    /** Called on each poll: closes the drawer once it's been left alone for a moment. */
+    private void autoCloseDrawer() {
+        if (!drawerOpen || editing) {
+            return;
+        }
+        long now = android.os.SystemClock.uptimeMillis();
+        GameState st = moves.state;
+        boolean inUse = moves.busy() || moves.orangstand || st.gunOut || st.camera || st.firstPerson;
+        for (Control c : pressed) {
+            if (c.drawerItem || c.drawerHandle) {
+                inUse = true;
+            }
+        }
+        if (inUse) {
+            drawerUsedAt = now;   // the pause starts once it's put away
+        } else if (now - drawerUsedAt >= DRAWER_AUTO_CLOSE_MS) {
+            toggleDrawer();
+        }
     }
 
     /**
@@ -522,6 +547,7 @@ public final class TouchControllerView extends View {
     }
 
     private void pollUiState() {
+        autoCloseDrawer();
         if (usingMoves && moves.state.inGame()) {
             RomIcons.ensureLoaded(this::postInvalidate);   // the move buttons' icons (from the ROM)
         }
@@ -1158,6 +1184,9 @@ public final class TouchControllerView extends View {
         }
         for (Control c : now) {
             if (pressed.add(c)) {
+                if (c.drawerItem) {
+                    drawerUsedAt = android.os.SystemClock.uptimeMillis();
+                }
                 c.onPress.run();
                 newPress = true;
             }
