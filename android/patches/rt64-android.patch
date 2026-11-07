@@ -69,27 +69,6 @@ index 79dfc38..ff188ea 100644
  
  # Add any Apple-specific source files and libraries
  if (APPLE)
-diff --git a/src/common/rt64_emulator_configuration.cpp b/src/common/rt64_emulator_configuration.cpp
-index 303113d..237cb09 100644
---- a/src/common/rt64_emulator_configuration.cpp
-+++ b/src/common/rt64_emulator_configuration.cpp
-@@ -10,7 +10,15 @@ namespace RT64 {
-     EmulatorConfiguration::EmulatorConfiguration() {
-         dither.postBlendNoise = true;
-         dither.postBlendNoiseNegative = false;
-+#   if defined(__ANDROID__)
-+        // Android: off. Render to RAM draws every frame a second time at native resolution and
-+        // makes the game wait for it; with this GPU's per-draw cost that's ~11 ms per game frame
-+        // in busy scenes (Angry Aztec's dust storm), enough to drop below 30 game frames/s.
-+        // A game can still turn it on where it needs it (gEXSetRenderToRAM).
-+        framebuffer.renderToRAM = false;
-+#   else
-         framebuffer.renderToRAM = true;
-+#   endif
-         framebuffer.copyWithGPU = true;
-     }
- };
-\ No newline at end of file
 diff --git a/src/common/rt64_thread.cpp b/src/common/rt64_thread.cpp
 index c4b080b..45e070a 100644
 --- a/src/common/rt64_thread.cpp
@@ -145,7 +124,7 @@ index 7006549..cec813b 100644
              return nullptr;
          }
 diff --git a/src/hle/rt64_application.cpp b/src/hle/rt64_application.cpp
-index ee8bc1f..08fa291 100644
+index ee8bc1f..bb31fb5 100644
 --- a/src/hle/rt64_application.cpp
 +++ b/src/hle/rt64_application.cpp
 @@ -3,6 +3,10 @@
@@ -267,9 +246,9 @@ index ee8bc1f..08fa291 100644
 +            const uint64_t syncs = AndroidRenderStats::dlSyncs.exchange(0);
 +            if (syncs > 0) {
 +                const double m = double(syncs) * 1000.0;
-+                fprintf(stdout, "Perf DL waits (ms per game frame): framebuffer worker %.2f, texture uploads %.2f, buffer uploaders %.2f; %.1f game frames/s\n",
++                fprintf(stdout, "Perf DL waits (ms per game frame): framebuffer worker %.2f, texture uploads %.2f, buffer uploaders %.2f, background RAM copy %.2f; %.1f game frames/s\n",
 +                    double(AndroidRenderStats::dlWaitFbWorker.exchange(0)) / m, double(AndroidRenderStats::dlWaitUploads.exchange(0)) / m,
-+                    double(AndroidRenderStats::dlWaitUploaders.exchange(0)) / m, double(syncs) / 5.0);
++                    double(AndroidRenderStats::dlWaitUploaders.exchange(0)) / m, double(AndroidRenderStats::dlWaitRAMCopy.exchange(0)) / m, double(syncs) / 5.0);
 +            }
 +            fflush(stdout);
 +        }
@@ -486,10 +465,60 @@ index 7de5b69..99c1807 100644
          // Create the semaphore the acquire method will use.
          acquiredSemaphore = ext.device->createCommandSemaphore();
 diff --git a/src/hle/rt64_state.cpp b/src/hle/rt64_state.cpp
-index 2970e71..beeff1f 100644
+index 2970e71..6200a1e 100644
 --- a/src/hle/rt64_state.cpp
 +++ b/src/hle/rt64_state.cpp
-@@ -1237,6 +1237,7 @@ namespace RT64 {
+@@ -64,7 +64,28 @@ namespace RT64 {
+         reset();
+     }
+ 
+-    State::~State() { }
++    State::~State() {
++#   if defined(__ANDROID__)
++        if (asyncRAMThread.joinable()) {
++            asyncRAMThread.join();
++        }
++#   endif
++    }
++
++#if defined(__ANDROID__)
++    void State::finishAsyncRenderToRAM() {
++        if (!asyncRAMPending) {
++            return;
++        }
++
++        RT64_ANDROID_TIME(dlWaitRAMCopy, asyncRAMThread.join());
++        asyncRAMCopies.clear();
++        asyncRAMPending = false;
++
++        // Done here rather than at the end of fullSync, so the hashes match what was written.
++        framebufferManager.hashTracking(RDRAM);
++    }
++#endif
+ 
+     void State::setup(const External &ext) {
+         this->ext = ext;
+@@ -617,6 +638,9 @@ namespace RT64 {
+     }
+     
+     void State::checkRDRAM() {
++#   if defined(__ANDROID__)
++        finishAsyncRenderToRAM();
++#   endif
+         if (!rdramCheckPending) {
+             return;
+         }
+@@ -790,6 +814,9 @@ namespace RT64 {
+     }
+ 
+     void State::fullSync() {
++#   if defined(__ANDROID__)
++        finishAsyncRenderToRAM();
++#   endif
+         flush();
+         submitFramebufferPair(FramebufferPair::FlushReason::ProcessDisplayListsEnd);
+ 
+@@ -1237,6 +1264,7 @@ namespace RT64 {
              uint32_t framebufferIndex = 0;
              auto renderSetup = [&]() {
                  scratchFbChangePool.reset();
@@ -497,7 +526,7 @@ index 2970e71..beeff1f 100644
                  ext.framebufferGraphicsWorker->commandList->begin();
                  framebufferManager.resetOperations();
                  framebufferRenderer->resetFramebuffers(ext.framebufferGraphicsWorker, false, workload.extended.ditherNoiseStrength, renderTargetManager.multisampling);
-@@ -1310,7 +1311,7 @@ namespace RT64 {
+@@ -1310,7 +1338,7 @@ namespace RT64 {
                  }
  
                  // Synchronize all texture uploads before filling out the GPU tiles and update the texture cache on the framebuffer renderer.
@@ -506,7 +535,7 @@ index 2970e71..beeff1f 100644
                  framebufferRenderer->updateTextureCache(ext.textureCache);
  
                  thread_local std::vector<BufferUploader *> bufferUploaders;
-@@ -1469,9 +1470,8 @@ namespace RT64 {
+@@ -1469,9 +1497,43 @@ namespace RT64 {
                  }
  
                  ext.framebufferGraphicsWorker->commandList->end();
@@ -514,11 +543,46 @@ index 2970e71..beeff1f 100644
 -                ext.framebufferGraphicsWorker->execute();
 -                ext.framebufferGraphicsWorker->wait();
 +                RT64_ANDROID_TIME(dlWaitUploaders, framebufferRenderer->waitForUploaders());
++#           if defined(__ANDROID__)
++                // The last batch of the frame: let the game carry on and copy the results into
++                // RDRAM when the GPU is done (see finishAsyncRenderToRAM). Earlier batches are
++                // synchronous, as the rest of the frame may sample what they wrote.
++                if (maxFramebufferPair == workload.fbPairCount) {
++                    asyncRAMCopies.clear();
++                    pairCursor = framebufferPairCursor;
++                    while (pairCursor < maxFramebufferPair) {
++                        if (getFramebufferPairs(pairCursor)) {
++                            asyncRAMCopies.push_back({ colorFb, &RDRAM[colorFb->addressStart], colorWriteWidth, colorRowStart, std::min(colorRowEnd, colorFb->height) });
++                            if (depthWriteWidth > 0) {
++                                asyncRAMCopies.push_back({ depthFb, &RDRAM[depthFb->addressStart], depthWriteWidth, depthRowStart, std::min(depthRowEnd, depthFb->height) });
++                            }
++                        }
++
++                        pairCursor++;
++                    }
++
++                    RT64_ANDROID_TIME(dlWaitFbWorker, ext.framebufferGraphicsWorker->execute());
++                    RenderWorker *worker = ext.framebufferGraphicsWorker;
++                    std::vector<AsyncRAMCopy> *copies = &asyncRAMCopies;
++                    asyncRAMThread = std::thread([worker, copies]() {
++                        worker->wait();
++                        for (const AsyncRAMCopy &copy : *copies) {
++                            if (copy.rowStart < copy.rowEnd) {
++                                copy.fb->copyNativeToRAM(copy.dst, copy.rowWidth, copy.rowStart, copy.rowEnd);
++                            }
++                        }
++                    });
++
++                    asyncRAMPending = true;
++                    framebufferPairCursor = maxFramebufferPair;
++                    return;
++                }
++#           endif
 +                RT64_ANDROID_TIME(dlWaitFbWorker, ext.framebufferGraphicsWorker->execute(); ext.framebufferGraphicsWorker->wait());
  
                  pairCursor = framebufferPairCursor;
                  while (pairCursor < maxFramebufferPair) {
-@@ -1570,6 +1570,7 @@ namespace RT64 {
+@@ -1570,6 +1632,7 @@ namespace RT64 {
              }
  
              // Do not render anything, just wait for the data to be uploaded.
@@ -526,7 +590,7 @@ index 2970e71..beeff1f 100644
              ext.framebufferGraphicsWorker->commandList->begin();
              ext.drawDataUploader->commandListBeforeBarriers(ext.framebufferGraphicsWorker);
              ext.transformsUploader->commandListBeforeBarriers(ext.framebufferGraphicsWorker);
-@@ -1578,11 +1579,28 @@ namespace RT64 {
+@@ -1578,11 +1641,28 @@ namespace RT64 {
              ext.drawDataUploader->commandListAfterBarriers(ext.framebufferGraphicsWorker);
              ext.transformsUploader->commandListAfterBarriers(ext.framebufferGraphicsWorker);
              ext.framebufferGraphicsWorker->commandList->end();
@@ -560,7 +624,22 @@ index 2970e71..beeff1f 100644
          }
  
          // Evict from the texture cache that are too old and should no longer be maintained.
-@@ -1624,6 +1642,9 @@ namespace RT64 {
+@@ -1595,7 +1675,13 @@ namespace RT64 {
+             // Indicate to the texture cache it's safe to delete the textures if no locks are active.
+             ext.textureCache->decrementLock();
+ 
+-            framebufferManager.hashTracking(RDRAM);
++#       if defined(__ANDROID__)
++            // With the RAM copy still running, the hashes are taken when it finishes.
++            if (!asyncRAMPending)
++#       endif
++            {
++                framebufferManager.hashTracking(RDRAM);
++            }
+ 
+             advanceFramebufferRenderer();
+ 
+@@ -1624,6 +1710,9 @@ namespace RT64 {
          }
  
          // Log and reset profilers.
@@ -570,11 +649,30 @@ index 2970e71..beeff1f 100644
          dlCpuProfiler.end();
          dlCpuProfiler.log();
          screenCpuProfiler.log();
+@@ -1836,6 +1925,9 @@ namespace RT64 {
+     }
+     
+     void State::updateScreen(const VI &newVI, bool fromEarlyPresent) {
++#   if defined(__ANDROID__)
++        finishAsyncRenderToRAM();
++#   endif
+         // If the debugger has paused the plugin, keep submitting the last workload and screen VI for rendering and a present event.
+         if (debuggerInspector.paused && !fromEarlyPresent) {
+             if (ext.userConfig->developerMode) {
 diff --git a/src/hle/rt64_state.h b/src/hle/rt64_state.h
-index 7a8c13b..9e98b4b 100644
+index 7a8c13b..bd198be 100644
 --- a/src/hle/rt64_state.h
 +++ b/src/hle/rt64_state.h
-@@ -46,6 +46,7 @@ namespace RT64 {
+@@ -4,6 +4,8 @@
+ 
+ #pragma once
+ 
++#include <thread>
++
+ #include "xxHash/xxh3.h"
+ 
+ #include "common/rt64_emulator_configuration.h"
+@@ -46,6 +48,7 @@ namespace RT64 {
              RenderDevice *device;
              RenderSwapChain *swapChain;
              RenderWorker *framebufferGraphicsWorker;
@@ -582,6 +680,31 @@ index 7a8c13b..9e98b4b 100644
              ShaderLibrary *shaderLibrary;
              BufferUploader *drawDataUploader;
              BufferUploader *transformsUploader;
+@@ -95,6 +98,24 @@ namespace RT64 {
+         uint32_t displayListAddress;
+         uint64_t displayListCounter;
+         bool rdramCheckPending;
++#   if defined(__ANDROID__)
++        // Android: Render to RAM's copy of the frame's native-resolution result into RDRAM runs
++        // on a helper thread once the GPU has finished, instead of the game waiting for the GPU
++        // (which is busy with the full-resolution frames). finishAsyncRenderToRAM waits for it
++        // and records the framebuffers' RAM hashes; it runs before anything reads RDRAM's
++        // framebuffers or uses the framebuffer worker again (next display list, screen update).
++        struct AsyncRAMCopy {
++            Framebuffer *fb;
++            uint8_t *dst;
++            uint32_t rowWidth;
++            uint32_t rowStart;
++            uint32_t rowEnd;
++        };
++        std::vector<AsyncRAMCopy> asyncRAMCopies;
++        std::thread asyncRAMThread;
++        bool asyncRAMPending = false;
++        void finishAsyncRenderToRAM();
++#   endif
+         uint32_t lastWorkloadIndex;
+         VI lastScreenVI;
+         uint64_t lastScreenHash;
 diff --git a/src/hle/rt64_workload_queue.cpp b/src/hle/rt64_workload_queue.cpp
 index 5a331aa..6d7a371 100644
 --- a/src/hle/rt64_workload_queue.cpp
@@ -865,10 +988,10 @@ index 69a82ac..3f7dd70 100644
              if (device != nullptr) {
                  create(device);
 diff --git a/src/render/rt64_framebuffer_renderer.cpp b/src/render/rt64_framebuffer_renderer.cpp
-index 9fae0d4..d8a2951 100644
+index 9fae0d4..eced8e5 100644
 --- a/src/render/rt64_framebuffer_renderer.cpp
 +++ b/src/render/rt64_framebuffer_renderer.cpp
-@@ -50,6 +50,28 @@ namespace interop {
+@@ -50,6 +50,29 @@ namespace interop {
  };
  
  namespace RT64 {
@@ -888,6 +1011,7 @@ index 9fae0d4..d8a2951 100644
 +    std::atomic<uint64_t> AndroidRenderStats::dlWaitUploads{ 0 };
 +    std::atomic<uint64_t> AndroidRenderStats::dlWaitUploaders{ 0 };
 +    std::atomic<uint64_t> AndroidRenderStats::dlSyncs{ 0 };
++    std::atomic<uint64_t> AndroidRenderStats::dlWaitRAMCopy{ 0 };
 +    std::atomic<uint64_t> AndroidRenderStats::recordMicros{ 0 };
 +    std::atomic<uint64_t> AndroidRenderStats::waitMicros{ 0 };
 +    std::atomic<uint32_t> AndroidRenderStats::targetWidth{ 0 };
@@ -897,7 +1021,7 @@ index 9fae0d4..d8a2951 100644
      // Helper functions.
      
      RenderRect convertFixedRect(FixedRect rect, hlslpp::float2 resScale, int32_t fbWidth, float aspectRatioScale, float extOriginPercentage, int32_t horizontalMisalignment, uint16_t leftOrigin, uint16_t rightOrigin) {
-@@ -312,7 +334,14 @@ namespace RT64 {
+@@ -312,7 +335,14 @@ namespace RT64 {
          
          const bool createSet = (descTextureSet == nullptr) || (descTextureSet->textureCacheSize < (textureCacheSize + 1));
          if (createSet) {
@@ -912,7 +1036,7 @@ index 9fae0d4..d8a2951 100644
          }
  
          if (createSet || (descriptorTextureReplacementMapEnabled != textureCacheReplacementMapEnabled)) {
-@@ -462,6 +491,9 @@ namespace RT64 {
+@@ -462,6 +492,9 @@ namespace RT64 {
          worker->commandList->barriers(RenderBarrierStage::GRAPHICS, RenderTextureBarrier(fbStorage->depthTarget->texture.get(), readOnly ? depthReadState : RenderTextureLayout::DEPTH_WRITE));
          worker->commandList->setFramebuffer(renderFramebuffer);
          depthState = readOnly;
@@ -922,7 +1046,7 @@ index 9fae0d4..d8a2951 100644
          return true;
      }
      
-@@ -554,7 +586,12 @@ namespace RT64 {
+@@ -554,7 +587,12 @@ namespace RT64 {
                  const interop::OtherMode otherMode = triangles.shaderDesc.otherMode;
                  bool depthDecal = (otherMode.zMode() == ZMODE_DEC);
                  bool depthWrite = otherMode.zUpd();
@@ -936,7 +1060,7 @@ index 9fae0d4..d8a2951 100644
                      switchToDepthRead();
                  }
                  else if (!depthDecal && depthWrite) {
-@@ -571,6 +608,9 @@ namespace RT64 {
+@@ -571,6 +609,9 @@ namespace RT64 {
                      previousPipeline = triangles.pipeline;
                  }
                  
@@ -946,7 +1070,7 @@ index 9fae0d4..d8a2951 100644
                  rasterParams.renderIndex = i;
                  rasterParams.screenScale = triangles.screenScale;
                  rasterParams.screenOffset = triangles.screenOffset;
-@@ -580,6 +620,9 @@ namespace RT64 {
+@@ -580,6 +621,9 @@ namespace RT64 {
  
                  // Simulate dither noise.
                  if (triangles.postBlendDitherNoise) {
@@ -956,7 +1080,7 @@ index 9fae0d4..d8a2951 100644
                      if (triangles.postBlendDitherNoiseNegative) {
                          worker->commandList->setPipeline(postBlendDitherNoiseSubNegativePipeline);
                      }
-@@ -1229,6 +1272,9 @@ namespace RT64 {
+@@ -1229,6 +1273,9 @@ namespace RT64 {
      }
  
      void FramebufferRenderer::recordFramebuffer(RenderWorker *worker, uint32_t framebufferIndex) {
@@ -966,7 +1090,7 @@ index 9fae0d4..d8a2951 100644
          // Submit all transition barriers first.
          thread_local std::vector<RenderTextureBarrier> startBarriers;
          startBarriers.clear();
-@@ -1244,6 +1290,14 @@ namespace RT64 {
+@@ -1244,6 +1291,14 @@ namespace RT64 {
          if (colorTarget != nullptr) {
              startBarriers.emplace_back(RenderTextureBarrier(colorTarget->texture.get(), RenderTextureLayout::COLOR_WRITE));
          }
@@ -981,7 +1105,7 @@ index 9fae0d4..d8a2951 100644
  
          startBarriers.emplace_back(RenderTextureBarrier(depthTarget->texture.get(), RenderTextureLayout::DEPTH_WRITE));
          worker->commandList->barriers(RenderBarrierStage::GRAPHICS, startBarriers);
-@@ -1608,10 +1662,15 @@ namespace RT64 {
+@@ -1608,10 +1663,15 @@ namespace RT64 {
                          triangles.shaderDesc = call.shaderDesc;
  
                          RasterShader *gpuShader = p.ubershadersOnly ? nullptr : p.rasterShaderCache->getGPUShader(call.shaderDesc);
@@ -998,7 +1122,7 @@ index 9fae0d4..d8a2951 100644
                              triangles.pipeline = rasterShaderUber->getPipeline(
                                  !copyMode && call.shaderDesc.otherMode.zCmp() && (call.shaderDesc.otherMode.zMode() != ZMODE_DEC),
 diff --git a/src/render/rt64_framebuffer_renderer.h b/src/render/rt64_framebuffer_renderer.h
-index 3add9c3..f6a358f 100644
+index 3add9c3..e143e85 100644
 --- a/src/render/rt64_framebuffer_renderer.h
 +++ b/src/render/rt64_framebuffer_renderer.h
 @@ -4,6 +4,8 @@
@@ -1010,7 +1134,7 @@ index 3add9c3..f6a358f 100644
  #include <stdint.h>
  
  #include "common/rt64_emulator_configuration.h"
-@@ -30,6 +32,37 @@
+@@ -30,6 +32,38 @@
  #endif
  
  namespace RT64 {
@@ -1039,6 +1163,7 @@ index 3add9c3..f6a358f 100644
 +        static std::atomic<uint64_t> dlWaitUploads;     // texture uploads
 +        static std::atomic<uint64_t> dlWaitUploaders;   // buffer uploaders
 +        static std::atomic<uint64_t> dlSyncs;           // display lists finished (full syncs)
++        static std::atomic<uint64_t> dlWaitRAMCopy;     // waiting for the background Render to RAM copy
 +    };
 +#   define RT64_ANDROID_TIME(counter, expr) do { ElapsedTimer androidTimer_; expr; AndroidRenderStats::counter.fetch_add(uint64_t(androidTimer_.elapsedMicroseconds()), std::memory_order_relaxed); } while (0)
 +#else
