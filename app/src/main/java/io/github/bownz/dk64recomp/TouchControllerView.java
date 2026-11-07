@@ -74,6 +74,7 @@ public final class TouchControllerView extends View {
         boolean shown;
         // The drawer: its handle, and the buttons that slide in (positions before sliding).
         boolean drawerHandle, drawerItem;
+        int n64Bit;   // N64 buttons only: the button it presses
         float baseCx;
         boolean layoutShown;
 
@@ -172,6 +173,10 @@ public final class TouchControllerView extends View {
     private static final long TAP_MAX_MS = 250, DOUBLE_TAP_GAP_MS = 300;
     private boolean doubleTapZ = false;
     private boolean zFromStick = false;
+    // A button pressed while that Z is held: Z is let go when it's released (so A gives a
+    // crouch jump and Z is gone by the landing). Oranges (C-Right, or the oranges button)
+    // keep Z, to throw several while crouched.
+    private Control zEndsWith;
     private long stickDownAt, stickUpAt;
     private boolean lastStickTouchWasTap;
     private float stickHomeX, stickHomeY, stickHomeR;
@@ -344,9 +349,11 @@ public final class TouchControllerView extends View {
     }
 
     private Control button(String group, String label, int color, Place normal, Place analog, int n64Bit) {
-        return new Control(Kind.BUTTON, group, label, color, normal, analog,
+        Control c = new Control(Kind.BUTTON, group, label, color, normal, analog,
             () -> TouchInput.setOverlayN64Button(n64Bit, true),
             () -> TouchInput.setOverlayN64Button(n64Bit, false), 0, 0, 1f);
+        c.n64Bit = n64Bit;
+        return c;
     }
 
     /** A button on the virtual SDL gamepad (the menu button: opens the game's menu). */
@@ -419,10 +426,7 @@ public final class TouchControllerView extends View {
             }
             stickReleased(s);
         }
-        if (zFromStick) {
-            zFromStick = false;
-            TouchInput.setOverlayN64Button(TouchInput.N64_Z, false);
-        }
+        releaseStickZ();
         invalidate();
     }
 
@@ -899,7 +903,12 @@ public final class TouchControllerView extends View {
         fill.setAlpha(c.pointerId != -1 ? Math.min(255, baseAlpha + 90) : baseAlpha);
         canvas.drawCircle(knobX, knobY, c.r * 0.45f, fill);
         canvas.drawCircle(knobX, knobY, c.r * 0.45f, stroke);
-        if (!c.label.isEmpty()) {
+        if (zFromStick && c.group.equals("stick")) {
+            text.setAlpha(255);
+            text.setTextSize(c.r * 0.4f);
+            float baseline = knobY - (text.descent() + text.ascent()) / 2f;
+            canvas.drawText("Z", knobX, baseline, text);
+        } else if (!c.label.isEmpty()) {
             text.setAlpha(Math.min(255, baseAlpha + 30));
             text.setTextSize(c.r * 0.22f);
             float baseline = knobY - (text.descent() + text.ascent()) / 2f;
@@ -1089,10 +1098,26 @@ public final class TouchControllerView extends View {
         long now = android.os.SystemClock.uptimeMillis();
         if (doubleTapZ && lastStickTouchWasTap && now - stickUpAt <= DOUBLE_TAP_GAP_MS && !zFromStick) {
             zFromStick = true;
+            zEndsWith = null;
             TouchInput.setOverlayN64Button(TouchInput.N64_Z, true);
             Haptics.tap(this);
+            invalidate();
         }
         stickDownAt = now;
+    }
+
+    private void releaseStickZ() {
+        if (zFromStick) {
+            zFromStick = false;
+            zEndsWith = null;
+            TouchInput.setOverlayN64Button(TouchInput.N64_Z, false);
+            invalidate();
+        }
+    }
+
+    /** Oranges are thrown with Z held, so they don't end the double-tap Z. */
+    private static boolean keepsZ(Control c) {
+        return c.move == TouchMoves.Move.ORANGE || c.n64Bit == TouchInput.N64_C_RIGHT;
     }
 
     /** The thumb left the control stick: let go of Z if the double tap was holding it. */
@@ -1102,8 +1127,7 @@ public final class TouchControllerView extends View {
         }
         long now = android.os.SystemClock.uptimeMillis();
         if (zFromStick) {
-            zFromStick = false;
-            TouchInput.setOverlayN64Button(TouchInput.N64_Z, false);
+            releaseStickZ();
             lastStickTouchWasTap = false;   // a third tap starts over
         } else {
             lastStickTouchWasTap = now - stickDownAt <= TAP_MAX_MS;
@@ -1175,12 +1199,18 @@ public final class TouchControllerView extends View {
             if (!now.contains(c)) {
                 c.onRelease.run();
                 pressed.remove(c);
+                if (c == zEndsWith) {
+                    releaseStickZ();   // e.g. after the crouch jump
+                }
             }
         }
         for (Control c : now) {
             if (pressed.add(c)) {
                 if (c.drawerItem) {
                     drawerUsedAt = android.os.SystemClock.uptimeMillis();
+                }
+                if (zFromStick && zEndsWith == null && !c.drawerHandle && !keepsZ(c)) {
+                    zEndsWith = c;
                 }
                 c.onPress.run();
                 newPress = true;
