@@ -836,7 +836,7 @@ public final class TouchControllerView extends View {
                     updateStick(stick, x, y);
                 } else if (hitButton(x, y) != null) {
                     buttonPointers.put(pointerId, new float[] { x, y });
-                } else if (left != null && left.pointerId == -1 && x < getWidth() / 2f) {
+                } else if (left != null && left.pointerId == -1 && inFloatingZone(x, y)) {
                     // Floating stick: a smaller stick comes to the thumb, centred under it.
                     stickHomeX = left.cx;
                     stickHomeY = left.cy;
@@ -914,6 +914,14 @@ public final class TouchControllerView extends View {
         updatePressedButtons();
         invalidate();
         return true;
+    }
+
+    /**
+     * Where the floating stick can appear: the lower-left, like Roblox's dynamic thumbstick
+     * (the left half, below the top third). The rest of the screen turns the camera.
+     */
+    private boolean inFloatingZone(float x, float y) {
+        return x < getWidth() / 2f && y > getHeight() / 3f;
     }
 
     /** The left (control) stick. */
@@ -1170,7 +1178,7 @@ public final class TouchControllerView extends View {
                 getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_FLOATING, floatingStick).apply();
                 if (floatingStick) {
                     android.widget.Toast.makeText(getContext(),
-                        "Touch anywhere on the left half to bring up the stick. Remove the control stick if you only want the floating one.",
+                        "Touch anywhere in the lower-left to bring up the stick; drag elsewhere to turn the camera. Remove the control stick if you only want the floating one.",
                         android.widget.Toast.LENGTH_LONG).show();
                 }
                 invalidate();
