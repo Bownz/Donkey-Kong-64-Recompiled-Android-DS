@@ -161,6 +161,14 @@ public final class TouchControllerView extends View {
     private static final float FLOATING_RADIUS = 0.11f;   // in units of the shorter side
     private boolean floatingStick = false;
     private boolean stickFloating = false;
+    // Double-tap the control stick for Z (a toggle in the layout editor): a quick tap, then a
+    // second touch soon after holds Z for as long as that touch lasts (the stick still works).
+    private static final String KEY_DOUBLE_TAP_Z = "double_tap_z";
+    private static final long TAP_MAX_MS = 250, DOUBLE_TAP_GAP_MS = 300;
+    private boolean doubleTapZ = false;
+    private boolean zFromStick = false;
+    private long stickDownAt, stickUpAt;
+    private boolean lastStickTouchWasTap;
     private float stickHomeX, stickHomeY, stickHomeR;
     // Greys out move buttons that can't be used (not bought yet, nothing to use, swimming...).
     private final Paint greyLayer = new Paint();
@@ -184,9 +192,9 @@ public final class TouchControllerView extends View {
     private float dragLastX, dragLastY;
     private int pinchPointer = -1;
     private float pinchStartDist, pinchStartScale;
-    private final RectF[] toolbar = { new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF() };
-    private static final String[] TOOLBAR_LABELS = { "−", "+", "Remove", "Add", "Reset", "Done", "Floating stick" };
-    private static final int TB_SMALLER = 0, TB_BIGGER = 1, TB_REMOVE = 2, TB_ADD = 3, TB_RESET = 4, TB_DONE = 5, TB_FLOATING = 6;
+    private final RectF[] toolbar = { new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF() };
+    private static final String[] TOOLBAR_LABELS = { "−", "+", "Remove", "Add", "Reset", "Done", "Floating stick", "Double-tap stick: Z" };
+    private static final int TB_SMALLER = 0, TB_BIGGER = 1, TB_REMOVE = 2, TB_ADD = 3, TB_RESET = 4, TB_DONE = 5, TB_FLOATING = 6, TB_DOUBLE_TAP = 7;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable poll = new Runnable() {
@@ -288,6 +296,7 @@ public final class TouchControllerView extends View {
 
         loadLayout();
         floatingStick = getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_FLOATING, false);
+        doubleTapZ = getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_DOUBLE_TAP_Z, false);
         setContentDescription("On-screen N64 controller");
         setHapticFeedbackEnabled(true);
         setVisibility(GONE);
@@ -376,6 +385,10 @@ public final class TouchControllerView extends View {
                 setStick(s, 0f, 0f);
             }
             stickReleased(s);
+        }
+        if (zFromStick) {
+            zFromStick = false;
+            TouchInput.setOverlayN64Button(TouchInput.N64_Z, false);
         }
         invalidate();
     }
@@ -606,10 +619,12 @@ public final class TouchControllerView extends View {
                 x += widths[i] + gap;
             }
         }
-        // Third row: the floating stick toggle, as wide as a row.
-        float rowW = widths[3] + widths[4] + widths[5] + gap * 2;
+        // Third row: the stick toggles (floating stick, double-tap for Z), side by side.
+        float half = unit * 0.40f;
         float top3 = h * 0.5f - bh / 2f + 2 * (bh + gap);
-        toolbar[TB_FLOATING].set((w - rowW) / 2f, top3, (w + rowW) / 2f, top3 + bh);
+        float left3 = (w - (half * 2 + gap)) / 2f;
+        toolbar[TB_FLOATING].set(left3, top3, left3 + half, top3 + bh);
+        toolbar[TB_DOUBLE_TAP].set(left3 + half + gap, top3, left3 + half * 2 + gap, top3 + bh);
     }
 
     // ------------------------------------------------------------------------------
@@ -785,16 +800,20 @@ public final class TouchControllerView extends View {
             boolean primary = i == TB_DONE;
             boolean disabled = i == TB_REMOVE && (selected == null || !GROUP_NAMES.containsKey(selected));
             fill.setColor(primary ? Color.rgb(46, 158, 79) : i == TB_REMOVE && !disabled ? Color.rgb(170, 60, 50)
-                : i == TB_FLOATING && floatingStick ? Color.rgb(59, 111, 216) : Color.rgb(60, 60, 68));
+                : (i == TB_FLOATING && floatingStick) || (i == TB_DOUBLE_TAP && doubleTapZ) ? Color.rgb(59, 111, 216) : Color.rgb(60, 60, 68));
             fill.setAlpha(disabled ? 110 : 235);
             canvas.drawRoundRect(rect, radius, radius, fill);
             stroke.setAlpha(255);
             canvas.drawRoundRect(rect, radius, radius, stroke);
             text.setTextSize(rect.height() * 0.45f);
             float baseline = rect.centerY() - (text.descent() + text.ascent()) / 2f;
-            String label = i == TB_FLOATING ? "Floating stick: " + (floatingStick ? "On" : "Off") : TOOLBAR_LABELS[i];
-            if (i == TB_FLOATING) {
+            String label = i == TB_FLOATING ? "Floating stick: " + (floatingStick ? "On" : "Off")
+                : i == TB_DOUBLE_TAP ? "Double-tap stick for Z: " + (doubleTapZ ? "On" : "Off") : TOOLBAR_LABELS[i];
+            if (i == TB_FLOATING || i == TB_DOUBLE_TAP) {
                 text.setTextSize(rect.height() * 0.38f);
+                while (text.getTextSize() > 8f && text.measureText(label) > rect.width() * 0.92f) {
+                    text.setTextSize(text.getTextSize() * 0.92f);
+                }
                 baseline = rect.centerY() - (text.descent() + text.ascent()) / 2f;
             }
             canvas.drawText(label, rect.centerX(), baseline, text);
@@ -833,6 +852,7 @@ public final class TouchControllerView extends View {
                 Control left = floatingStick ? leftStick() : null;
                 if (stick != null) {
                     stick.pointerId = pointerId;
+                    stickDown(stick);
                     updateStick(stick, x, y);
                 } else if (hitButton(x, y) != null) {
                     buttonPointers.put(pointerId, new float[] { x, y });
@@ -846,6 +866,7 @@ public final class TouchControllerView extends View {
                     left.cy = y;
                     left.r = FLOATING_RADIUS * unit;
                     left.pointerId = pointerId;
+                    stickDown(left);
                     updateStick(left, x, y);
                 } else if (dragCamera && cameraPointer == -1) {
                     // Away from the buttons: this finger turns the camera (Drag to Move Camera).
@@ -890,6 +911,7 @@ public final class TouchControllerView extends View {
                         if (s.pointerId != -1) {
                             s.pointerId = -1;
                             setStick(s, 0f, 0f);
+                            stickUp(s);
                             stickReleased(s);
                         }
                     }
@@ -898,6 +920,7 @@ public final class TouchControllerView extends View {
                     if (stick != null) {
                         stick.pointerId = -1;
                         setStick(stick, 0f, 0f);
+                        stickUp(stick);
                         stickReleased(stick);
                     } else if (pointerId == cameraPointer) {
                         cameraPointer = -1;
@@ -932,6 +955,36 @@ public final class TouchControllerView extends View {
             }
         }
         return null;
+    }
+
+    /** The control stick was touched: a second touch right after a quick tap holds Z. */
+    private void stickDown(Control s) {
+        if (!s.group.equals("stick")) {
+            return;
+        }
+        long now = android.os.SystemClock.uptimeMillis();
+        if (doubleTapZ && lastStickTouchWasTap && now - stickUpAt <= DOUBLE_TAP_GAP_MS && !zFromStick) {
+            zFromStick = true;
+            TouchInput.setOverlayN64Button(TouchInput.N64_Z, true);
+            Haptics.tap(this);
+        }
+        stickDownAt = now;
+    }
+
+    /** The thumb left the control stick: let go of Z if the double tap was holding it. */
+    private void stickUp(Control s) {
+        if (!s.group.equals("stick")) {
+            return;
+        }
+        long now = android.os.SystemClock.uptimeMillis();
+        if (zFromStick) {
+            zFromStick = false;
+            TouchInput.setOverlayN64Button(TouchInput.N64_Z, false);
+            lastStickTouchWasTap = false;   // a third tap starts over
+        } else {
+            lastStickTouchWasTap = now - stickDownAt <= TAP_MAX_MS;
+        }
+        stickUpAt = now;
     }
 
     /** Puts a floating stick back in its place once the thumb lifts. */
@@ -1172,6 +1225,16 @@ public final class TouchControllerView extends View {
                 break;
             case TB_ADD:
                 showAddMenu();
+                return;
+            case TB_DOUBLE_TAP:
+                doubleTapZ = !doubleTapZ;
+                getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_DOUBLE_TAP_Z, doubleTapZ).apply();
+                if (doubleTapZ) {
+                    android.widget.Toast.makeText(getContext(),
+                        "Tap the control stick, then touch it again and hold for Z. You can still move while holding.",
+                        android.widget.Toast.LENGTH_LONG).show();
+                }
+                invalidate();
                 return;
             case TB_FLOATING:
                 floatingStick = !floatingStick;
