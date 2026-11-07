@@ -1,5 +1,5 @@
 diff --git a/plume_vulkan.cpp b/plume_vulkan.cpp
-index f1dd503..2479fec 100644
+index f1dd503..ca9530c 100644
 --- a/plume_vulkan.cpp
 +++ b/plume_vulkan.cpp
 @@ -27,7 +27,18 @@
@@ -300,7 +300,38 @@ index f1dd503..2479fec 100644
          vkCmdClearAttachments(vk, 1, &attachment, uint32_t(rectVector.size()), rectVector.data());
      }
  
-@@ -3828,6 +4006,12 @@ namespace plume {
+@@ -3703,13 +3881,29 @@ namespace plume {
+     
+     // VulkanQueueFamily
+ 
++#if defined(__ANDROID__)
++    bool vulkanHighPriorityQueueCreation = false;
++#endif
++
+     void VulkanQueueFamily::add(VulkanCommandQueue *virtualQueue) {
+         assert(virtualQueue != nullptr);
+ 
+         // Insert virtual queue into the queue with the least amount of virtual queues.
+         uint32_t queueIndex = 0;
+         uint32_t lowestCount = UINT_MAX;
+-        for (uint32_t i = 0; i < queues.size(); i++) {
++        uint32_t firstCandidate = 0;
++        uint32_t endCandidate = uint32_t(queues.size());
++#   if defined(__ANDROID__)
++        if (queues.size() >= 2) {
++            if (vulkanHighPriorityQueueCreation) {
++                endCandidate = 1; // Queue 0 is the high-priority one.
++            }
++            else {
++                firstCandidate = 1;
++            }
++        }
++#   endif
++        for (uint32_t i = firstCandidate; i < endCandidate; i++) {
+             uint32_t virtualQueueCount = uint32_t(queues[i].virtualQueues.size());
+             if (virtualQueueCount < lowestCount) {
+                 queueIndex = i;
+@@ -3828,6 +4022,12 @@ namespace plume {
  
          // Store properties.
          vkGetPhysicalDeviceProperties(physicalDevice, &physicalDeviceProperties);
@@ -313,7 +344,30 @@ index f1dd503..2479fec 100644
  
          // Check for supported features.
          void *featuresChain = nullptr;
-@@ -4149,7 +4333,15 @@ namespace plume {
+@@ -4018,12 +4218,22 @@ namespace plume {
+         // Create the logical device with the desired family queues.
+         std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
+         std::vector<float> queuePriorities(MaxQueuesPerFamilyCount, 1.0f);
++#   if defined(__ANDROID__)
++        // Queue 0 is the high-priority one (see vulkanHighPriorityQueueCreation).
++        for (uint32_t i = 1; i < MaxQueuesPerFamilyCount; i++) {
++            queuePriorities[i] = 0.5f;
++        }
++#   endif
+         queueCreateInfos.reserve(queueFamilyCount);
+         for (uint32_t i = 0; i < queueFamilyCount; i++) {
+             if (queueFamilyUsed[i]) {
+                 VkDeviceQueueCreateInfo queueCreateInfo = {};
+                 queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+                 queueCreateInfo.queueCount = std::min(queueFamilyProperties[i].queueCount, MaxQueuesPerFamilyCount);
++#           if defined(__ANDROID__)
++                fprintf(stdout, "Vulkan queue family %u: %u queues available, %u used, flags 0x%X\n", i, queueFamilyProperties[i].queueCount, queueCreateInfo.queueCount, uint32_t(queueFamilyProperties[i].queueFlags));
++                fflush(stdout);
++#           endif
+                 queueCreateInfo.queueFamilyIndex = i;
+                 queueCreateInfo.pQueuePriorities = queuePriorities.data();
+                 queueCreateInfos.emplace_back(queueCreateInfo);
+@@ -4149,7 +4359,15 @@ namespace plume {
  #   endif
  
          // Fill Vulkan-only capabilities.
@@ -329,7 +383,7 @@ index f1dd503..2479fec 100644
  
          if (!nullDescriptorSupported) {
              nullBuffer = createBuffer(RenderBufferDesc::DefaultBuffer(16, RenderBufferFlag::VERTEX));
-@@ -4464,7 +4656,19 @@ namespace plume {
+@@ -4464,7 +4682,19 @@ namespace plume {
  #else
      VulkanInterface::VulkanInterface() {
  #endif
@@ -350,7 +404,7 @@ index f1dd503..2479fec 100644
              fprintf(stderr, "volkInitialize failed with error code 0x%X.\n", res);
              return;
 diff --git a/plume_vulkan.h b/plume_vulkan.h
-index 0a1edbe..5dbab6d 100644
+index 0a1edbe..3477b4b 100644
 --- a/plume_vulkan.h
 +++ b/plume_vulkan.h
 @@ -42,6 +42,14 @@
@@ -389,3 +443,19 @@ index 0a1edbe..5dbab6d 100644
          const VulkanPipelineLayout *activeComputePipelineLayout = nullptr;
          const VulkanPipelineLayout *activeGraphicsPipelineLayout = nullptr;
          const VulkanPipelineLayout *activeRaytracingPipelineLayout = nullptr;
+@@ -395,6 +410,15 @@ namespace plume {
+         std::unordered_set<const VulkanCommandQueue *> virtualQueues;
+     };
+ 
++#if defined(__ANDROID__)
++    // Android: while true, newly created command queues go to the family's first hardware
++    // queue, which is created with a higher priority than the others (when the family has
++    // more than one). Everything else is spread over the remaining queues. RT64 uses this so
++    // its small display-list renders and texture uploads, which the game waits on, can run
++    // ahead of the full-resolution frames instead of queueing behind them.
++    extern bool vulkanHighPriorityQueueCreation;
++#endif
++
+     struct VulkanQueueFamily {
+         std::vector<VulkanQueue> queues;
+ 

@@ -2551,7 +2551,7 @@ index 296ce0e..a6df4df 100644
  
          return config;
 diff --git a/recompui/src/config/ui_config_tab_graphics.cpp b/recompui/src/config/ui_config_tab_graphics.cpp
-index 4fdf81f..4834249 100644
+index 4fdf81f..e50e989 100644
 --- a/recompui/src/config/ui_config_tab_graphics.cpp
 +++ b/recompui/src/config/ui_config_tab_graphics.cpp
 @@ -77,11 +77,19 @@ namespace recompui {
@@ -2605,7 +2605,22 @@ index 4fdf81f..4834249 100644
  
              new_config.ds_option = get_graphics_enum_value<int>(graphics::options::ds_option);
  
-@@ -297,6 +322,9 @@ namespace recompui {
+@@ -220,7 +245,14 @@ namespace recompui {
+         recomp::config::Config &create_graphics_tab(const std::string &name) {
+             created_graphics_config = true;
+ 
++#ifdef __ANDROID__
++            // Android: no Apply step. With it, leaving the tab (B, or the menu closing) could
++            // drop the changes, and players found Framerate / Draw Distance back as before
++            // after a restart. The tab saves (and applies) when it closes, like the others.
++            recomp::config::Config &config = recompui::config::create_config_tab(name, graphics::id, false);
++#else
+             recomp::config::Config &config = recompui::config::create_config_tab(name, graphics::id, true);
++#endif
+             config.set_save_callback(apply_graphics_config);
+             config.set_load_callback(apply_graphics_config);
+ 
+@@ -297,6 +329,9 @@ namespace recompui {
                  "Sets whether the game should display <recomp-color primary>Windowed</recomp-color> or <recomp-color primary>Fullscreen</recomp-color>. You can also use <recomp-color primary>F11</recomp-color> or <recomp-color primary>Alt + Enter</recomp-color> to toggle this option.",
                  window_mode_options,
                  wm_default()
@@ -2615,7 +2630,7 @@ index 4fdf81f..4834249 100644
              );
  
              config.add_enum_option(
-@@ -304,7 +332,15 @@ namespace recompui {
+@@ -304,7 +339,15 @@ namespace recompui {
                  "Framerate",
                  get_framerate_text(60),
                  refresh_rate_options,
@@ -2631,7 +2646,7 @@ index 4fdf81f..4834249 100644
              );
  
              config.add_number_option(
-@@ -314,12 +350,23 @@ namespace recompui {
+@@ -314,12 +357,23 @@ namespace recompui {
                  20.0, 240.0, 1.0, 0, false, 60.0
              );
              {
@@ -2655,7 +2670,7 @@ index 4fdf81f..4834249 100644
              }
  
              config.add_enum_option(
-@@ -330,7 +377,12 @@ namespace recompui {
+@@ -330,7 +384,12 @@ namespace recompui {
                  "<br />"
                  "<recomp-color primary>Note: This option won't be available if your GPU does not support programmable MSAA sample positions, as it is currently required to avoid rendering glitches.</recomp-color>",
                  antialiasing_options,

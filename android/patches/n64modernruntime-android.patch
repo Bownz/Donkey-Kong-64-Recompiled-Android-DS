@@ -70,6 +70,37 @@ index 0f7de83..7541a3c 100644
  
  namespace modpaths {
      constexpr std::string_view default_mod_extension = "nrm";
+diff --git a/ultramodern/src/mesgqueue.cpp b/ultramodern/src/mesgqueue.cpp
+index 9944a02..2e282ea 100644
+--- a/ultramodern/src/mesgqueue.cpp
++++ b/ultramodern/src/mesgqueue.cpp
+@@ -1,4 +1,6 @@
++#include <atomic>
+ #include <bitset>
++#include <cstdio>
+ #include <thread>
+ 
+ #include "blockingconcurrentqueue.h"
+@@ -90,6 +92,19 @@ s32 MQ_IS_FULL(OSMesgQueue* mq) {
+ }
+ 
+ bool do_send(RDRAM_ARG PTR(OSMesgQueue) mq_, OSMesg msg, bool jam, bool block) {
++#if defined(__ANDROID__)
++    // A message for a queue that isn't a KSEG0/KSEG1 address (e.g. 0x00000008, a field of a
++    // null pointer) would make the host read outside RDRAM and crash, which once happened in
++    // the EEPROM thread while a save was loading. Drop it instead (counted as delivered, so
++    // it isn't requeued forever) and log it.
++    if (static_cast<uint32_t>(mq_) < 0x80000000u || static_cast<uint32_t>(mq_) >= 0xC0000000u) {
++        static std::atomic<int> logged{ 0 };
++        if (logged.fetch_add(1) < 8) {
++            fprintf(stderr, "[Message Queue] Dropped a message (0x%08X) sent to an invalid queue address 0x%08X\n", static_cast<uint32_t>(msg), static_cast<uint32_t>(mq_));
++        }
++        return true;
++    }
++#endif
+     OSMesgQueue* mq = TO_PTR(OSMesgQueue, mq_);
+     if (!block) {
+         // If non-blocking, fail if the queue is full.
 diff --git a/ultramodern/src/threads.cpp b/ultramodern/src/threads.cpp
 index 6e3ed18..6eed542 100644
 --- a/ultramodern/src/threads.cpp
