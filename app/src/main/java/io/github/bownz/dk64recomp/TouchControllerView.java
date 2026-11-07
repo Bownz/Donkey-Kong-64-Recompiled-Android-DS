@@ -123,7 +123,7 @@ public final class TouchControllerView extends View {
         GROUP_NAMES.put("act_film", "Camera (film)");
         GROUP_NAMES.put("first_person", "First person");
         GROUP_NAMES.put("dynamic", "Dynamic move (Orangstand, Charge, Punch, Cancel)");
-        GROUP_NAMES.put("drawer", "Action drawer (a handle that slides oranges, gun, instrument, camera and first person in from the right)");
+        GROUP_NAMES.put("drawer", "Action drawer (a handle that slides oranges, gun, instrument and camera in from the right)");
     }
     private static final Set<String> DEFAULT_ON = new HashSet<>(java.util.Arrays.asList(
         "stick", "dpad", "a", "b", "z", "r", "start", "c", "camera", "menu"));
@@ -312,16 +312,17 @@ public final class TouchControllerView extends View {
         controls.add(dyn);
 
         // The action drawer: the handle on the right edge, and a column of moves beside it.
-        // (The dynamic move isn't in it: it only appears when usable, so it's placed on its own.)
+        // (The dynamic move isn't in it: it only appears when usable, so it's placed on its own.
+        // Nor is first person: that's C-Up, a way of looking rather than an item.)
         Control handle = new Control(Kind.BUTTON, "drawer", "", COLOR_NEUTRAL,
             both(AnchorX.RIGHT, 0.045f, AnchorY.TOP, 0.50f, 0.04f), both(AnchorX.RIGHT, 0.045f, AnchorY.TOP, 0.50f, 0.04f),
             this::toggleDrawer, () -> { }, 0, 0, 1f);
         handle.drawerHandle = true;
         controls.add(handle);
         TouchMoves.Move[] drawerMoves = { TouchMoves.Move.ORANGE, TouchMoves.Move.WEAPON, TouchMoves.Move.INSTRUMENT,
-            TouchMoves.Move.CAMERA, TouchMoves.Move.FIRST_PERSON };
+            TouchMoves.Move.CAMERA };
         for (int i = 0; i < drawerMoves.length; i++) {
-            Control item = moveButton("drawer_items", drawerMoves[i], both(AnchorX.RIGHT, 0.15f, AnchorY.TOP, 0.14f + i * 0.125f, 0.05f));
+            Control item = moveButton("drawer_items", drawerMoves[i], both(AnchorX.RIGHT, 0.15f, AnchorY.TOP, 0.20f + i * 0.14f, 0.055f));
             item.drawerItem = true;
             controls.add(item);
         }
