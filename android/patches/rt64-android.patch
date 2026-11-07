@@ -845,7 +845,7 @@ index 69a82ac..3f7dd70 100644
              if (device != nullptr) {
                  create(device);
 diff --git a/src/render/rt64_framebuffer_renderer.cpp b/src/render/rt64_framebuffer_renderer.cpp
-index 9fae0d4..eced8e5 100644
+index 9fae0d4..fd4634f 100644
 --- a/src/render/rt64_framebuffer_renderer.cpp
 +++ b/src/render/rt64_framebuffer_renderer.cpp
 @@ -50,6 +50,29 @@ namespace interop {
@@ -917,9 +917,22 @@ index 9fae0d4..eced8e5 100644
                      switchToDepthRead();
                  }
                  else if (!depthDecal && depthWrite) {
-@@ -571,6 +609,9 @@ namespace RT64 {
+@@ -570,7 +608,22 @@ namespace RT64 {
+                     worker->commandList->setPipeline(triangles.pipeline);
                      previousPipeline = triangles.pipeline;
                  }
++
++#           if defined(__ANDROID__)
++                if (depthDecal && triangles.hardwareDecal) {
++                    // Match the shader's decal tolerance (RasterPS): the larger of the coplanar
++                    // tolerance (up to 0.0005 of depth; about 8192 units of a D32 float's
++                    // precision near the far plane) and the depth change across a pixel times the
++                    // resolution scale (ddx + ddy, so up to twice the steepest slope). Without the
++                    // resolution scale, decals a little behind the surface (the ring under a
++                    // charging Kong, shadows) partly failed at high resolutions.
++                    worker->commandList->setDepthBias(-8192.0f, 0.0f, -2.0f * std::max(framebuffer.resolutionScaleY, 1.0f));
++                }
++#           endif
                  
 +#           if defined(__ANDROID__)
 +                AndroidRenderStats::draws.fetch_add(1, std::memory_order_relaxed);
@@ -927,7 +940,7 @@ index 9fae0d4..eced8e5 100644
                  rasterParams.renderIndex = i;
                  rasterParams.screenScale = triangles.screenScale;
                  rasterParams.screenOffset = triangles.screenOffset;
-@@ -580,6 +621,9 @@ namespace RT64 {
+@@ -580,6 +633,9 @@ namespace RT64 {
  
                  // Simulate dither noise.
                  if (triangles.postBlendDitherNoise) {
@@ -937,7 +950,7 @@ index 9fae0d4..eced8e5 100644
                      if (triangles.postBlendDitherNoiseNegative) {
                          worker->commandList->setPipeline(postBlendDitherNoiseSubNegativePipeline);
                      }
-@@ -1229,6 +1273,9 @@ namespace RT64 {
+@@ -1229,6 +1285,9 @@ namespace RT64 {
      }
  
      void FramebufferRenderer::recordFramebuffer(RenderWorker *worker, uint32_t framebufferIndex) {
@@ -947,7 +960,7 @@ index 9fae0d4..eced8e5 100644
          // Submit all transition barriers first.
          thread_local std::vector<RenderTextureBarrier> startBarriers;
          startBarriers.clear();
-@@ -1244,6 +1291,14 @@ namespace RT64 {
+@@ -1244,6 +1303,14 @@ namespace RT64 {
          if (colorTarget != nullptr) {
              startBarriers.emplace_back(RenderTextureBarrier(colorTarget->texture.get(), RenderTextureLayout::COLOR_WRITE));
          }
@@ -962,7 +975,15 @@ index 9fae0d4..eced8e5 100644
  
          startBarriers.emplace_back(RenderTextureBarrier(depthTarget->texture.get(), RenderTextureLayout::DEPTH_WRITE));
          worker->commandList->barriers(RenderBarrierStage::GRAPHICS, startBarriers);
-@@ -1608,10 +1663,15 @@ namespace RT64 {
+@@ -1442,6 +1509,7 @@ namespace RT64 {
+         const float originalWidth = p.fbWidth * p.resolutionScale.y;
+         const float commonHeight = float(p.targetHeight);
+         framebuffer.viewport = RenderViewport(0.0f, 0.0f, wideWidth, commonHeight);
++        framebuffer.resolutionScaleY = p.resolutionScale.y;
+         
+         const interop::float2 halfViewportSize = { framebuffer.viewport.width / 2.0f, framebuffer.viewport.height / 2.0f };
+         const interop::float2 halfPixelOffset = { 1.0f / framebuffer.viewport.width, -1.0f / framebuffer.viewport.height };
+@@ -1608,10 +1676,15 @@ namespace RT64 {
                          triangles.shaderDesc = call.shaderDesc;
  
                          RasterShader *gpuShader = p.ubershadersOnly ? nullptr : p.rasterShaderCache->getGPUShader(call.shaderDesc);
@@ -979,7 +1000,7 @@ index 9fae0d4..eced8e5 100644
                              triangles.pipeline = rasterShaderUber->getPipeline(
                                  !copyMode && call.shaderDesc.otherMode.zCmp() && (call.shaderDesc.otherMode.zMode() != ZMODE_DEC),
 diff --git a/src/render/rt64_framebuffer_renderer.h b/src/render/rt64_framebuffer_renderer.h
-index 3add9c3..e143e85 100644
+index 3add9c3..ba64600 100644
 --- a/src/render/rt64_framebuffer_renderer.h
 +++ b/src/render/rt64_framebuffer_renderer.h
 @@ -4,6 +4,8 @@
@@ -1030,6 +1051,14 @@ index 3add9c3..e143e85 100644
      struct DynamicTextureView {
          const RenderTexture *texture = nullptr;
          uint32_t dstIndex = 0;
+@@ -118,6 +152,7 @@ namespace RT64 {
+             std::set<RenderTarget *> transitionRenderTargetSet;
+             RenderTargetDrawCall renderTargetDrawCall;
+             RenderViewport viewport;
++            float resolutionScaleY = 1.0f; // Android: sizes the hardware decal depth bias.
+         };
+ 
+         std::vector<Framebuffer> framebufferVector;
 diff --git a/src/render/rt64_framebuffer_renderer_call.h b/src/render/rt64_framebuffer_renderer_call.h
 index f2eee70..b64d898 100644
 --- a/src/render/rt64_framebuffer_renderer_call.h
@@ -1043,7 +1072,7 @@ index f2eee70..b64d898 100644
  
              struct {
 diff --git a/src/render/rt64_raster_shader.cpp b/src/render/rt64_raster_shader.cpp
-index 721a01e..badfba3 100644
+index 721a01e..f23dc17 100644
 --- a/src/render/rt64_raster_shader.cpp
 +++ b/src/render/rt64_raster_shader.cpp
 @@ -84,6 +84,17 @@ namespace RT64 {
@@ -1085,7 +1114,7 @@ index 721a01e..badfba3 100644
          creation.zUpd = !copyMode && desc.otherMode.zUpd();
          creation.cvgAdd = (desc.otherMode.cvgDst() == CVG_DST_WRAP) || (desc.otherMode.cvgDst() == CVG_DST_SAVE);
          creation.NoN = desc.flags.NoN;
-@@ -315,6 +329,16 @@ namespace RT64 {
+@@ -315,6 +329,15 @@ namespace RT64 {
          pipelineDesc.depthClipEnabled = !c.NoN;
          pipelineDesc.depthEnabled = c.zCmp || c.zUpd;
          pipelineDesc.depthFunction = c.zCmp ? RenderComparisonFunction::LESS : RenderComparisonFunction::ALWAYS;
@@ -1095,9 +1124,8 @@ index 721a01e..badfba3 100644
 +            // tolerance (a constant part for the depth's precision and a slope part for the
 +            // triangle's depth change across a pixel), capped at the shader's largest one.
 +            pipelineDesc.depthFunction = RenderComparisonFunction::LESS_EQUAL;
-+            pipelineDesc.depthBias = -1024;
-+            pipelineDesc.slopeScaledDepthBias = -2.0f;
-+            pipelineDesc.depthBiasClamp = -0.0005f;
++            // Set per draw, as it depends on the resolution scale (FramebufferRenderer).
++            pipelineDesc.dynamicDepthBiasEnabled = true;
 +        }
          pipelineDesc.depthWriteEnabled = c.zUpd;
          pipelineDesc.depthTargetFormat = RenderFormat::D32_FLOAT;
