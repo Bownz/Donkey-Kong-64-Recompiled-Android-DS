@@ -204,6 +204,8 @@ public class DK64Activity extends SDLActivity
         if (overlay != null) {
             overlay.releaseAll();
         }
+        // Moves from the touch buttons (on either screen) stop, and Z is let go.
+        TouchMoves.get().cancel();
         if (presentation != null && presentation.getBottomScreen() != null) {
             presentation.getBottomScreen().cancel();
         }
