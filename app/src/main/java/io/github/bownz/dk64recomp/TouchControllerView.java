@@ -175,7 +175,7 @@ public final class TouchControllerView extends View {
     private boolean zFromStick = false;
     // A button pressed while that Z is held: Z is let go when it's released (so A gives a
     // crouch jump and Z is gone by the landing). Oranges (C-Right, or the oranges button)
-    // keep Z, to throw several while crouched.
+    // and B keep Z (see keepsZ).
     private Control zEndsWith;
     private long stickDownAt, stickUpAt;
     private boolean lastStickTouchWasTap;
@@ -1115,9 +1115,12 @@ public final class TouchControllerView extends View {
         }
     }
 
-    /** Oranges are thrown with Z held, so they don't end the double-tap Z. */
+    /**
+     * Buttons used with Z held, which don't end the double-tap Z: oranges (thrown while
+     * crouched) and B (the Z + B moves, e.g. Lanky's Orangstand needs Z kept down).
+     */
     private static boolean keepsZ(Control c) {
-        return c.move == TouchMoves.Move.ORANGE || c.n64Bit == TouchInput.N64_C_RIGHT;
+        return c.move == TouchMoves.Move.ORANGE || c.n64Bit == TouchInput.N64_C_RIGHT || c.n64Bit == TouchInput.N64_B;
     }
 
     /** The thumb left the control stick: let go of Z if the double tap was holding it. */
