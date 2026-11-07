@@ -153,11 +153,14 @@ public final class TouchControllerView extends View {
     private boolean dragCamera = true;
     private int cameraPointer = -1;
     private float cameraLastX, cameraLastY;
-    // Floating Control Stick (Input > Touch): the stick moves to wherever the left half is
-    // touched, and back to its place when let go.
+    // Floating stick (a toggle in the layout editor): touching anywhere on the left half brings
+    // a smaller control stick under the thumb. It works whether or not the stick itself is on
+    // screen; when it is, it goes back to its place when let go.
+    private static final String KEY_FLOATING = "floating_stick";
+    private static final float FLOATING_RADIUS = 0.11f;   // in units of the shorter side
     private boolean floatingStick = false;
     private boolean stickFloating = false;
-    private float stickHomeX, stickHomeY;
+    private float stickHomeX, stickHomeY, stickHomeR;
     // Greys out move buttons that can't be used (not bought yet, nothing to use, swimming...).
     private final Paint greyLayer = new Paint();
     private final Paint alphaLayer = new Paint();
@@ -180,9 +183,9 @@ public final class TouchControllerView extends View {
     private float dragLastX, dragLastY;
     private int pinchPointer = -1;
     private float pinchStartDist, pinchStartScale;
-    private final RectF[] toolbar = { new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF() };
-    private static final String[] TOOLBAR_LABELS = { "−", "+", "Remove", "Add", "Reset", "Done" };
-    private static final int TB_SMALLER = 0, TB_BIGGER = 1, TB_REMOVE = 2, TB_ADD = 3, TB_RESET = 4, TB_DONE = 5;
+    private final RectF[] toolbar = { new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF() };
+    private static final String[] TOOLBAR_LABELS = { "−", "+", "Remove", "Add", "Reset", "Done", "Floating stick" };
+    private static final int TB_SMALLER = 0, TB_BIGGER = 1, TB_REMOVE = 2, TB_ADD = 3, TB_RESET = 4, TB_DONE = 5, TB_FLOATING = 6;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable poll = new Runnable() {
@@ -283,6 +286,7 @@ public final class TouchControllerView extends View {
         controls.add(dyn);
 
         loadLayout();
+        floatingStick = getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_FLOATING, false);
         setContentDescription("On-screen N64 controller");
         setHapticFeedbackEnabled(true);
         setVisibility(GONE);
@@ -439,7 +443,6 @@ public final class TouchControllerView extends View {
         if (!dragCamera) {
             cameraPointer = -1;
         }
-        floatingStick = (state & 8) != 0;
         if (analog != analogMode && !editing) {
             releaseAll();
             analogMode = analog;
@@ -597,6 +600,10 @@ public final class TouchControllerView extends View {
                 x += widths[i] + gap;
             }
         }
+        // Third row: the floating stick toggle, as wide as a row.
+        float rowW = widths[3] + widths[4] + widths[5] + gap * 2;
+        float top3 = h * 0.5f - bh / 2f + 2 * (bh + gap);
+        toolbar[TB_FLOATING].set((w - rowW) / 2f, top3, (w + rowW) / 2f, top3 + bh);
     }
 
     // ------------------------------------------------------------------------------
@@ -610,7 +617,8 @@ public final class TouchControllerView extends View {
             canvas.drawColor(Color.argb(150, 0, 0, 0));
         }
         for (Control c : controls) {
-            if (!c.shown) {
+            boolean floatingNow = stickFloating && c.group.equals("stick");
+            if (!c.shown && !floatingNow) {
                 continue;
             }
             if (c.kind == Kind.STICK) {
@@ -770,14 +778,20 @@ public final class TouchControllerView extends View {
             RectF rect = toolbar[i];
             boolean primary = i == TB_DONE;
             boolean disabled = i == TB_REMOVE && (selected == null || !GROUP_NAMES.containsKey(selected));
-            fill.setColor(primary ? Color.rgb(46, 158, 79) : i == TB_REMOVE && !disabled ? Color.rgb(170, 60, 50) : Color.rgb(60, 60, 68));
+            fill.setColor(primary ? Color.rgb(46, 158, 79) : i == TB_REMOVE && !disabled ? Color.rgb(170, 60, 50)
+                : i == TB_FLOATING && floatingStick ? Color.rgb(59, 111, 216) : Color.rgb(60, 60, 68));
             fill.setAlpha(disabled ? 110 : 235);
             canvas.drawRoundRect(rect, radius, radius, fill);
             stroke.setAlpha(255);
             canvas.drawRoundRect(rect, radius, radius, stroke);
             text.setTextSize(rect.height() * 0.45f);
             float baseline = rect.centerY() - (text.descent() + text.ascent()) / 2f;
-            canvas.drawText(TOOLBAR_LABELS[i], rect.centerX(), baseline, text);
+            String label = i == TB_FLOATING ? "Floating stick: " + (floatingStick ? "On" : "Off") : TOOLBAR_LABELS[i];
+            if (i == TB_FLOATING) {
+                text.setTextSize(rect.height() * 0.38f);
+                baseline = rect.centerY() - (text.descent() + text.ascent()) / 2f;
+            }
+            canvas.drawText(label, rect.centerX(), baseline, text);
         }
     }
 
@@ -805,7 +819,7 @@ public final class TouchControllerView extends View {
                 float x = event.getX(index), y = event.getY(index);
                 Control stick = null;
                 for (Control s : sticks) {
-                    if (s.shown && s.pointerId == -1 && s.hit(x, y, s.captureSlack)) {
+                    if (s.shown && s.pointerId == -1 && !(stickFloating && s.group.equals("stick")) && s.hit(x, y, s.captureSlack)) {
                         stick = s;
                         break;
                     }
@@ -816,13 +830,15 @@ public final class TouchControllerView extends View {
                     updateStick(stick, x, y);
                 } else if (hitButton(x, y) != null) {
                     buttonPointers.put(pointerId, new float[] { x, y });
-                } else if (left != null && left.shown && left.pointerId == -1 && x < getWidth() / 2f) {
-                    // Floating Control Stick: the stick comes to the thumb, centred under it.
+                } else if (left != null && left.pointerId == -1 && x < getWidth() / 2f) {
+                    // Floating stick: a smaller stick comes to the thumb, centred under it.
                     stickHomeX = left.cx;
                     stickHomeY = left.cy;
+                    stickHomeR = left.r;
                     stickFloating = true;
                     left.cx = x;
                     left.cy = y;
+                    left.r = FLOATING_RADIUS * unit;
                     left.pointerId = pointerId;
                     updateStick(left, x, y);
                 } else if (dragCamera && cameraPointer == -1) {
@@ -910,6 +926,7 @@ public final class TouchControllerView extends View {
             stickFloating = false;
             s.cx = stickHomeX;
             s.cy = stickHomeY;
+            s.r = stickHomeR;
         }
     }
 
@@ -1141,6 +1158,16 @@ public final class TouchControllerView extends View {
                 break;
             case TB_ADD:
                 showAddMenu();
+                return;
+            case TB_FLOATING:
+                floatingStick = !floatingStick;
+                getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_FLOATING, floatingStick).apply();
+                if (floatingStick) {
+                    android.widget.Toast.makeText(getContext(),
+                        "Touch anywhere on the left half to bring up the stick. Remove the control stick if you only want the floating one.",
+                        android.widget.Toast.LENGTH_LONG).show();
+                }
+                invalidate();
                 return;
             case TB_SMALLER:
             case TB_BIGGER: {
