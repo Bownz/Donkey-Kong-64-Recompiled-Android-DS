@@ -123,7 +123,7 @@ public final class TouchControllerView extends View {
         GROUP_NAMES.put("act_film", "Camera (film)");
         GROUP_NAMES.put("first_person", "First person");
         GROUP_NAMES.put("dynamic", "Dynamic move (Orangstand, Charge, Punch, Cancel)");
-        GROUP_NAMES.put("drawer", "Action drawer (a handle that slides the actions in from the right)");
+        GROUP_NAMES.put("drawer", "Action drawer (a handle that slides oranges, gun, instrument, camera and first person in from the right)");
     }
     private static final Set<String> DEFAULT_ON = new HashSet<>(java.util.Arrays.asList(
         "stick", "dpad", "a", "b", "z", "r", "start", "c", "camera", "menu"));
@@ -312,6 +312,7 @@ public final class TouchControllerView extends View {
         controls.add(dyn);
 
         // The action drawer: the handle on the right edge, and a column of moves beside it.
+        // (The dynamic move isn't in it: it only appears when usable, so it's placed on its own.)
         Control handle = new Control(Kind.BUTTON, "drawer", "", COLOR_NEUTRAL,
             both(AnchorX.RIGHT, 0.045f, AnchorY.TOP, 0.50f, 0.04f), both(AnchorX.RIGHT, 0.045f, AnchorY.TOP, 0.50f, 0.04f),
             this::toggleDrawer, () -> { }, 0, 0, 1f);
@@ -324,13 +325,6 @@ public final class TouchControllerView extends View {
             item.drawerItem = true;
             controls.add(item);
         }
-        Control drawerDyn = new Control(Kind.BUTTON, "drawer_items", "", COLOR_NEUTRAL,
-            both(AnchorX.RIGHT, 0.15f, AnchorY.TOP, 0.14f + drawerMoves.length * 0.125f, 0.05f),
-            both(AnchorX.RIGHT, 0.15f, AnchorY.TOP, 0.14f + drawerMoves.length * 0.125f, 0.05f),
-            () -> moves.performDynamic(null), () -> { }, 0, 0, 1f);
-        drawerDyn.dynamic = true;
-        drawerDyn.drawerItem = true;
-        controls.add(drawerDyn);
 
         loadLayout();
         floatingStick = getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_FLOATING, false);
