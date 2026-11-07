@@ -27,6 +27,9 @@ namespace dk64::android {
     void set_touch_kong_swap(bool enabled);
     void set_touch_feedback(bool enabled);
     void set_bottom_buttons(bool shown);   // the bottom screen's touch buttons
+    // Input > Touch > Drag to Move Camera (android/jni/touch_controller.cpp).
+    void set_drag_camera(bool enabled);
+    bool drag_camera_enabled();
     void set_touch_feedback_strength(int strength);   // 1 light, 2 medium, 3 strong
     // The "Show FPS" setting (the counter is drawn by DK64Activity).
     void set_show_fps(bool enabled);

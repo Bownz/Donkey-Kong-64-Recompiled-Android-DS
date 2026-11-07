@@ -91,6 +91,7 @@ extern "C" void recomp_report_frame(uint8_t* rdram, recomp_context* ctx) {
 
 #include <atomic>
 static std::atomic<bool> button_icons_enabled{ true };
+extern "C" bool dk64_android_touch_overlay_active(); // android/jni/touch_controller.cpp
 extern "C" void dk64_android_set_button_icons(int enabled) {
     button_icons_enabled = enabled != 0;
 }
@@ -224,7 +225,9 @@ extern "C" void recomp_fill_button_icon(uint8_t* rdram, recomp_context* ctx) {
 
     recompinput::GameInput input;
     if (!button_icons_enabled || width <= 0 || height <= 0 || width > 256 || height > 256 || codec < 0 || codec > 3
-            || !game_input_for_sprite(sprite, input) || recompinput::connected_controller_name().empty()) {
+            || !game_input_for_sprite(sprite, input) || recompinput::connected_controller_name().empty()
+            // With the on-screen controller in use, keep the N64 icons: they match its buttons.
+            || dk64_android_touch_overlay_active()) {
         _return<int32_t>(ctx, 0);
         return;
     }
@@ -582,6 +585,36 @@ extern "C" void recomp_get_mouse_inverted_axes(uint8_t* rdram, recomp_context* c
 
     *x_out = (mode == dk64::CameraInvertMode::InvertX || mode == dk64::CameraInvertMode::InvertBoth);
     *y_out = (mode == dk64::CameraInvertMode::InvertY || mode == dk64::CameraInvertMode::InvertBoth);
+}
+
+#if defined(__ANDROID__)
+#include "../../android/jni/gpu_driver.h"
+extern "C" bool dk64_android_take_camera_drag(float* dx, float* dy); // android/jni/touch_controller.cpp
+#endif
+
+// patches/sound_options_patches.c: the touch-drag camera turn since the last frame, in the
+// camera's own units: x is added to its angle (4096 per full turn), y to its distance.
+extern "C" void recomp_touch_camera_get(uint8_t* rdram, recomp_context* ctx) {
+    float* x_out = _arg<0, float*>(rdram, ctx);
+    float* y_out = _arg<1, float*>(rdram, ctx);
+    *x_out = 0.0f;
+    *y_out = 0.0f;
+#if defined(__ANDROID__)
+    float dx = 0.0f, dy = 0.0f;
+    if (!dk64::android::drag_camera_enabled() || !dk64_android_take_camera_drag(&dx, &dy) || recompinput::game_input_disabled()) {
+        _return<int32_t>(ctx, 0);
+        return;
+    }
+    // Half a turn for a 400 dp drag across the screen at the default sensitivity (3), scaled by
+    // the Analog Camera Sensitivity setting. Dragging right turns the view right, as the
+    // right stick does; dragging down moves the camera up and back, as pulling the stick does.
+    const float sensitivity = static_cast<float>(dk64::get_analog_cam_sensitivity()) / 3.0f;
+    *x_out = dx * (2048.0f / 400.0f) * sensitivity;
+    *y_out = dy * 1.0f * sensitivity;
+    _return<int32_t>(ctx, 1);
+#else
+    _return<int32_t>(ctx, 0);
+#endif
 }
 
 extern "C" void recomp_get_right_analog_inputs(uint8_t* rdram, recomp_context* ctx) {

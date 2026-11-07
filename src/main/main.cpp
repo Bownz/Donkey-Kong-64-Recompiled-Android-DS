@@ -997,6 +997,7 @@ int main(int argc, char** argv) {
     REGISTER_FUNC(recomp_report_frame);
     REGISTER_FUNC(recomp_get_tag_target);
     REGISTER_FUNC(recomp_fill_button_icon);
+    REGISTER_FUNC(recomp_touch_camera_get);
     REGISTER_FUNC(recomp_get_mouse_deltas);
     REGISTER_FUNC(recomp_get_inverted_axes);
     REGISTER_FUNC(recomp_get_analog_inverted_axes);

@@ -82,3 +82,4 @@ recomp_report_input_handler = 0x8F000160;
 recomp_report_frame = 0x8F000164;
 recomp_get_tag_target = 0x8F000168;
 recomp_fill_button_icon = 0x8F00016C;
+recomp_touch_camera_get = 0x8F000170;

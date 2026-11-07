@@ -111,6 +111,10 @@ public final class TouchControllerView extends View {
     private boolean active = false;   // Touch controls wanted (setting / no controller)
     private boolean menuOpen = false; // A menu is taking input: hide and let touches through
     private boolean analogMode = false;
+    // Drag to Move Camera (Input > Touch): a finger that lands away from the buttons turns the camera.
+    private boolean dragCamera = true;
+    private int cameraPointer = -1;
+    private float cameraLastX, cameraLastY;
     private float unit = 1f;
 
     // Layout adjustments for the current camera mode, by group.
@@ -236,6 +240,7 @@ public final class TouchControllerView extends View {
             return;
         }
         this.active = active;
+        TouchInput.setOverlayActive(active);
         if (!active) {
             releaseAll();
             TouchInput.release();
@@ -262,6 +267,7 @@ public final class TouchControllerView extends View {
         }
         pressed.clear();
         buttonPointers.clear();
+        cameraPointer = -1;
         for (Control s : sticks) {
             if (s.pointerId != -1 || s.sx != 0f || s.sy != 0f) {
                 s.pointerId = -1;
@@ -301,6 +307,10 @@ public final class TouchControllerView extends View {
         int state = TouchInput.uiState();
         boolean menu = (state & 1) != 0;
         boolean analog = (state & 2) != 0;
+        dragCamera = (state & 4) != 0;
+        if (!dragCamera) {
+            cameraPointer = -1;
+        }
         if (analog != analogMode && !editing) {
             releaseAll();
             analogMode = analog;
@@ -565,6 +575,11 @@ public final class TouchControllerView extends View {
                     updateStick(stick, x, y);
                 } else if (hitButton(x, y) != null) {
                     buttonPointers.put(pointerId, new float[] { x, y });
+                } else if (dragCamera && cameraPointer == -1) {
+                    // Away from the buttons: this finger turns the camera (Drag to Move Camera).
+                    cameraPointer = pointerId;
+                    cameraLastX = x;
+                    cameraLastY = y;
                 } else if (action == MotionEvent.ACTION_DOWN) {
                     return false;
                 }
@@ -577,6 +592,12 @@ public final class TouchControllerView extends View {
                     Control stick = stickFor(id);
                     if (stick != null) {
                         updateStick(stick, event.getX(i), event.getY(i));
+                    } else if (id == cameraPointer) {
+                        float x = event.getX(i), y = event.getY(i);
+                        float density = getResources().getDisplayMetrics().density;
+                        TouchInput.addCameraDrag((x - cameraLastX) / density, (y - cameraLastY) / density);
+                        cameraLastX = x;
+                        cameraLastY = y;
                     } else {
                         float[] pos = buttonPointers.get(id);
                         if (pos != null) {
@@ -592,6 +613,7 @@ public final class TouchControllerView extends View {
             case MotionEvent.ACTION_CANCEL: {
                 if (action == MotionEvent.ACTION_CANCEL || action == MotionEvent.ACTION_UP) {
                     buttonPointers.clear();
+                    cameraPointer = -1;
                     for (Control s : sticks) {
                         if (s.pointerId != -1) {
                             s.pointerId = -1;
@@ -603,6 +625,8 @@ public final class TouchControllerView extends View {
                     if (stick != null) {
                         stick.pointerId = -1;
                         setStick(stick, 0f, 0f);
+                    } else if (pointerId == cameraPointer) {
+                        cameraPointer = -1;
                     } else {
                         buttonPointers.remove(pointerId);
                     }

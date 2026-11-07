@@ -38,6 +38,7 @@ static std::atomic<bool> dk64_android_analog_camera{false};
 
 // Bit 1: a menu (the launcher, the menu bar, settings) is taking input, so the touch
 // buttons are hidden and touches go to it. Bit 2: the Analog Camera is selected.
+// Bit 4: Drag to Move Camera is on.
 extern "C" JNIEXPORT jint JNICALL
 Java_io_github_bownz_dk64recomp_TouchInput_nativeUiState(JNIEnv*, jclass) {
     jint bits = 0;
@@ -46,6 +47,9 @@ Java_io_github_bownz_dk64recomp_TouchInput_nativeUiState(JNIEnv*, jclass) {
     }
     if (dk64_android_analog_camera.load()) {
         bits |= 2;
+    }
+    if (dk64::android::drag_camera_enabled()) {
+        bits |= 4;
     }
     return bits;
 }
@@ -478,6 +482,29 @@ static void add_dual_screen_options(recomp::config::Config &config) {
             }
         });
 
+    // Dragging a finger on the free part of the screen turns the camera (touch controls only).
+    static const std::string drag_camera_option = "android_drag_camera";
+    static EnumOptionVector drag_camera_options = {
+        {0u, "Off", "Off"},
+        {1u, "On", "On"},
+    };
+    config.add_enum_option(
+        drag_camera_option,
+        "Drag to Move Camera",
+        "With the touch controls on screen, drag a finger anywhere away from the buttons to turn "
+        "the camera left and right, or up and down to raise and lower it. Works with every camera "
+        "type; the speed follows Analog Camera Sensitivity.",
+        drag_camera_options,
+        1u
+    );
+    config.add_option_change_callback(drag_camera_option,
+        [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
+            dk64::android::set_drag_camera(std::get<uint32_t>(cur) == 1u);
+            if (context == recomp::config::OptionChangeContext::Permanent) {
+                recompui::config::get_config("dual_screen").save_config();
+            }
+        });
+
     // A little vibration when a touch button is pressed, and how strong it is.
     static const std::string touch_feedback_option = "android_touch_feedback";
     static EnumOptionVector touch_feedback_options = {
@@ -755,6 +782,7 @@ void dk64::init_config() {
             edit_touch,
             option(d, "android_bottom_screen"),
             option(d, "android_bottom_buttons"),
+            option(d, "android_drag_camera"),
             option(d, "android_touch_kong_swap"),
             option(d, "android_touch_feedback"),
             option(d, "android_touch_feedback_strength"),
