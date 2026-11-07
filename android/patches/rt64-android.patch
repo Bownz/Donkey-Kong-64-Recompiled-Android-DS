@@ -701,7 +701,7 @@ index 7a8c13b..bd198be 100644
          VI lastScreenVI;
          uint64_t lastScreenHash;
 diff --git a/src/hle/rt64_workload_queue.cpp b/src/hle/rt64_workload_queue.cpp
-index 5a331aa..7af84a3 100644
+index 5a331aa..df80119 100644
 --- a/src/hle/rt64_workload_queue.cpp
 +++ b/src/hle/rt64_workload_queue.cpp
 @@ -11,6 +11,7 @@
@@ -712,21 +712,26 @@ index 5a331aa..7af84a3 100644
      // WorkloadQueue
  
      WorkloadQueue::WorkloadQueue() {
-@@ -188,7 +189,13 @@ namespace RT64 {
+@@ -188,7 +189,18 @@ namespace RT64 {
          switch (resolutionMode) {
          case UserConfiguration::Resolution::WindowIntegerScale:
              if (ext.sharedResources->swapChainHeight > 0) {
 +#           if defined(__ANDROID__)
 +                // Android: exactly the screen's height (1080 is 4.5x the N64's 240), not the
-+                // next whole multiple (5x, 1200 lines: about 23% more pixels than the screen).
-+                resolutionMultiplier = std::max(float(ext.sharedResources->swapChainHeight) / float(referenceHeight), 1.0f);
++                // next whole multiple (5x, 1200 lines: about 23% more pixels than the screen),
++                // and at most 1080 lines. Big screens (a Galaxy Z Fold's inner screen is ~1968
++                // lines tall) would otherwise draw about twice the pixels of a 1080p handheld,
++                // more than phone GPUs keep up with at 60 FPS; 1080 still looks sharp there.
++                static constexpr float maxAutoHeight = 1080.0f;
++                const float autoHeight = std::min(float(ext.sharedResources->swapChainHeight), maxAutoHeight);
++                resolutionMultiplier = std::max(autoHeight / float(referenceHeight), 1.0f);
 +#           else
                  resolutionMultiplier = std::max(float((ext.sharedResources->swapChainHeight + referenceHeight - 1) / referenceHeight), 1.0f);
 +#           endif
              }
              else {
                  resolutionMultiplier = 1.0f;
-@@ -301,6 +308,10 @@ namespace RT64 {
+@@ -301,6 +313,10 @@ namespace RT64 {
          const bool usingMSAA = (targetManager.multisampling.sampleCount > 1);
  
          rendererCPUProfiler.start();
@@ -737,7 +742,7 @@ index 5a331aa..7af84a3 100644
  
          const bool aspectRatioAdjustment = (abs(workloadConfig.aspectRatioScale - 1.0f) > 1e-6f);
          const bool processProjections = aspectRatioAdjustment || prevFrame.matched|| curFrame.isDebuggerCameraEnabled(*this);
-@@ -484,6 +495,10 @@ namespace RT64 {
+@@ -484,6 +500,10 @@ namespace RT64 {
  
                      if (colorTarget != nullptr) {
                          rtWidth = std::max(rtWidth, colorTarget->width);
@@ -748,7 +753,7 @@ index 5a331aa..7af84a3 100644
                          rtHeight = std::max(rtHeight, colorTarget->height);
                          chosenRt = colorTarget;
                      }
-@@ -840,8 +855,15 @@ namespace RT64 {
+@@ -840,8 +860,15 @@ namespace RT64 {
              ext.workloadGraphicsWorker->commandList->writeTimestamp(queryPool.get(), 1);
              ext.workloadGraphicsWorker->commandList->end();
              framebufferRenderer->waitForUploaders();
@@ -764,7 +769,7 @@ index 5a331aa..7af84a3 100644
              workerMutex.unlock();
  
              // Update the GPU profiler with the results from the timestamps of the frame.
-@@ -880,6 +902,7 @@ namespace RT64 {
+@@ -880,6 +907,7 @@ namespace RT64 {
  
      void WorkloadQueue::renderThreadLoop() {
          Thread::setCurrentThreadName("RT64 Workload");
@@ -772,7 +777,7 @@ index 5a331aa..7af84a3 100644
  
          WorkloadConfiguration workloadConfig;
          int64_t logicalTicks = 0;
-@@ -1070,7 +1093,19 @@ namespace RT64 {
+@@ -1070,7 +1098,19 @@ namespace RT64 {
                          const int64_t currentTimeMicro = workloadTimer.elapsedMicroseconds() - setupTimeMicro;
                          const int64_t expectedTimeMicro = frame * maxTimePerFrameMicro;
                          const int64_t measuredFrameMicro = renderTimeTotalMicro / framesRendered;
