@@ -72,6 +72,10 @@ public final class TouchControllerView extends View {
         // Resolved on layout, in pixels.
         float cx, cy, r;
         boolean shown;
+        // The drawer: its handle, and the buttons that slide in (positions before sliding).
+        boolean drawerHandle, drawerItem;
+        float baseCx;
+        boolean layoutShown;
 
         Control(Kind kind, String group, String label, int color, Place normal, Place analog,
                 Runnable onPress, Runnable onRelease, int axisX, int axisY, float captureSlack) {
@@ -119,6 +123,7 @@ public final class TouchControllerView extends View {
         GROUP_NAMES.put("act_film", "Camera (film)");
         GROUP_NAMES.put("first_person", "First person");
         GROUP_NAMES.put("dynamic", "Dynamic move (Orangstand, Charge, Punch, Cancel)");
+        GROUP_NAMES.put("drawer", "Action drawer (a handle that slides the actions in from the right)");
     }
     private static final Set<String> DEFAULT_ON = new HashSet<>(java.util.Arrays.asList(
         "stick", "dpad", "a", "b", "z", "r", "start", "c", "camera", "menu"));
@@ -179,6 +184,13 @@ public final class TouchControllerView extends View {
     private final Map<String, Adjust> adjust = new HashMap<>();
     // Groups shown in the current camera mode (added or removed in the editor).
     private final Set<String> on = new HashSet<>();
+
+    // The action drawer: a handle (group "drawer", placed anywhere) that slides a column of
+    // action buttons (group "drawer_items", placed separately) in from the right edge.
+    private static final long DRAWER_MS = 180;
+    private boolean drawerOpen = false;
+    private float drawerProgress = 0f;   // 0 closed .. 1 open
+    private long drawerAnimAt;
 
     // The moves (action buttons, first person, dynamic), shared with the bottom screen.
     private final TouchMoves moves = TouchMoves.get();
@@ -293,6 +305,27 @@ public final class TouchControllerView extends View {
             () -> moves.performDynamic(null), () -> { }, 0, 0, 1f);
         dyn.dynamic = true;
         controls.add(dyn);
+
+        // The action drawer: the handle on the right edge, and a column of moves beside it.
+        Control handle = new Control(Kind.BUTTON, "drawer", "", COLOR_NEUTRAL,
+            both(AnchorX.RIGHT, 0.045f, AnchorY.TOP, 0.50f, 0.04f), both(AnchorX.RIGHT, 0.045f, AnchorY.TOP, 0.50f, 0.04f),
+            this::toggleDrawer, () -> { }, 0, 0, 1f);
+        handle.drawerHandle = true;
+        controls.add(handle);
+        TouchMoves.Move[] drawerMoves = { TouchMoves.Move.ORANGE, TouchMoves.Move.WEAPON, TouchMoves.Move.INSTRUMENT,
+            TouchMoves.Move.CAMERA, TouchMoves.Move.FIRST_PERSON };
+        for (int i = 0; i < drawerMoves.length; i++) {
+            Control item = moveButton("drawer_items", drawerMoves[i], both(AnchorX.RIGHT, 0.15f, AnchorY.TOP, 0.14f + i * 0.125f, 0.05f));
+            item.drawerItem = true;
+            controls.add(item);
+        }
+        Control drawerDyn = new Control(Kind.BUTTON, "drawer_items", "", COLOR_NEUTRAL,
+            both(AnchorX.RIGHT, 0.15f, AnchorY.TOP, 0.14f + drawerMoves.length * 0.125f, 0.05f),
+            both(AnchorX.RIGHT, 0.15f, AnchorY.TOP, 0.14f + drawerMoves.length * 0.125f, 0.05f),
+            () -> moves.performDynamic(null), () -> { }, 0, 0, 1f);
+        drawerDyn.dynamic = true;
+        drawerDyn.drawerItem = true;
+        controls.add(drawerDyn);
 
         loadLayout();
         floatingStick = getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_FLOATING, false);
@@ -432,9 +465,51 @@ public final class TouchControllerView extends View {
         }
     }
 
+    /** A group is shown; the drawer's buttons go with its handle. */
+    private boolean groupOn(String group) {
+        return on.contains(group.equals("drawer_items") ? "drawer" : group);
+    }
+
+    private void toggleDrawer() {
+        drawerOpen = !drawerOpen;
+        drawerAnimAt = android.os.SystemClock.uptimeMillis();
+        invalidate();
+    }
+
+    /**
+     * Slides the drawer's buttons: from just off the right edge (closed) to where they were
+     * placed (open). Hidden while closed; touchable once mostly open.
+     */
+    private void applyDrawer() {
+        float target = (drawerOpen || editing) ? 1f : 0f;
+        if (drawerProgress != target) {
+            long now = android.os.SystemClock.uptimeMillis();
+            float step = Math.max(0f, now - drawerAnimAt) / DRAWER_MS;
+            drawerAnimAt = now;
+            drawerProgress = target > drawerProgress ? Math.min(target, drawerProgress + step) : Math.max(target, drawerProgress - step);
+        }
+        float minLeft = Float.MAX_VALUE, maxR = 0f;
+        for (Control c : controls) {
+            if (c.drawerItem && c.layoutShown) {
+                minLeft = Math.min(minLeft, c.baseCx - c.r);
+                maxR = Math.max(maxR, c.r);
+            }
+        }
+        float slide = minLeft == Float.MAX_VALUE ? 0f : Math.max(0f, getWidth() - minLeft + maxR);
+        // Eased, so it slows as it settles.
+        float p = 1f - (1f - drawerProgress) * (1f - drawerProgress);
+        for (Control c : controls) {
+            if (!c.drawerItem) {
+                continue;
+            }
+            c.cx = c.baseCx + (1f - p) * slide;
+            c.shown = c.layoutShown && drawerProgress > 0f;
+        }
+    }
+
     private boolean anyMoveGroupOn() {
         for (Control c : controls) {
-            if ((c.move != null || c.dynamic) && on.contains(c.group)) {
+            if ((c.move != null || c.dynamic) && groupOn(c.group)) {
                 return true;
             }
         }
@@ -572,7 +647,7 @@ public final class TouchControllerView extends View {
         Map<String, float[]> centres = new HashMap<>(); // group -> sum x, sum y, count
         for (Control c : controls) {
             Place p = analogMode ? c.analog : c.normal;
-            c.shown = p != null && on.contains(c.group);
+            c.shown = p != null && groupOn(c.group);
             if (p == null) {
                 continue;
             }
@@ -605,6 +680,11 @@ public final class TouchControllerView extends View {
             c.cy = gy + (c.cy - gy) * a.scale + a.dy * h;
             c.r *= a.scale;
         }
+        for (Control c : controls) {
+            c.baseCx = c.cx;
+            c.layoutShown = c.shown;
+        }
+        applyDrawer();
         stroke.setStrokeWidth(Math.max(2f, unit * 0.006f));
 
         // Editor toolbar, in the middle of the screen: − + Remove / Add Reset Done.
@@ -633,6 +713,11 @@ public final class TouchControllerView extends View {
 
     @Override
     protected void onDraw(Canvas canvas) {
+        float before = drawerProgress;
+        applyDrawer();
+        if (drawerProgress != ((drawerOpen || editing) ? 1f : 0f) || before != drawerProgress) {
+            postInvalidateOnAnimation();
+        }
         int baseAlpha = Math.round(255 * (editing ? Math.max(opacity, 0.8f) : opacity));
         if (editing) {
             canvas.drawColor(Color.argb(150, 0, 0, 0));
@@ -645,10 +730,12 @@ public final class TouchControllerView extends View {
             if (c.kind == Kind.STICK) {
                 drawStick(canvas, c, baseAlpha);
             } else if (c.move != null || c.dynamic) {
-                if (hiddenNow(c)) {
+                if (c.dynamic && !editing && !dynamicUsable()) {
                     continue;
                 }
                 drawMoveButton(canvas, c, baseAlpha);
+            } else if (c.drawerHandle) {
+                drawDrawerHandle(canvas, c, baseAlpha);
             } else {
                 boolean down = pressed.contains(c);
                 fill.setColor(c.color);
@@ -675,6 +762,21 @@ public final class TouchControllerView extends View {
         if (editing) {
             drawEditor(canvas);
         }
+    }
+
+    /** The drawer's handle: a tab with an arrow (◀ to open, ▶ to close). */
+    private void drawDrawerHandle(Canvas canvas, Control c, int baseAlpha) {
+        boolean open = drawerOpen || editing;
+        fill.setColor(Color.rgb(150, 100, 55));
+        fill.setAlpha(pressed.contains(c) ? Math.min(255, baseAlpha + 90) : Math.max(baseAlpha / 2, 80));
+        RectF tab = new RectF(c.cx - c.r * 0.7f, c.cy - c.r * 1.3f, c.cx + c.r * 0.7f, c.cy + c.r * 1.3f);
+        canvas.drawRoundRect(tab, c.r * 0.5f, c.r * 0.5f, fill);
+        stroke.setAlpha(baseAlpha);
+        canvas.drawRoundRect(tab, c.r * 0.5f, c.r * 0.5f, stroke);
+        text.setAlpha(Math.min(255, baseAlpha + 60));
+        text.setTextSize(c.r * 0.9f);
+        float baseline = c.cy - (text.descent() + text.ascent()) / 2f;
+        canvas.drawText(open ? "▶" : "◀", c.cx, baseline, text);
     }
 
     /** A move button: the bottom screen's icon on a round button, dimmed when it can't be used. */
@@ -791,14 +893,15 @@ public final class TouchControllerView extends View {
         canvas.drawText(analogMode ? "Touch layout (Analog Camera)" : "Touch layout", getWidth() / 2f, y, text);
         text.setTextSize(unit * 0.032f);
         canvas.drawText(selected == null ? "Tap a control to select it, drag to move, pinch to resize · Add for more"
-                : (GROUP_NAMES.containsKey(selected) ? GROUP_NAMES.get(selected) + ": " : "")
+                : (selected.equals("drawer_items") ? "Action drawer buttons: " : selected.equals("drawer") ? "Action drawer handle: "
+                    : GROUP_NAMES.containsKey(selected) ? GROUP_NAMES.get(selected) + ": " : "")
                     + "drag to move · pinch or − / + to resize · Remove to hide", getWidth() / 2f, y + unit * 0.05f, text);
 
         float radius = unit * 0.02f;
         for (int i = 0; i < toolbar.length; i++) {
             RectF rect = toolbar[i];
             boolean primary = i == TB_DONE;
-            boolean disabled = i == TB_REMOVE && (selected == null || !GROUP_NAMES.containsKey(selected));
+            boolean disabled = i == TB_REMOVE && (selected == null || !(GROUP_NAMES.containsKey(selected) || selected.equals("drawer_items")));
             fill.setColor(primary ? Color.rgb(46, 158, 79) : i == TB_REMOVE && !disabled ? Color.rgb(170, 60, 50)
                 : (i == TB_FLOATING && floatingStick) || (i == TB_DOUBLE_TAP && doubleTapZ) ? Color.rgb(59, 111, 216) : Color.rgb(60, 60, 68));
             fill.setAlpha(disabled ? 110 : 235);
@@ -1011,6 +1114,9 @@ public final class TouchControllerView extends View {
      * for it to do (outside the layout editor).
      */
     private boolean hiddenNow(Control c) {
+        if (c.drawerItem && !editing && drawerProgress < 0.6f) {
+            return true;   // the drawer is closed or still sliding
+        }
         return c.dynamic && !editing && !dynamicUsable();
     }
 
@@ -1217,6 +1323,9 @@ public final class TouchControllerView extends View {
         Haptics.tap(this);
         switch (i) {
             case TB_REMOVE:
+                if ("drawer_items".equals(selected)) {
+                    selected = "drawer";   // the drawer's buttons go with its handle
+                }
                 if (selected != null && GROUP_NAMES.containsKey(selected)) {
                     on.remove(selected);
                     selected = null;
