@@ -169,6 +169,17 @@ bool dk64::android::drag_camera_enabled() {
     return drag_camera.load(std::memory_order_relaxed);
 }
 
+// Input > Touch > Floating Control Stick.
+static std::atomic<bool> floating_stick{false};
+
+void dk64::android::set_floating_stick(bool enabled) {
+    floating_stick.store(enabled, std::memory_order_relaxed);
+}
+
+bool dk64::android::floating_stick_enabled() {
+    return floating_stick.load(std::memory_order_relaxed);
+}
+
 extern "C" {
 
 // Finger movement (in dp) on the free part of the screen, not yet taken by the game's camera.

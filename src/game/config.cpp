@@ -38,7 +38,7 @@ static std::atomic<bool> dk64_android_analog_camera{false};
 
 // Bit 1: a menu (the launcher, the menu bar, settings) is taking input, so the touch
 // buttons are hidden and touches go to it. Bit 2: the Analog Camera is selected.
-// Bit 4: Drag to Move Camera is on.
+// Bit 4: Drag to Move Camera is on. Bit 8: Floating Control Stick is on.
 extern "C" JNIEXPORT jint JNICALL
 Java_io_github_bownz_dk64recomp_TouchInput_nativeUiState(JNIEnv*, jclass) {
     jint bits = 0;
@@ -50,6 +50,9 @@ Java_io_github_bownz_dk64recomp_TouchInput_nativeUiState(JNIEnv*, jclass) {
     }
     if (dk64::android::drag_camera_enabled()) {
         bits |= 4;
+    }
+    if (dk64::android::floating_stick_enabled()) {
+        bits |= 8;
     }
     return bits;
 }
@@ -505,6 +508,29 @@ static void add_dual_screen_options(recomp::config::Config &config) {
             }
         });
 
+    // The control stick appears wherever the left half of the screen is touched.
+    static const std::string floating_stick_option = "android_floating_stick";
+    static EnumOptionVector floating_stick_options = {
+        {0u, "Off", "Off"},
+        {1u, "On", "On"},
+    };
+    config.add_enum_option(
+        floating_stick_option,
+        "Floating Control Stick",
+        "With the touch controls on screen, touch anywhere on the left half of the screen (away "
+        "from the buttons there) and the control stick appears under your thumb. Drag the camera "
+        "on the right half.",
+        floating_stick_options,
+        0u
+    );
+    config.add_option_change_callback(floating_stick_option,
+        [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
+            dk64::android::set_floating_stick(std::get<uint32_t>(cur) == 1u);
+            if (context == recomp::config::OptionChangeContext::Permanent) {
+                recompui::config::get_config("dual_screen").save_config();
+            }
+        });
+
     // A little vibration when a touch button is pressed, and how strong it is.
     static const std::string touch_feedback_option = "android_touch_feedback";
     static EnumOptionVector touch_feedback_options = {
@@ -783,6 +809,7 @@ void dk64::init_config() {
             option(d, "android_bottom_screen"),
             option(d, "android_bottom_buttons"),
             option(d, "android_drag_camera"),
+            option(d, "android_floating_stick"),
             option(d, "android_touch_kong_swap"),
             option(d, "android_touch_feedback"),
             option(d, "android_touch_feedback_strength"),

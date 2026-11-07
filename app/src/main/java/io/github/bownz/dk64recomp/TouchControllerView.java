@@ -153,6 +153,14 @@ public final class TouchControllerView extends View {
     private boolean dragCamera = true;
     private int cameraPointer = -1;
     private float cameraLastX, cameraLastY;
+    // Floating Control Stick (Input > Touch): the stick moves to wherever the left half is
+    // touched, and back to its place when let go.
+    private boolean floatingStick = false;
+    private boolean stickFloating = false;
+    private float stickHomeX, stickHomeY;
+    // Greys out move buttons that can't be used (not bought yet, nothing to use, swimming...).
+    private final Paint greyLayer = new Paint();
+    private final Paint alphaLayer = new Paint();
     private float unit = 1f;
 
     // Layout adjustments for the current camera mode, by group.
@@ -190,6 +198,9 @@ public final class TouchControllerView extends View {
     public TouchControllerView(Context context) {
         super(context);
 
+        android.graphics.ColorMatrix grey = new android.graphics.ColorMatrix();
+        grey.setSaturation(0f);
+        greyLayer.setColorFilter(new android.graphics.ColorMatrixColorFilter(grey));
         stroke.setStyle(Paint.Style.STROKE);
         stroke.setColor(Color.WHITE);
         text.setColor(Color.WHITE);
@@ -359,6 +370,7 @@ public final class TouchControllerView extends View {
                 s.pointerId = -1;
                 setStick(s, 0f, 0f);
             }
+            stickReleased(s);
         }
         invalidate();
     }
@@ -417,8 +429,8 @@ public final class TouchControllerView extends View {
     }
 
     private void pollUiState() {
-        if (usingMoves) {
-            RomIcons.ensureLoaded(this::postInvalidate);   // the move buttons' icons
+        if (usingMoves && moves.state.inGame()) {
+            RomIcons.ensureLoaded(this::postInvalidate);   // the move buttons' icons (from the ROM)
         }
         int state = TouchInput.uiState();
         boolean menu = (state & 1) != 0;
@@ -427,6 +439,7 @@ public final class TouchControllerView extends View {
         if (!dragCamera) {
             cameraPointer = -1;
         }
+        floatingStick = (state & 8) != 0;
         if (analog != analogMode && !editing) {
             releaseAll();
             analogMode = analog;
@@ -603,6 +616,9 @@ public final class TouchControllerView extends View {
             if (c.kind == Kind.STICK) {
                 drawStick(canvas, c, baseAlpha);
             } else if (c.move != null || c.dynamic) {
+                if (hiddenNow(c)) {
+                    continue;
+                }
                 drawMoveButton(canvas, c, baseAlpha);
             } else {
                 boolean down = pressed.contains(c);
@@ -655,15 +671,18 @@ public final class TouchControllerView extends View {
             usable = editing || (moves.owned(c.move, -1) && !moves.greyed(c.move));
         }
         int alpha = usable ? baseAlpha : baseAlpha / 3;
-        boolean down = pressed.contains(c) || lit;
-        fill.setColor(c.dynamic && dyn == TouchMoves.Dynamic.CANCEL ? Color.rgb(200, 60, 45)
+        boolean down = usable && (pressed.contains(c) || lit);
+        fill.setColor(!usable ? Color.rgb(90, 90, 90)
+            : c.dynamic && dyn == TouchMoves.Dynamic.CANCEL ? Color.rgb(200, 60, 45)
             : c.dynamic ? Color.rgb(200, 130, 50) : Color.rgb(150, 100, 55));
         fill.setAlpha(down ? Math.min(255, alpha + 90) : alpha / 2);
         canvas.drawCircle(c.cx, c.cy, c.r, fill);
         stroke.setAlpha(alpha);
         canvas.drawCircle(c.cx, c.cy, c.r, stroke);
 
-        int saved = canvas.saveLayerAlpha(c.cx - c.r, c.cy - c.r, c.cx + c.r, c.cy + c.r, Math.min(255, alpha + 60));
+        Paint layer = usable ? alphaLayer : greyLayer;
+        layer.setAlpha(usable ? Math.min(255, alpha + 60) : Math.min(255, baseAlpha / 2 + 30));
+        int saved = canvas.saveLayer(c.cx - c.r, c.cy - c.r, c.cx + c.r, c.cy + c.r, layer);
         float iconY = label != null ? c.cy - c.r * 0.12f : c.cy, iconR = c.r * (label != null ? 0.5f : 0.62f);
         if (c.dynamic) {
             if (dyn == TouchMoves.Dynamic.ORANGSTAND) {
@@ -791,11 +810,21 @@ public final class TouchControllerView extends View {
                         break;
                     }
                 }
+                Control left = floatingStick ? leftStick() : null;
                 if (stick != null) {
                     stick.pointerId = pointerId;
                     updateStick(stick, x, y);
                 } else if (hitButton(x, y) != null) {
                     buttonPointers.put(pointerId, new float[] { x, y });
+                } else if (left != null && left.shown && left.pointerId == -1 && x < getWidth() / 2f) {
+                    // Floating Control Stick: the stick comes to the thumb, centred under it.
+                    stickHomeX = left.cx;
+                    stickHomeY = left.cy;
+                    stickFloating = true;
+                    left.cx = x;
+                    left.cy = y;
+                    left.pointerId = pointerId;
+                    updateStick(left, x, y);
                 } else if (dragCamera && cameraPointer == -1) {
                     // Away from the buttons: this finger turns the camera (Drag to Move Camera).
                     cameraPointer = pointerId;
@@ -839,6 +868,7 @@ public final class TouchControllerView extends View {
                         if (s.pointerId != -1) {
                             s.pointerId = -1;
                             setStick(s, 0f, 0f);
+                            stickReleased(s);
                         }
                     }
                 } else {
@@ -846,6 +876,7 @@ public final class TouchControllerView extends View {
                     if (stick != null) {
                         stick.pointerId = -1;
                         setStick(stick, 0f, 0f);
+                        stickReleased(stick);
                     } else if (pointerId == cameraPointer) {
                         cameraPointer = -1;
                     } else {
@@ -863,6 +894,25 @@ public final class TouchControllerView extends View {
         return true;
     }
 
+    /** The left (control) stick. */
+    private Control leftStick() {
+        for (Control s : sticks) {
+            if (s.group.equals("stick")) {
+                return s;
+            }
+        }
+        return null;
+    }
+
+    /** Puts a floating stick back in its place once the thumb lifts. */
+    private void stickReleased(Control s) {
+        if (stickFloating && s.group.equals("stick")) {
+            stickFloating = false;
+            s.cx = stickHomeX;
+            s.cy = stickHomeY;
+        }
+    }
+
     private Control stickFor(int pointerId) {
         for (Control s : sticks) {
             if (s.pointerId == pointerId) {
@@ -872,9 +922,27 @@ public final class TouchControllerView extends View {
         return null;
     }
 
+    /**
+     * Shown but not drawn or touchable right now: the dynamic button while there's nothing
+     * for it to do (outside the layout editor).
+     */
+    private boolean hiddenNow(Control c) {
+        return c.dynamic && !editing && !dynamicUsable();
+    }
+
+    private boolean dynamicUsable() {
+        switch (moves.dynamic()) {
+            case CANCEL: return !moves.state.paused;
+            case ORANGSTAND: return !moves.state.paused && (moves.orangstand || moves.orangstandBusy
+                || (!moves.state.swimming && !moves.state.climbing && !moves.state.gunOut));
+            case ZB_MOVE: return moves.zbBusy || moves.zbMoveUsable();
+            default: return false;
+        }
+    }
+
     private Control hitButton(float x, float y) {
         for (Control c : controls) {
-            if (c.shown && c.kind == Kind.BUTTON && c.hit(x, y, BUTTON_SLACK)) {
+            if (c.shown && c.kind == Kind.BUTTON && !hiddenNow(c) && c.hit(x, y, BUTTON_SLACK)) {
                 return c;
             }
         }
