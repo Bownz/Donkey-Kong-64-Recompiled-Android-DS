@@ -214,9 +214,10 @@ public final class TouchControllerView extends View {
     private float dragLastX, dragLastY;
     private int pinchPointer = -1;
     private float pinchStartDist, pinchStartScale;
-    private final RectF[] toolbar = { new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF() };
-    private static final String[] TOOLBAR_LABELS = { "−", "+", "Remove", "Add", "Reset", "Done", "Floating stick", "Double-tap stick: Z" };
-    private static final int TB_SMALLER = 0, TB_BIGGER = 1, TB_REMOVE = 2, TB_ADD = 3, TB_RESET = 4, TB_DONE = 5, TB_FLOATING = 6, TB_DOUBLE_TAP = 7;
+    private final RectF[] toolbar = { new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF() };
+    private static final String[] TOOLBAR_LABELS = { "−", "+", "Remove", "Add", "Reset", "Done", "Floating stick", "Double-tap stick: Z", "Save", "Load" };
+    private static final int TB_SMALLER = 0, TB_BIGGER = 1, TB_REMOVE = 2, TB_ADD = 3, TB_RESET = 4, TB_DONE = 5, TB_FLOATING = 6, TB_DOUBLE_TAP = 7,
+        TB_SAVE = 8, TB_LOAD = 9;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable poll = new Runnable() {
@@ -594,10 +595,54 @@ public final class TouchControllerView extends View {
         return analogMode ? "analog." : "normal.";
     }
 
+    // ---- Layouts per screen shape, and saved layouts ----
+    //
+    // Each screen shape (landscape, portrait, square - e.g. a foldable opened) keeps its own
+    // layout, per camera mode, as one string "group=dx,dy,scale,on;..." under
+    // "layout.<shape>.<mode>". A shape with none yet starts from the older per-group keys
+    // ("<mode>.<group>", "<mode>.on.<group>"), i.e. the layout from before shapes existed.
+    // Saved layouts ("saved.<name>") use the same string and load onto any shape.
+
+    private String loadedShape = "";
+
+    /** The screen's shape, from its aspect ratio. */
+    private String shape() {
+        int w = getWidth(), h = getHeight();
+        if (w <= 0 || h <= 0) {
+            android.util.DisplayMetrics m = getResources().getDisplayMetrics();
+            w = m.widthPixels;
+            h = m.heightPixels;
+        }
+        float ratio = h > 0 ? (float) w / h : 1.6f;
+        if (ratio >= 1.45f) {
+            return "landscape";
+        }
+        return ratio < 0.9f ? "portrait" : "square";
+    }
+
+    private static String shapeName(String shape) {
+        switch (shape) {
+            case "portrait": return "Portrait";
+            case "square": return "Square screen";
+            default: return "Landscape";
+        }
+    }
+
+    private String layoutKey() {
+        return "layout." + loadedShape + "." + (analogMode ? "analog" : "normal");
+    }
+
     private void loadLayout() {
+        loadedShape = shape();
+        SharedPreferences prefs = getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        String layout = prefs.getString(layoutKey(), null);
+        if (layout != null) {
+            applyLayoutString(layout);
+            return;
+        }
+        // Not set up on this shape yet: the layout from before shapes were kept apart.
         adjust.clear();
         on.clear();
-        SharedPreferences prefs = getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         for (Control c : controls) {
             String shown = prefs.getString(prefix() + "on." + c.group, null);
             if (shown != null ? shown.equals("1") : DEFAULT_ON.contains(c.group)) {
@@ -623,27 +668,143 @@ public final class TouchControllerView extends View {
     }
 
     private void saveLayout() {
-        SharedPreferences.Editor editor = getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit();
+        getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(layoutKey(), layoutString()).apply();
+        updateMovesUse();
+    }
+
+    /** The current layout as "group=dx,dy,scale,on;...". */
+    private String layoutString() {
+        StringBuilder b = new StringBuilder();
         for (Map.Entry<String, Adjust> e : adjust.entrySet()) {
             Adjust a = e.getValue();
-            String key = prefix() + e.getKey();
-            if (a.dx == 0f && a.dy == 0f && a.scale == 1f) {
-                editor.remove(key);
-            } else {
-                editor.putString(key, a.dx + "," + a.dy + "," + a.scale);
+            b.append(e.getKey()).append('=').append(a.dx).append(',').append(a.dy).append(',').append(a.scale)
+                .append(',').append(on.contains(e.getKey()) ? 1 : 0).append(';');
+        }
+        return b.toString();
+    }
+
+    /** Applies a layout string; groups it doesn't mention get their defaults. */
+    private void applyLayoutString(String layout) {
+        adjust.clear();
+        on.clear();
+        Set<String> mentioned = new HashSet<>();
+        for (String entry : layout.split(";")) {
+            int eq = entry.indexOf('=');
+            if (eq <= 0) {
+                continue;
+            }
+            String group = entry.substring(0, eq);
+            String[] parts = entry.substring(eq + 1).split(",");
+            Adjust a = new Adjust();
+            try {
+                a.dx = Float.parseFloat(parts[0]);
+                a.dy = Float.parseFloat(parts[1]);
+                a.scale = clampScale(Float.parseFloat(parts[2]));
+                if (parts.length > 3 && parts[3].equals("1")) {
+                    on.add(group);
+                }
+                mentioned.add(group);
+            } catch (RuntimeException ignored) {
+                a = new Adjust();
+            }
+            adjust.put(group, a);
+        }
+        for (Control c : controls) {
+            if (!adjust.containsKey(c.group)) {
+                adjust.put(c.group, new Adjust());
+            }
+            if (!mentioned.contains(c.group) && DEFAULT_ON.contains(c.group)) {
+                on.add(c.group);
             }
         }
-        for (String group : adjust.keySet()) {
-            String key = prefix() + "on." + group;
-            boolean shown = on.contains(group);
-            if (shown == DEFAULT_ON.contains(group)) {
-                editor.remove(key);
-            } else {
-                editor.putString(key, shown ? "1" : "0");
+        on.add("menu");   // always there: it's the way back to this editor
+    }
+
+    /** Names of the saved layouts, sorted. */
+    private List<String> savedLayoutNames() {
+        List<String> names = new ArrayList<>();
+        for (String key : getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE).getAll().keySet()) {
+            if (key.startsWith("saved.")) {
+                names.add(key.substring("saved.".length()));
             }
         }
-        editor.apply();
-        updateMovesUse();
+        java.util.Collections.sort(names, String.CASE_INSENSITIVE_ORDER);
+        return names;
+    }
+
+    /** Asks for a name, then saves the current layout under it (replacing one of the same name). */
+    private void showSaveDialog() {
+        final android.widget.EditText input = new android.widget.EditText(getContext());
+        input.setSingleLine(true);
+        input.setHint("Layout name");
+        int pad = Math.round(20 * getResources().getDisplayMetrics().density);
+        android.widget.FrameLayout box = new android.widget.FrameLayout(getContext());
+        box.setPadding(pad, pad / 2, pad, 0);
+        box.addView(input);
+        new android.app.AlertDialog.Builder(getContext())
+            .setTitle("Save this layout")
+            .setView(box)
+            .setPositiveButton("Save", (d, w) -> {
+                String name = input.getText().toString().trim().replace(";", "").replace("=", "");
+                if (name.isEmpty()) {
+                    return;
+                }
+                getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                    .putString("saved." + name, layoutString()).apply();
+                android.widget.Toast.makeText(getContext(), "Saved \"" + name + "\"", android.widget.Toast.LENGTH_SHORT).show();
+            })
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+
+    /** Lists the saved layouts: tap one to use it here, or delete them. */
+    private void showLoadDialog() {
+        final List<String> names = savedLayoutNames();
+        if (names.isEmpty()) {
+            android.widget.Toast.makeText(getContext(), "No saved layouts yet: use Save first.", android.widget.Toast.LENGTH_SHORT).show();
+            return;
+        }
+        new android.app.AlertDialog.Builder(getContext())
+            .setTitle("Load a layout")
+            .setItems(names.toArray(new String[0]), (d, which) -> {
+                String layout = getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .getString("saved." + names.get(which), null);
+                if (layout != null) {
+                    applyLayoutString(layout);
+                    selected = null;
+                    updateMovesUse();
+                    layoutControls();
+                    invalidate();
+                }
+            })
+            .setNeutralButton("Delete…", (d, w) -> showDeleteDialog())
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+
+    private void showDeleteDialog() {
+        final List<String> names = savedLayoutNames();
+        final boolean[] checked = new boolean[names.size()];
+        new android.app.AlertDialog.Builder(getContext())
+            .setTitle("Delete saved layouts")
+            .setMultiChoiceItems(names.toArray(new String[0]), checked, (d, which, isChecked) -> checked[which] = isChecked)
+            .setPositiveButton("Delete", (d, w) -> {
+                SharedPreferences.Editor editor = getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit();
+                for (int i = 0; i < names.size(); i++) {
+                    if (checked[i]) {
+                        editor.remove("saved." + names.get(i));
+                    }
+                }
+                editor.apply();
+            })
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+
+    /** The toolbar's four rows, centred on the screen. */
+    private static float toolbarTop(int h, float bh, float gap) {
+        return h * 0.5f - (4 * bh + 3 * gap) / 2f;
     }
 
     private static float clampScale(float s) {
@@ -653,6 +814,15 @@ public final class TouchControllerView extends View {
     @Override
     protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         super.onSizeChanged(w, h, oldw, oldh);
+        if (!shape().equals(loadedShape)) {
+            // Folded, unfolded or rotated: this shape's own layout.
+            if (editing) {
+                saveLayout();   // keep the edits made on the shape before
+            }
+            releaseAll();
+            selected = null;
+            loadLayout();
+        }
         layoutControls();
         if (active || editing) {
             startPolling();
@@ -718,7 +888,7 @@ public final class TouchControllerView extends View {
         for (int row = 0; row < 2; row++) {
             float total = gap * 2;
             for (int i = row * 3; i < row * 3 + 3; i++) total += widths[i];
-            float x = (w - total) / 2f, top = h * 0.5f - bh / 2f + row * (bh + gap);
+            float x = (w - total) / 2f, top = toolbarTop(h, bh, gap) + row * (bh + gap);
             for (int i = row * 3; i < row * 3 + 3; i++) {
                 toolbar[i].set(x, top, x + widths[i], top + bh);
                 x += widths[i] + gap;
@@ -726,10 +896,14 @@ public final class TouchControllerView extends View {
         }
         // Third row: the stick toggles (floating stick, double-tap for Z), side by side.
         float half = unit * 0.40f;
-        float top3 = h * 0.5f - bh / 2f + 2 * (bh + gap);
+        float top3 = toolbarTop(h, bh, gap) + 2 * (bh + gap);
         float left3 = (w - (half * 2 + gap)) / 2f;
         toolbar[TB_FLOATING].set(left3, top3, left3 + half, top3 + bh);
         toolbar[TB_DOUBLE_TAP].set(left3 + half + gap, top3, left3 + half * 2 + gap, top3 + bh);
+        // Fourth row: save and load layouts.
+        float top4 = top3 + bh + gap;
+        toolbar[TB_SAVE].set(left3, top4, left3 + half, top4 + bh);
+        toolbar[TB_LOAD].set(left3 + half + gap, top4, left3 + half * 2 + gap, top4 + bh);
     }
 
     // ------------------------------------------------------------------------------
@@ -920,7 +1094,7 @@ public final class TouchControllerView extends View {
         text.setAlpha(255);
         text.setTextSize(unit * 0.045f);
         float y = toolbar[0].top - unit * 0.10f;
-        canvas.drawText(analogMode ? "Touch layout (Analog Camera)" : "Touch layout", getWidth() / 2f, y, text);
+        canvas.drawText("Touch layout · " + shapeName(loadedShape) + (analogMode ? " · Analog Camera" : ""), getWidth() / 2f, y, text);
         text.setTextSize(unit * 0.032f);
         canvas.drawText(selected == null ? "Tap a control to select it, drag to move, pinch to resize · Add for more"
                 : (selected.equals("drawer_items") ? "Action drawer buttons: " : selected.equals("drawer") ? "Action drawer handle: "
@@ -1391,6 +1565,12 @@ public final class TouchControllerView extends View {
                 break;
             case TB_ADD:
                 showAddMenu();
+                return;
+            case TB_SAVE:
+                showSaveDialog();
+                return;
+            case TB_LOAD:
+                showLoadDialog();
                 return;
             case TB_DOUBLE_TAP:
                 doubleTapZ = !doubleTapZ;
