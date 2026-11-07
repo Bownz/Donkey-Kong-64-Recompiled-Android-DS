@@ -102,7 +102,10 @@ final class TouchInput {
 
     private static native int nativeUiState();
 
-    /** Bit 1: a menu is taking input. Bit 2: the Analog Camera is selected. Bit 4: Drag to Move Camera is on. */
+    /**
+     * Bit 1: a menu is taking input. Bit 2: the Analog Camera is selected. Bit 4: Drag to Move
+     * Camera is on. Bit 16: the game has started (not just the launcher).
+     */
     static int uiState() {
         try {
             return nativeUiState();

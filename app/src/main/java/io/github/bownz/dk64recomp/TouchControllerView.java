@@ -148,6 +148,7 @@ public final class TouchControllerView extends View {
     private float opacity = 0.55f;
     private boolean active = false;   // Touch controls wanted (setting / no controller)
     private boolean menuOpen = false; // A menu is taking input: hide and let touches through
+    private boolean gameStarted = false; // Until the game runs (startup, launcher) there's nothing to control
     private boolean analogMode = false;
     // Drag to Move Camera (Input > Touch): a finger that lands away from the buttons turns the camera.
     private boolean dragCamera = true;
@@ -438,6 +439,11 @@ public final class TouchControllerView extends View {
         }
         int state = TouchInput.uiState();
         boolean menu = (state & 1) != 0;
+        boolean started = (state & 16) != 0;
+        if (started != gameStarted) {
+            gameStarted = started;
+            refreshVisibility();
+        }
         boolean analog = (state & 2) != 0;
         dragCamera = (state & 4) != 0;
         if (!dragCamera) {
@@ -460,7 +466,7 @@ public final class TouchControllerView extends View {
     }
 
     private void refreshVisibility() {
-        boolean show = editing || (active && !menuOpen);
+        boolean show = editing || (active && !menuOpen && gameStarted);
         if (!show) {
             releaseAll();
         }

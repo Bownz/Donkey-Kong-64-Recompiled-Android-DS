@@ -33,12 +33,13 @@
 #if defined(__ANDROID__)
 #include <atomic>
 #include <jni.h>
+#include "ultramodern/ultramodern.hpp"
 // Read by the on-screen touch controls (TouchInput.nativeUiState).
 static std::atomic<bool> dk64_android_analog_camera{false};
 
 // Bit 1: a menu (the launcher, the menu bar, settings) is taking input, so the touch
 // buttons are hidden and touches go to it. Bit 2: the Analog Camera is selected.
-// Bit 4: Drag to Move Camera is on.
+// Bit 4: Drag to Move Camera is on. Bit 16: the game has started (not just the launcher).
 extern "C" JNIEXPORT jint JNICALL
 Java_io_github_bownz_dk64recomp_TouchInput_nativeUiState(JNIEnv*, jclass) {
     jint bits = 0;
@@ -50,6 +51,9 @@ Java_io_github_bownz_dk64recomp_TouchInput_nativeUiState(JNIEnv*, jclass) {
     }
     if (dk64::android::drag_camera_enabled()) {
         bits |= 4;
+    }
+    if (ultramodern::is_game_started()) {
+        bits |= 16;
     }
     return bits;
 }
