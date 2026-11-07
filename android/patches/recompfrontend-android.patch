@@ -433,10 +433,18 @@ index 6de7a94..7e5c496 100644
                      recompui::hide_all_contexts();
                  }
 diff --git a/recompui/src/base/ui_state.cpp b/recompui/src/base/ui_state.cpp
-index 277a421..71f98aa 100644
+index 277a421..a987bdf 100644
 --- a/recompui/src/base/ui_state.cpp
 +++ b/recompui/src/base/ui_state.cpp
-@@ -35,6 +35,13 @@
+@@ -5,6 +5,7 @@
+ #include <SDL2/SDL_video.h>
+ #endif
+ #include <chrono>
++#include <cmath>
+ 
+ #include "rt64_render_hooks.h"
+ 
+@@ -35,6 +36,13 @@
  
  static std::atomic_bool cursor_enabled = true;
  
@@ -450,7 +458,7 @@ index 277a421..71f98aa 100644
  void recompui::open_quit_game_prompt() {
      recompui::open_choice_prompt(
          "Are you sure you want to quit?",
-@@ -49,6 +56,12 @@ void recompui::open_quit_game_prompt() {
+@@ -49,6 +57,12 @@ void recompui::open_quit_game_prompt() {
          recompui::ButtonStyle::Tertiary,
          true
      );
@@ -463,7 +471,7 @@ index 277a421..71f98aa 100644
  }
  
  static std::string primary_font = "";
-@@ -278,6 +291,9 @@ public:
+@@ -278,6 +292,9 @@ public:
          recompui::init_styling(recompui::file::get_asset_path("recomp.rcss"));
          recompui::init_launcher_menu();
          recompui::init_prompt_context();
@@ -473,7 +481,7 @@ index 277a421..71f98aa 100644
          recompui::AssignPlayersModal::init();
          recompui::config::init_modal();
      }
-@@ -580,6 +596,31 @@ bool check_menu_button_pressed(int profile_index, recompinput::GameInput input,
+@@ -580,6 +597,31 @@ bool check_menu_button_pressed(int profile_index, recompinput::GameInput input,
      return false;
  }
  
@@ -505,15 +513,16 @@ index 277a421..71f98aa 100644
  int cont_button_to_key(SDL_ControllerButtonEvent& button) {
      int player1_profile = recompinput::profiles::get_input_profile_for_player(0, recompinput::InputDevice::Controller);
  
-@@ -694,6 +735,52 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
+@@ -694,6 +736,59 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
              }
          }
  
 +#ifdef __ANDROID__
 +        // Touch: drag anywhere to scroll (like a phone), not only on the scroll bar. A press
-+        // that moves more than a little turns into a scroll, and is then not a tap.
++        // that moves more than a little up or down turns into a scroll, and is then not a
++        // tap. One that moves sideways first is left alone, so sliders can be dragged.
 +        if (!all_input_is_disabled && recompui::is_context_capturing_mouse()) {
-+            static bool touch_down = false, touch_dragging = false;
++            static bool touch_down = false, touch_dragging = false, touch_sideways = false;
 +            static float touch_last_y = 0.0f, touch_start_x = 0.0f, touch_start_y = 0.0f;
 +            int win_w = 0, win_h = 1080;
 +            recompui::get_window_size(win_w, win_h);
@@ -521,16 +530,22 @@ index 277a421..71f98aa 100644
 +            if (cur_event.type == SDL_EventType::SDL_MOUSEBUTTONDOWN && cur_event.button.which == SDL_TOUCH_MOUSEID) {
 +                touch_down = true;
 +                touch_dragging = false;
++                touch_sideways = false;
 +                touch_start_x = float(cur_event.button.x);
 +                touch_start_y = touch_last_y = float(cur_event.button.y);
 +            }
 +            else if (cur_event.type == SDL_EventType::SDL_MOUSEMOTION && cur_event.motion.which == SDL_TOUCH_MOUSEID && touch_down) {
 +                const float y = float(cur_event.motion.y);
-+                if (!touch_dragging) {
++                if (!touch_dragging && !touch_sideways) {
 +                    const float dx = float(cur_event.motion.x) - touch_start_x, dy = y - touch_start_y;
 +                    if (dx * dx + dy * dy > (32.0f * dp) * (32.0f * dp)) {
-+                        touch_dragging = true;
-+                        touch_last_y = y;
++                        if (std::abs(dx) > std::abs(dy)) {
++                            touch_sideways = true;   // e.g. dragging a slider: not a scroll
++                        }
++                        else {
++                            touch_dragging = true;
++                            touch_last_y = y;
++                        }
 +                    }
 +                }
 +                if (touch_dragging) {
@@ -558,7 +573,7 @@ index 277a421..71f98aa 100644
          if (!all_input_is_disabled) {
              bool is_mouse_input = false;
              // Implement some additional behavior for specific events on top of what RmlUi normally does with them.
-@@ -731,6 +818,7 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
+@@ -731,6 +826,7 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
              case SDL_EventType::SDL_CONTROLLERBUTTONDOWN: {
                  int sdl_key = cont_button_to_key(cur_event.cbutton);
                  if (context_capturing_input && sdl_key) {
@@ -566,7 +581,7 @@ index 277a421..71f98aa 100644
                      ui_state->context->ProcessKeyDown(convert_sdl_to_rml(sdl_key), 0);
                      latest_controller_key_pressed = sdl_key;
                      next_repeat_time = clock::now() + start_repeat_delay;
-@@ -776,7 +864,8 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
+@@ -776,7 +872,8 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
                          non_mouse_interacted = true;
                          int sdl_key = cont_axis_to_key(cur_event.caxis, axis_value);
                          if (context_capturing_input && sdl_key) {
@@ -576,7 +591,7 @@ index 277a421..71f98aa 100644
                              latest_controller_key_pressed = sdl_key;
                              next_repeat_time = clock::now() + start_repeat_delay;
                          }
-@@ -787,8 +876,11 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
+@@ -787,8 +884,11 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
                  else if (*await_stick_return && fabsf(axis_value) < 0.15f) {
                      *await_stick_return = false;
                      // Stop pressing the current key if the axis that was released was the one triggering key presses.
@@ -590,7 +605,7 @@ index 277a421..71f98aa 100644
                          latest_controller_key_pressed = SDLK_UNKNOWN;
                      }
                  }
-@@ -838,15 +930,32 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
+@@ -838,15 +938,32 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
              }
  
              if (open_config) {
@@ -623,7 +638,7 @@ index 277a421..71f98aa 100644
              ui_state->context->ProcessKeyDown(convert_sdl_to_rml(latest_controller_key_pressed), 0);
              next_repeat_time += repeat_rate;
          }
-@@ -870,7 +979,14 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
+@@ -870,7 +987,14 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
          int height = swap_chain_framebuffer->getHeight();
  
          // Scale the UI based on the window size with 1080 vertical resolution as the reference point.
@@ -2906,6 +2921,66 @@ index d065a14..f713162 100644
          recompinput::InputDevice last_input_device = recompinput::InputDevice::COUNT;
          int last_input_profile = -1;
  
+diff --git a/recompui/src/elements/ui_radio.cpp b/recompui/src/elements/ui_radio.cpp
+index 7e5c18d..7501064 100644
+--- a/recompui/src/elements/ui_radio.cpp
++++ b/recompui/src/elements/ui_radio.cpp
+@@ -16,8 +16,16 @@ namespace recompui {
+         set_border_color(theme::color::Text, 0);
+         set_border_bottom_width(theme::border::width);
+         set_color(theme::color::TextInactive);
++#if defined(__ANDROID__)
++        // Taller (and a little wider) to tap with a finger.
++        set_padding_top(16.0f);
++        set_padding_bottom(16.0f - theme::border::width);
++        set_padding_left(6.0f);
++        set_padding_right(6.0f);
++#else
+         set_padding_top(8.0f);
+         set_padding_bottom(8.0f - theme::border::width);
++#endif
+         set_text_transform(TextTransform::Uppercase);
+         set_height_auto();
+         set_opacity(1.0f);
+diff --git a/recompui/src/elements/ui_slider.cpp b/recompui/src/elements/ui_slider.cpp
+index 7a50da4..1102e0b 100644
+--- a/recompui/src/elements/ui_slider.cpp
++++ b/recompui/src/elements/ui_slider.cpp
+@@ -155,6 +155,13 @@ namespace recompui {
+ 
+         slider_element = context.create_element<Clickable>(this, true);
+         slider_element->set_flex(1.0f, 0.0f);
++#if defined(__ANDROID__)
++        // A taller touch area around the thin bar, so a finger can grab it anywhere near.
++        slider_element->set_padding_top(18.0f);
++        slider_element->set_padding_bottom(18.0f);
++        slider_element->set_margin_top(-18.0f);
++        slider_element->set_margin_bottom(-18.0f);
++#endif
+         slider_element->add_pressed_callback([this](float x, float y){ bar_pressed(x, y); focus(); });
+         slider_element->add_dragged_callback([this](float x, float y, recompui::DragPhase phase){ bar_dragged(x, y, phase); focus(); });
+ 
+@@ -169,11 +176,20 @@ namespace recompui {
+             
+             circle_element = context.create_element<Clickable>(bar_element, true);
+             circle_element->set_position(Position::Relative);
++#if defined(__ANDROID__)
++            // A bigger knob for fingers.
++            circle_element->set_width(26.0f);
++            circle_element->set_height(26.0f);
++            circle_element->set_margin_top(-12.0f);
++            circle_element->set_margin_right(-13.0f);
++            circle_element->set_margin_left(-13.0f);
++#else
+             circle_element->set_width(16.0f);
+             circle_element->set_height(16.0f);
+             circle_element->set_margin_top(-7.0f);
+             circle_element->set_margin_right(-8.0f);
+             circle_element->set_margin_left(-8.0f);
++#endif
+             circle_element->set_background_color(theme::color::TextDim);
+             circle_element->set_border_radius(theme::border::radius_sm);
+             circle_element->add_pressed_callback([this](float, float){ focus(); });
 diff --git a/recompui/src/elements/ui_tab_set.cpp b/recompui/src/elements/ui_tab_set.cpp
 index 2c5dc52..3d04f98 100644
 --- a/recompui/src/elements/ui_tab_set.cpp
