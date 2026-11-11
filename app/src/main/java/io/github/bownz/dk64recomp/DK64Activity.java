@@ -351,7 +351,7 @@ public class DK64Activity extends SDLActivity
         try { nativeSetForeground(foreground); } catch (UnsatisfiedLinkError ignored) { }
     }
 
-    /** From native code (Settings > General > Game Files Location): offers to move the files. */
+    /** From native code (Settings > Gameplay > Game Files Location): offers to move the files. */
     public String changeStorageLocation() {
         runOnUiThread(storage::startChange);
         return null;

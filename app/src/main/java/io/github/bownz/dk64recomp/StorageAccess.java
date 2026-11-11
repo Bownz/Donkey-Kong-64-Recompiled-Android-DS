@@ -35,7 +35,7 @@ import java.util.concurrent.CountDownLatch;
  * creates its window, and blocks until the player has answered. The activity must
  * forward onResume and onRequestPermissionsResult so the answer is noticed.
  *
- * The choice can be changed later ({@link #startChange()}, Settings > General > Game Files
+ * The choice can be changed later ({@link #startChange()}, Settings > Gameplay > Game Files
  * Location, main menu only): the files are copied to the new place, the old copy can be
  * removed, and the app restarts using the new place.
  */
@@ -326,7 +326,7 @@ final class StorageAccess {
     }
 
     // ------------------------------------------------------------------------------
-    // Changing the location later (Settings > General > Game Files Location)
+    // Changing the location later (Settings > Gameplay > Game Files Location)
     // ------------------------------------------------------------------------------
 
     /** A short description of where the files are now, for the settings button. */

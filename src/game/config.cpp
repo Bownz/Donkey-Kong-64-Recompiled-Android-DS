@@ -202,31 +202,6 @@ static void add_general_options(recomp::config::Config &config) {
         skip_launcher_options,
         0u
     );
-#if defined(__ANDROID__)
-    // Where saves, settings, mods and the ROM are kept: app storage or a shared folder.
-    // Moving them restarts the app, so (like the graphics driver) only from the main menu.
-    {
-        recompui::config::LayoutEntry button;
-        button.kind = recompui::config::LayoutEntry::Kind::Button;
-        button.text = "Game Files Location";
-        const std::string where = dk64::android::storage_description();
-        button.description = "Move your saves, settings, mods and ROM between app storage and a shared folder "
-            "(easy to reach from a PC, and kept if the app is uninstalled). Everything is copied, then the app restarts; "
-            "only from the main menu."
-            + (where.empty() ? std::string() : "<br />Now in " + where + ".");
-        button.on_press = []() {
-            if (ultramodern::is_game_started()) {
-                recompui::open_info_prompt("Game Files Location",
-                    "The game files can only be moved from the main menu, because the app restarts to use the new place. "
-                    "Use QUIT > Main Menu, then open Settings > General > Game Files Location.",
-                    "OK", []() {});
-                return;
-            }
-            dk64::android::change_storage_location();
-        };
-        recompui::config::add_page_button(config, std::move(button));
-    }
-#endif
 }
 
 template <typename T = uint32_t>
@@ -828,11 +803,34 @@ void dk64::init_config() {
         auto &sound_config = recompui::config::create_sound_tab("Audio");
         add_sound_options(sound_config);
 
+        // Where saves, settings, mods and the ROM are kept: app storage or a shared folder.
+        // Moving them restarts the app, so (like the graphics driver) only from the main menu.
+        Entry files; files.kind = Kind::Button; files.text = "Game Files Location";
+        {
+            const std::string where = dk64::android::storage_description();
+            files.description = "Move your saves, settings, mods and ROM between app storage and a shared folder "
+                "(easy to reach from a PC, and kept if the app is uninstalled). Everything is copied, then the app restarts; "
+                "only from the main menu."
+                + (where.empty() ? std::string() : "<br />Now in " + where + ".");
+        }
+        files.on_press = []() {
+            if (ultramodern::is_game_started()) {
+                recompui::open_info_prompt("Game Files Location",
+                    "The game files can only be moved from the main menu, because the app restarts to use the new place. "
+                    "Use QUIT > Main Menu, then open Settings > Gameplay > Game Files Location.",
+                    "OK", []() {});
+                return;
+            }
+            dk64::android::change_storage_location();
+        };
+
         recompui::config::create_layout_tab("Gameplay", "gameplay", {
             option(g, "android_experience"),
             option(g, keys::story_skip),
             option(g, keys::lightning_flashes),
             option(g, keys::skip_launcher),
+            header("Storage"),
+            files,
         }, { g });
     }
 

@@ -27,7 +27,7 @@ namespace dk64::android {
     void set_touch_kong_swap(bool enabled);
     void set_touch_feedback(bool enabled);
     void set_bottom_buttons(bool shown);   // the bottom screen's touch buttons
-    // Settings > General > Game Files Location (StorageAccess.startChange / describeLocation).
+    // Settings > Gameplay > Game Files Location (StorageAccess.startChange / describeLocation).
     void change_storage_location();
     std::string storage_description();
     // Input > Touch > Drag to Move Camera (android/jni/touch_controller.cpp).
