@@ -179,6 +179,14 @@ namespace dk64::android {
         return active_driver;
     }
 
+    void change_storage_location() {
+        call_activity("changeStorageLocation", "()Ljava/lang/String;", nullptr);
+    }
+
+    std::string storage_description() {
+        return call_activity("getStorageDescription", "()Ljava/lang/String;", nullptr);
+    }
+
     void share_log() {
         call_activity("shareLog", "()Ljava/lang/String;", nullptr);
     }

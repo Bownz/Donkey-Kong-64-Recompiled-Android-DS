@@ -342,6 +342,17 @@ public class DK64Activity extends SDLActivity
     }
 
     /** From the in-game Graphics settings: install or remove driver packages. */
+    /** From native code (Settings > General > Game Files Location): offers to move the files. */
+    public String changeStorageLocation() {
+        runOnUiThread(storage::startChange);
+        return null;
+    }
+
+    /** From native code: where the game's files are now, for that button's description. */
+    public String getStorageDescription() {
+        return storage.describeLocation();
+    }
+
     public String openGpuDriverManager() {
         runOnUiThread(() -> startActivity(new Intent(this, GpuDriverActivity.class)
             .putExtra(GpuDriverActivity.EXTRA_DRIVERS, true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)));

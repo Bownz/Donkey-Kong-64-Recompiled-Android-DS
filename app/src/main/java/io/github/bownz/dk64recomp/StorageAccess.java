@@ -34,6 +34,10 @@ import java.util.concurrent.CountDownLatch;
  * {@link #resolveDataDirectory()} is called from the game's native thread before it
  * creates its window, and blocks until the player has answered. The activity must
  * forward onResume and onRequestPermissionsResult so the answer is noticed.
+ *
+ * The choice can be changed later ({@link #startChange()}, Settings > General > Game Files
+ * Location, main menu only): the files are copied to the new place, the old copy can be
+ * removed, and the app restarts using the new place.
  */
 final class StorageAccess {
     private static final String TAG = "DK64Recomp";
@@ -51,6 +55,10 @@ final class StorageAccess {
 
     private CountDownLatch answer;
     private String resolvedPath;
+    // The folder in use this run, and whether a change of location is under way (the
+    // shared-folder steps then lead to moving the files instead of the first-run choice).
+    private volatile String currentPath;
+    private boolean changing;
     private boolean waitingForSettings;
     private boolean waitingForPermissionDialog;
 
@@ -116,6 +124,11 @@ final class StorageAccess {
 
     /** Returns the user-data directory, asking the player first if they haven't chosen. */
     String resolveDataDirectory() {
+        currentPath = resolveDataDirectoryInner();
+        return currentPath;
+    }
+
+    private String resolveDataDirectoryInner() {
         String mode = prefs.getString(KEY_MODE, null);
 
         if (MODE_APP.equals(mode)) {
@@ -209,6 +222,9 @@ final class StorageAccess {
     private void finishSharedRequest() {
         if (hasSharedStorageAccess(activity)) {
             pickFolder();
+        } else if (changing) {
+            changing = false;
+            Toast.makeText(activity, R.string.storage_denied_change, Toast.LENGTH_LONG).show();
         } else {
             Toast.makeText(activity, R.string.storage_denied, Toast.LENGTH_LONG).show();
             choose(MODE_APP);
@@ -245,7 +261,11 @@ final class StorageAccess {
             if (resultCode == Activity.RESULT_OK) {
                 Toast.makeText(activity, R.string.storage_bad_folder, Toast.LENGTH_LONG).show();
             }
-            showChoice();   // cancelled or unusable: back to the choice
+            if (changing) {
+                changing = false;   // a change of location was cancelled: nothing moves
+            } else {
+                showChoice();   // cancelled or unusable: back to the choice
+            }
             return true;
         }
         useSharedFolder(folder);
@@ -255,7 +275,16 @@ final class StorageAccess {
     private void useSharedFolder(File folder) {
         if (ensureDirectory(folder) == null || !folder.canWrite()) {
             Toast.makeText(activity, R.string.storage_bad_folder, Toast.LENGTH_LONG).show();
-            showChoice();
+            if (changing) {
+                changing = false;
+            } else {
+                showChoice();
+            }
+            return;
+        }
+        if (changing) {
+            changing = false;
+            moveTo(folder, MODE_SHARED);
             return;
         }
         prefs.edit().putString(KEY_SHARED_PATH, folder.getAbsolutePath()).apply();
@@ -294,6 +323,244 @@ final class StorageAccess {
         if (answer != null) {
             answer.countDown();
         }
+    }
+
+    // ------------------------------------------------------------------------------
+    // Changing the location later (Settings > General > Game Files Location)
+    // ------------------------------------------------------------------------------
+
+    /** A short description of where the files are now, for the settings button. */
+    String describeLocation() {
+        String path = currentPath;
+        if (path == null) {
+            return "";
+        }
+        return (usesSharedFolder() ? "a shared folder, " : "app storage, ") + path;
+    }
+
+    /** Shows where the files are and offers to move them. Call on the UI thread. */
+    void startChange() {
+        final String path = currentPath;
+        if (path == null) {
+            return;
+        }
+        final boolean shared = usesSharedFolder();
+        android.app.AlertDialog.Builder b = new android.app.AlertDialog.Builder(activity)
+            .setTitle("Game files location")
+            .setMessage("Your saves, settings, mods and ROM are in "
+                + (shared ? "a shared folder" : "app storage") + ":\n\n" + path + "\n\n"
+                + (shared
+                    ? "App storage needs no permission, but is removed if the app is uninstalled and is hard to reach from a PC."
+                    : "A shared folder is easy to reach from a PC or file manager (to add mods) and stays if the app is uninstalled. "
+                        + "It needs the \"All files access\" permission.")
+                + "\n\nMoving copies everything to the new place, then the app restarts.")
+            .setNegativeButton("Cancel", null);
+        if (shared) {
+            b.setPositiveButton("Move to app storage", (d, w) -> moveTo(appFolder(), MODE_APP));
+            b.setNeutralButton("Pick another folder…", (d, w) -> {
+                changing = true;
+                requestSharedAccess();
+            });
+        } else {
+            b.setPositiveButton("Move to a shared folder…", (d, w) -> {
+                changing = true;
+                requestSharedAccess();
+            });
+        }
+        b.show();
+    }
+
+    /** Copies the game's files to {@code dest}, then switches to it and restarts. */
+    private void moveTo(File dest, String mode) {
+        final File src = new File(currentPath);
+        final File to;
+        try {
+            File a = src.getCanonicalFile(), b = dest.getCanonicalFile();
+            if (a.equals(b)) {
+                Toast.makeText(activity, "The files are already there.", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            if (b.getPath().startsWith(a.getPath() + File.separator) || a.getPath().startsWith(b.getPath() + File.separator)) {
+                Toast.makeText(activity, "Pick a folder that isn't inside the current one (or around it).", Toast.LENGTH_LONG).show();
+                return;
+            }
+            to = b;
+        } catch (java.io.IOException e) {
+            Toast.makeText(activity, R.string.storage_bad_folder, Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (ensureDirectory(to) == null || !to.canWrite()) {
+            Toast.makeText(activity, R.string.storage_bad_folder, Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (hasGameFiles(to)) {
+            new android.app.AlertDialog.Builder(activity)
+                .setTitle("That folder already has DK64 files")
+                .setMessage(to.getAbsolutePath() + " already has saves, settings or a ROM from before.\n\n"
+                    + "Use the files there (your current ones stay where they are), or replace them with your current files?")
+                .setPositiveButton("Replace with mine", (d, w) -> copyThenSwitch(src, to, mode))
+                .setNeutralButton("Use the files there", (d, w) -> switchTo(to, mode, null))
+                .setNegativeButton("Cancel", null)
+                .show();
+            return;
+        }
+        copyThenSwitch(src, to, mode);
+    }
+
+    private static boolean hasGameFiles(File dir) {
+        File saves = new File(dir, "saves");
+        String[] inSaves = saves.list();
+        if (inSaves != null && inSaves.length > 0) {
+            return true;
+        }
+        if (new File(dir, "DK64.z64").isFile()) {
+            return true;
+        }
+        String[] names = dir.list();
+        if (names != null) {
+            for (String n : names) {
+                if (n.endsWith(".json")) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /** Copies everything in {@code src} to {@code dest} (replacing what's there), with progress. */
+    private void copyThenSwitch(File src, File dest, String mode) {
+        final android.app.AlertDialog progress = new android.app.AlertDialog.Builder(activity)
+            .setTitle("Moving game files")
+            .setMessage("Getting ready…")
+            .setCancelable(false)
+            .show();
+        new Thread(() -> {
+            java.util.List<String> files = new java.util.ArrayList<>();
+            listFiles(src, "", files);
+            long total = 0;
+            for (String rel : files) {
+                total += new File(src, rel).length();
+            }
+            long done = 0;
+            String error = null;
+            byte[] buffer = new byte[1 << 16];
+            for (int i = 0; i < files.size() && error == null; i++) {
+                String rel = files.get(i);
+                File from = new File(src, rel), to = new File(dest, rel);
+                final String status = "Copying " + (i + 1) + " of " + files.size() + " files ("
+                    + (total > 0 ? (done * 100 / total) : 100) + "%)\n" + rel;
+                activity.runOnUiThread(() -> progress.setMessage(status));
+                File parent = to.getParentFile();
+                if (parent != null && !parent.isDirectory() && !parent.mkdirs()) {
+                    error = "Couldn't create " + parent;
+                    break;
+                }
+                File temp = new File(to.getPath() + ".moving");
+                try (java.io.InputStream in = new java.io.FileInputStream(from);
+                     java.io.OutputStream out = new java.io.FileOutputStream(temp)) {
+                    int n;
+                    while ((n = in.read(buffer)) > 0) {
+                        out.write(buffer, 0, n);
+                    }
+                } catch (java.io.IOException e) {
+                    error = "Couldn't copy " + rel + ": " + e.getMessage();
+                    temp.delete();
+                    break;
+                }
+                if (temp.length() != from.length() || (to.exists() && !to.delete()) || !temp.renameTo(to)) {
+                    error = "Couldn't write " + to;
+                    temp.delete();
+                    break;
+                }
+                to.setLastModified(from.lastModified());
+                done += from.length();
+            }
+            final String failed = error;
+            activity.runOnUiThread(() -> {
+                progress.dismiss();
+                if (failed != null) {
+                    Log.w(TAG, "Moving game files failed: " + failed);
+                    new android.app.AlertDialog.Builder(activity)
+                        .setTitle("Couldn't move the files")
+                        .setMessage(failed + "\n\nNothing was changed: the game keeps using " + src.getAbsolutePath() + ".")
+                        .setPositiveButton("OK", null)
+                        .show();
+                    return;
+                }
+                Log.i(TAG, "Moved " + files.size() + " game files from " + src + " to " + dest);
+                switchTo(dest, mode, new Runnable[] { () -> removeOldCopy(src, files) });
+            });
+        }, "Move game files").start();
+    }
+
+    private static void listFiles(File dir, String prefix, java.util.List<String> out) {
+        File[] entries = dir.listFiles();
+        if (entries == null) {
+            return;
+        }
+        for (File f : entries) {
+            String rel = prefix.isEmpty() ? f.getName() : prefix + File.separator + f.getName();
+            if (f.isDirectory()) {
+                listFiles(f, rel, out);
+            } else if (f.isFile() && !f.getName().endsWith(".moving")) {
+                out.add(rel);
+            }
+        }
+    }
+
+    /**
+     * Uses {@code dest} from now on. With {@code removeOld}, first asks whether to remove the
+     * copy in the old place. Then restarts the app, back on the main menu.
+     */
+    private void switchTo(File dest, String mode, Runnable[] removeOld) {
+        SharedPreferences.Editor editor = prefs.edit().putString(KEY_MODE, mode);
+        if (MODE_SHARED.equals(mode)) {
+            editor.putString(KEY_SHARED_PATH, dest.getAbsolutePath());
+        }
+        editor.commit();
+        if (removeOld == null) {
+            restart();
+            return;
+        }
+        new android.app.AlertDialog.Builder(activity)
+            .setTitle("Files moved")
+            .setMessage("Everything is now in " + dest.getAbsolutePath() + ".\n\nRemove the old copy in "
+                + currentPath + "? Keeping it does no harm, but it's no longer used.")
+            .setPositiveButton("Keep it", (d, w) -> restart())
+            .setNegativeButton("Remove it", (d, w) -> {
+                removeOld[0].run();
+                restart();
+            })
+            .setCancelable(false)
+            .show();
+    }
+
+    /** Deletes the files that were copied (and folders left empty), nothing else. */
+    private static void removeOldCopy(File src, java.util.List<String> files) {
+        for (String rel : files) {
+            new File(src, rel).delete();
+        }
+        removeEmptyFolders(src);
+    }
+
+    private static void removeEmptyFolders(File dir) {
+        File[] entries = dir.listFiles();
+        if (entries == null) {
+            return;
+        }
+        for (File f : entries) {
+            if (f.isDirectory()) {
+                removeEmptyFolders(f);
+                f.delete();   // only succeeds if it's now empty
+            }
+        }
+    }
+
+    private void restart() {
+        Toast.makeText(activity, "Restarting with the new location…", Toast.LENGTH_SHORT).show();
+        activity.getSharedPreferences("launch", Context.MODE_PRIVATE).edit().putBoolean("show_launcher_once", true).commit();
+        activity.startActivity(new Intent(activity, RestartActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        activity.finish();
     }
 
     private static String ensureDirectory(File dir) {
