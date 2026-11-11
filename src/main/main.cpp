@@ -279,6 +279,25 @@ void update_gfx(void*) {
 static SDL_AudioCVT audio_convert;
 static SDL_AudioDeviceID audio_device = 0;
 
+#if defined(__ANDROID__)
+#include <atomic>
+#include <mutex>
+#include <thread>
+// Audio watchdog (Android). Android's audio output can stop for good after a headphone or
+// Bluetooth change, a call or another interruption: the game keeps queueing sound but none
+// plays. A thread checks twice a second and reopens the output device when it isn't playing
+// or its queue never drains. It also logs when the game itself stops sending sound.
+// The mutex guards audio_device against the reopen.
+static std::recursive_mutex audio_device_mutex;
+static std::atomic<uint64_t> audio_last_queued_ms{ 0 };   // when the game last queued sound
+static SDL_AudioSpec audio_spec_desired{};
+static void start_audio_watchdog();
+extern "C" int dk64_android_app_in_foreground(); // android/jni/gpu_driver.cpp
+#define DK64_AUDIO_LOCK std::lock_guard<std::recursive_mutex> audio_lock_{ audio_device_mutex }
+#else
+#define DK64_AUDIO_LOCK do { } while (0)
+#endif
+
 // Samples per channel per second.
 static uint32_t sample_rate = 48000;
 static uint32_t output_sample_rate = 48000;
@@ -339,6 +358,10 @@ void queue_samples(int16_t* audio_data, size_t sample_count) {
         throw std::runtime_error("Error using SDL audio converter");
     }
 
+    DK64_AUDIO_LOCK;
+#if defined(__ANDROID__)
+    audio_last_queued_ms.store(SDL_GetTicks64(), std::memory_order_relaxed);
+#endif
     uint64_t cur_queued_microseconds = uint64_t(SDL_GetQueuedAudioSize(audio_device)) / bytes_per_frame * 1000000 / sample_rate;
     uint32_t num_bytes_to_queue = audio_convert.len_cvt - output_channels * discarded_output_frames * sizeof(swap_buffer[0]);
     float* samples_to_queue = swap_buffer.data() + output_channels * discarded_output_frames / 2;
@@ -406,7 +429,11 @@ void queue_samples(int16_t* audio_data, size_t sample_count) {
 size_t get_frames_remaining() {
     constexpr float buffer_offset_frames = 1.0f;
     // Get the number of remaining buffered audio bytes.
-    uint64_t buffered_byte_count = SDL_GetQueuedAudioSize(audio_device);
+    uint64_t buffered_byte_count;
+    {
+        DK64_AUDIO_LOCK;
+        buffered_byte_count = SDL_GetQueuedAudioSize(audio_device);
+    }
 
     // Scale the byte count based on the ratio of sample rates and channel counts.
     buffered_byte_count = buffered_byte_count * 2 * sample_rate / output_sample_rate / output_channels;
@@ -461,6 +488,10 @@ bool reset_audio(uint32_t output_freq) {
         .userdata = nullptr
     };
 
+#if defined(__ANDROID__)
+    DK64_AUDIO_LOCK;
+    audio_spec_desired = spec_desired;
+#endif
     audio_device = SDL_OpenAudioDevice(nullptr, false, &spec_desired, nullptr, 0);
     if (audio_device == 0) {
         std::string audio_error = std::string("No audio device could be found. Please make sure an audio device is available.\nError opening audio device: ") + std::string(SDL_GetError());
@@ -473,8 +504,135 @@ bool reset_audio(uint32_t output_freq) {
     output_sample_rate = output_freq;
     update_audio_converter();
 
+#if defined(__ANDROID__)
+    start_audio_watchdog();
+#endif
     return true;
 }
+
+#if defined(__ANDROID__)
+static void audio_watchdog_thread() {
+    constexpr uint64_t check_ms = 500;
+    constexpr uint64_t stuck_queue_ms = 350;      // the queue never drained below this...
+    constexpr uint64_t stuck_window_ms = 2000;    // ...for this long: the output isn't playing
+    constexpr uint64_t not_playing_ms = 1000;     // device reports not playing for this long
+    constexpr uint64_t resume_grace_ms = 2000;    // after coming back from the background
+    constexpr uint64_t reopen_gap_ms = 5000;      // at most one reopen per this long
+    constexpr uint64_t game_silent_ms = 3000;     // the game sent no sound for this long
+
+    uint64_t window_start = 0, min_queued_ms = UINT64_MAX, not_playing_since = 0, last_reopen = 0;
+    uint64_t foreground_since = SDL_GetTicks64();
+    bool was_foreground = true, logged_game_silent = false;
+    int reopens = 0;
+
+    while (true) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(check_ms));
+        const uint64_t now = SDL_GetTicks64();
+        const bool foreground = dk64_android_app_in_foreground() != 0;
+        if (foreground && !was_foreground) {
+            foreground_since = now;
+        }
+        was_foreground = foreground;
+        if (!foreground || now - foreground_since < resume_grace_ms) {
+            // Android pauses audio in the background on purpose; start over once back.
+            window_start = 0;
+            min_queued_ms = UINT64_MAX;
+            not_playing_since = 0;
+            continue;
+        }
+
+        const uint64_t last_queued = audio_last_queued_ms.load(std::memory_order_relaxed);
+        const bool game_sending = last_queued != 0 && now - last_queued < 1000;
+
+        // The game stopped sending sound: nothing to reopen, but say so in the log.
+        if (last_queued != 0 && now - last_queued >= game_silent_ms && ultramodern::is_game_started()) {
+            if (!logged_game_silent) {
+                logged_game_silent = true;
+                printf("Audio watchdog: the game hasn't sent any sound for %llu ms (the output device is fine; "
+                    "the game's own audio stopped)\n", (unsigned long long)(now - last_queued));
+                fflush(stdout);
+            }
+        } else if (game_sending && logged_game_silent) {
+            logged_game_silent = false;
+            printf("Audio watchdog: the game is sending sound again\n");
+            fflush(stdout);
+        }
+
+        SDL_AudioStatus status;
+        uint64_t queued_ms;
+        {
+            DK64_AUDIO_LOCK;
+            if (audio_device == 0) {
+                status = SDL_AUDIO_STOPPED;   // a reopen failed: keep trying
+                queued_ms = 0;
+            } else {
+                status = SDL_GetAudioDeviceStatus(audio_device);
+                queued_ms = uint64_t(SDL_GetQueuedAudioSize(audio_device)) / (output_channels * sizeof(float)) * 1000 / std::max(output_sample_rate, 1u);
+            }
+        }
+
+        // Not playing (stopped or paused) while the app is in front.
+        if (status != SDL_AUDIO_PLAYING) {
+            if (not_playing_since == 0) {
+                not_playing_since = now;
+            }
+        } else {
+            not_playing_since = 0;
+        }
+        // The queue should keep draining; if it never gets low while the game fills it, the
+        // output has stalled.
+        if (window_start == 0) {
+            window_start = now;
+            min_queued_ms = queued_ms;
+        } else {
+            min_queued_ms = std::min(min_queued_ms, queued_ms);
+        }
+        bool stuck = false;
+        if (now - window_start >= stuck_window_ms) {
+            stuck = game_sending && min_queued_ms >= stuck_queue_ms;
+            window_start = now;
+            min_queued_ms = queued_ms;
+        }
+        const bool dead = not_playing_since != 0 && now - not_playing_since >= not_playing_ms;
+        if (!(stuck || dead) || now - last_reopen < reopen_gap_ms) {
+            continue;
+        }
+
+        // Reopen the output device.
+        last_reopen = now;
+        DK64_AUDIO_LOCK;
+        SDL_AudioDeviceID old_device = audio_device;
+        SDL_CloseAudioDevice(old_device);
+        SDL_AudioSpec spec = audio_spec_desired;
+        SDL_AudioDeviceID device = SDL_OpenAudioDevice(nullptr, false, &spec, nullptr, 0);
+        reopens++;
+        if (device == 0) {
+            audio_device = 0;
+            printf("Audio watchdog: output %s (queue %llu ms); reopening failed: %s (will retry)\n",
+                dead ? "stopped" : "stuck", (unsigned long long)queued_ms, SDL_GetError());
+            // audio_device stays 0 until a reopen works; try again shortly.
+            not_playing_since = now - not_playing_ms;
+        } else {
+            audio_device = device;
+            SDL_PauseAudioDevice(audio_device, 0);
+            update_audio_converter();
+            printf("Audio watchdog: output %s (status %d, queue %llu ms); reopened the audio device (%d so far)\n",
+                dead ? "stopped" : "stuck", int(status), (unsigned long long)queued_ms, reopens);
+            not_playing_since = 0;
+        }
+        fflush(stdout);
+        window_start = 0;
+        min_queued_ms = UINT64_MAX;
+    }
+}
+
+static void start_audio_watchdog() {
+    static std::once_flag started;
+    std::call_once(started, []() {
+        std::thread(audio_watchdog_thread).detach();
+    });
+}
+#endif
 
 extern RspUcodeFunc n_aspMain;
 

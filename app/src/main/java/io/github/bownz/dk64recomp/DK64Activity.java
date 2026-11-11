@@ -192,6 +192,7 @@ public class DK64Activity extends SDLActivity
         storage.onResume();
         inputManager.registerInputDeviceListener(this, null);
         displayManager.registerDisplayListener(this, null);
+        setForeground(true);
         hideSystemBars();
         preferSixtyHz();
         // Controllers or displays may have changed while we were away.
@@ -214,6 +215,7 @@ public class DK64Activity extends SDLActivity
         displayManager.unregisterDisplayListener(this);
         Diagnostics.markLeaving(this);
         super.onPause();
+        setForeground(false);
     }
 
     @Override
@@ -342,6 +344,13 @@ public class DK64Activity extends SDLActivity
     }
 
     /** From the in-game Graphics settings: install or remove driver packages. */
+    private static native void nativeSetForeground(boolean foreground);
+
+    /** Tells the audio watchdog whether the app is in front (sound pauses in the background). */
+    private static void setForeground(boolean foreground) {
+        try { nativeSetForeground(foreground); } catch (UnsatisfiedLinkError ignored) { }
+    }
+
     /** From native code (Settings > General > Game Files Location): offers to move the files. */
     public String changeStorageLocation() {
         runOnUiThread(storage::startChange);
