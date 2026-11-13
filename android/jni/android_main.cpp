@@ -23,6 +23,8 @@
 #include <vector>
 
 int dk64_main(int argc, char** argv);
+extern "C" void dk64_android_record_output(const char* data, size_t size);
+extern "C" void dk64_android_set_slowdown_folder(const char* data_dir);
 
 namespace {
     constexpr const char* log_tag = "DK64Recomp";
@@ -56,6 +58,7 @@ namespace {
                     fwrite(buffer, 1, size_t(size), session_log);
                     fflush(session_log);
                 }
+                dk64_android_record_output(buffer, size_t(size));
                 if (buffer[size - 1] == '\n') {
                     size--;
                 }
@@ -163,6 +166,7 @@ extern "C" int SDL_main(int argc, char* argv[]) {
 
     std::error_code ec;
     std::filesystem::create_directories(data_dir, ec);
+    dk64_android_set_slowdown_folder(data_dir.c_str());
 
     // recompui::file::get_app_folder_path() honours APP_FOLDER_PATH on Linux-like
     // platforms (Android defines __linux__), and RT64's user paths fall back to HOME.

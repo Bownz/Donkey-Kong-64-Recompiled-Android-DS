@@ -193,6 +193,8 @@ public class DK64Activity extends SDLActivity
         inputManager.registerInputDeviceListener(this, null);
         displayManager.registerDisplayListener(this, null);
         setForeground(true);
+        thermalHandler.removeCallbacks(thermalTick);
+        thermalHandler.post(thermalTick);
         hideSystemBars();
         preferSixtyHz();
         // Controllers or displays may have changed while we were away.
@@ -208,6 +210,7 @@ public class DK64Activity extends SDLActivity
         }
         // Moves from the touch buttons (on either screen) stop, and Z is let go.
         TouchMoves.get().cancel();
+        thermalHandler.removeCallbacks(thermalTick);
         if (presentation != null && presentation.getBottomScreen() != null) {
             presentation.getBottomScreen().cancel();
         }
@@ -345,6 +348,58 @@ public class DK64Activity extends SDLActivity
 
     /** From the in-game Graphics settings: install or remove driver packages. */
     private static native void nativeSetForeground(boolean foreground);
+
+    private static native void nativeRecordLine(String line);
+
+    /**
+     * Every 5 seconds while playing: the phone's temperature and thermal state, into the log and
+     * the slowdown recorder, so a slowdown report shows whether the phone was throttling.
+     */
+    private final android.os.Handler thermalHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable thermalTick = new Runnable() {
+        @Override
+        public void run() {
+            String line = thermalLine();
+            if (line != null) {
+                Log.i("DK64Recomp", line);
+                try { nativeRecordLine(line); } catch (UnsatisfiedLinkError ignored) { }
+            }
+            thermalHandler.postDelayed(this, 5000);
+        }
+    };
+
+    private static final String[] THERMAL_NAMES = {
+        "none", "light", "moderate", "severe", "critical", "emergency", "shutdown" };
+
+    private String thermalLine() {
+        StringBuilder b = new StringBuilder("Phone heat:");
+        try {
+            Intent battery = registerReceiver(null, new android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+            if (battery != null) {
+                int tenths = battery.getIntExtra(android.os.BatteryManager.EXTRA_TEMPERATURE, Integer.MIN_VALUE);
+                if (tenths != Integer.MIN_VALUE) {
+                    b.append(String.format(java.util.Locale.US, " battery %.1f C", tenths / 10f));
+                }
+                int plugged = battery.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED, 0);
+                b.append(plugged != 0 ? " (charging)" : "");
+            }
+        } catch (RuntimeException ignored) { }
+        if (Build.VERSION.SDK_INT >= 29) {
+            PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+            if (pm != null) {
+                int status = pm.getCurrentThermalStatus();
+                b.append(" | thermal ").append(status >= 0 && status < THERMAL_NAMES.length ? THERMAL_NAMES[status] : String.valueOf(status));
+                if (Build.VERSION.SDK_INT >= 30) {
+                    // 1.0 = the point where the phone starts throttling hard.
+                    float headroom = pm.getThermalHeadroom(0);
+                    if (!Float.isNaN(headroom)) {
+                        b.append(String.format(java.util.Locale.US, ", headroom %.2f", headroom));
+                    }
+                }
+            }
+        }
+        return b.length() > "Phone heat:".length() ? b.toString() : null;
+    }
 
     /** Tells the audio watchdog whether the app is in front (sound pauses in the background). */
     private static void setForeground(boolean foreground) {

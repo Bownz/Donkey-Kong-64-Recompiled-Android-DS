@@ -21,6 +21,8 @@
 #include <thread>
 #include <vector>
 
+extern "C" void dk64_android_record_line(const char* line);
+
 namespace {
     constexpr const char* log_tag = "DK64Recomp";
     std::atomic<bool> started{false};
@@ -133,6 +135,7 @@ namespace {
             snprintf(tail, sizeof(tail), " | total %.0f%%", total);
             line += tail;
             __android_log_print(ANDROID_LOG_INFO, log_tag, "%s", line.c_str());
+            dk64_android_record_line(line.c_str());
 
             // Clock speeds, if readable (MHz).
             std::string clocks = "Perf clocks: CPU";
@@ -155,6 +158,7 @@ namespace {
                 clocks += part;
             }
             __android_log_print(ANDROID_LOG_INFO, log_tag, "%s", clocks.c_str());
+            dk64_android_record_line(clocks.c_str());
         }
     }
 }

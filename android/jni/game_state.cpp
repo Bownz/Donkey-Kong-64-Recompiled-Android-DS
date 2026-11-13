@@ -17,6 +17,8 @@
 #include "gpu_driver.h"
 #include <cstdint>
 
+extern "C" void dk64_android_slowdown_second(float fps, int map, int chunk);
+
 namespace {
     std::atomic<uint8_t*> g_rdram{nullptr};
     std::atomic<bool> g_touch_kong_swap{false};
@@ -587,7 +589,7 @@ namespace {
         return false;
     }
 
-    // Logs places that run slow (at most once every 5 seconds).
+    // Logs places that run slow (at most once every 5 seconds), and feeds the slowdown recorder.
     std::chrono::steady_clock::time_point g_fps_start{};
     uint32_t g_fps_frames = 0;
     std::chrono::steady_clock::time_point g_last_slow_log{};
@@ -604,6 +606,9 @@ namespace {
         }
         const float fps = (g_fps_frames - 1) / elapsed;
         g_fps_frames = 0;
+        if (elapsed < 2.0f) {   // longer gaps are pauses (app in the background), not slowness
+            dk64_android_slowdown_second(fps, g_area_map.load(), g_area_chunk.load());
+        }
         if (elapsed < 2.0f && fps < 27.5f && now - g_last_slow_log > std::chrono::seconds(5)) {
             g_last_slow_log = now;
             __android_log_print(ANDROID_LOG_INFO, "DK64Recomp", "Slow area: map 0x%02X chunk %d, %.1f FPS%s",
