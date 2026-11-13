@@ -226,4 +226,10 @@ Java_io_github_bownz_dk64recomp_TouchInput_nativeTakePhysicalZ(JNIEnv*, jclass) 
     return bits;
 }
 
+// Whether Z is held on the controller (or keyboard) right now, without taking the press.
+JNIEXPORT jboolean JNICALL
+Java_io_github_bownz_dk64recomp_TouchInput_nativePhysicalZHeld(JNIEnv*, jclass) {
+    return physical_z_down.load(std::memory_order_relaxed) ? JNI_TRUE : JNI_FALSE;
+}
+
 } // extern "C"

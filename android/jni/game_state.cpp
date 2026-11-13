@@ -23,7 +23,7 @@ namespace {
     std::atomic<uint8_t*> g_rdram{nullptr};
     std::atomic<bool> g_touch_kong_swap{false};
     std::atomic<bool> g_touch_feedback{true};
-    std::atomic<bool> g_bottom_buttons{true};
+    std::atomic<int> g_bottom_buttons{1};   // 0 off, 1 on, 2 appear while Z is held
     std::atomic<int> g_touch_feedback_strength{2};
     // patches/android_hooks.c reports each input-handler set the game runs; a frame can run
     // several (e.g. a mode's own set plus shared ones). They're collected per frame.
@@ -486,13 +486,13 @@ void dk64::android::set_touch_kong_swap(bool enabled) {
     g_touch_kong_swap.store(enabled);
 }
 
-void dk64::android::set_bottom_buttons(bool shown) {
-    g_bottom_buttons.store(shown);
+void dk64::android::set_bottom_buttons(int mode) {
+    g_bottom_buttons.store(mode);
 }
 
-extern "C" JNIEXPORT jboolean JNICALL
-Java_io_github_bownz_dk64recomp_GameState_nativeBottomButtons(JNIEnv*, jclass) {
-    return g_bottom_buttons.load() ? JNI_TRUE : JNI_FALSE;
+extern "C" JNIEXPORT jint JNICALL
+Java_io_github_bownz_dk64recomp_GameState_nativeBottomButtonsMode(JNIEnv*, jclass) {
+    return g_bottom_buttons.load();
 }
 
 void dk64::android::set_touch_feedback(bool enabled) {

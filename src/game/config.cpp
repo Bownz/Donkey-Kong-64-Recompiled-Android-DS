@@ -468,19 +468,22 @@ static void add_dual_screen_options(recomp::config::Config &config) {
     static EnumOptionVector bottom_buttons_options = {
         {0u, "Off", "Off"},
         {1u, "On", "On"},
+        {2u, "AppearOnZ", "Appear on Z"},
     };
     config.add_enum_option(
         bottom_buttons_option,
         "Bottom Screen Buttons",
         "The touch buttons on the bottom screen (oranges, gun, instrument, camera, first person). "
-        "Turn them off to give the Kong barrels and collectibles the whole screen.",
+        "Turn them off to give the Kong barrels and collectibles the whole screen. With Appear on Z, "
+        "the Kong barrels and collectibles have the whole screen, and the oranges, gun, instrument and "
+        "camera buttons slide in from the right while you hold Z on your controller.",
         bottom_buttons_options,
         1u,
         one_screen
     );
     config.add_option_change_callback(bottom_buttons_option,
         [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
-            dk64::android::set_bottom_buttons(std::get<uint32_t>(cur) == 1u);
+            dk64::android::set_bottom_buttons(static_cast<int>(std::get<uint32_t>(cur)));
             if (context == recomp::config::OptionChangeContext::Permanent) {
                 recompui::config::get_config("dual_screen").save_config();
             }

@@ -70,6 +70,15 @@ public final class BottomScreenView extends View {
 
     // Layout, in pixels (computed in onSizeChanged).
     private final RectF[] actionRects = { new RectF(), new RectF(), new RectF(), new RectF() };
+    // Bottom Screen Buttons "Appear on Z": where the action buttons sit when slid in, and how far
+    // in each one is (0 out of sight .. 1 in place). They slide in top first while Z is held on
+    // the controller, and out again in the same order when it's let go.
+    private final RectF[] slideHome = { new RectF(), new RectF(), new RectF(), new RectF() };
+    private final float[] slideIn = new float[4];
+    private static final long SLIDE_MS = 170, SLIDE_STAGGER_MS = 60;
+    private int buttonsMode = GameState.BUTTONS_ON;
+    private boolean zShown;
+    private long zChangedAt, slideTickAt;
     /** Tabs: the five Kongs, then shared (non-Kong) collectibles. */
     private static final int SHARED_TAB = GameState.KONG_COUNT;
     private static final int TAB_COUNT = GameState.KONG_COUNT;   // shared items are on the pause screen
@@ -579,21 +588,26 @@ public final class BottomScreenView extends View {
         unit = Math.min(w, h);
         float m = unit * 0.03f;
 
-        buttonsShown = GameState.bottomButtons();
+        buttonsMode = GameState.bottomButtonsMode();
+        buttonsShown = buttonsMode == GameState.BUTTONS_ON;
         float left = m, right;
+        // Right column: four action buttons (where they slide in to with Appear on Z).
+        float colW = Math.min(w * 0.27f, h * 0.27f);
+        float colLeft = w - m - colW;
+        float colGap = m * 0.7f;
+        float cellH = (h - 2 * m - 3 * colGap) / 4f;
+        for (int i = 0; i < 4; i++) {
+            float top = m + i * (cellH + colGap);
+            slideHome[i].set(colLeft, top, w - m, top + cellH);
+        }
         if (buttonsShown) {
-            // Right column: four action buttons.
-            float colW = Math.min(w * 0.27f, h * 0.27f);
-            float colLeft = w - m - colW;
-            float gap = m * 0.7f;
-            float cellH = (h - 2 * m - 3 * gap) / 4f;
             for (int i = 0; i < 4; i++) {
-                float top = m + i * (cellH + gap);
-                actionRects[i].set(colLeft, top, w - m, top + cellH);
+                actionRects[i].set(slideHome[i]);
             }
             right = colLeft - m;
         } else {
-            // Bottom Screen Buttons off: no button column; everything else spreads across.
+            // Bottom Screen Buttons off (or appearing on Z): no button column; everything else
+            // spreads across.
             for (RectF r : actionRects) {
                 r.setEmpty();
             }
@@ -698,7 +712,7 @@ public final class BottomScreenView extends View {
             return;
         }
         watch("kong", state.currentKong, "tab" + state.currentKong);
-        if (GameState.bottomButtons() != buttonsShown) {
+        if (GameState.bottomButtonsMode() != buttonsMode) {
             layoutFor(getWidth(), getHeight());   // the setting changed
         }
         if (buttonsShown) {
@@ -718,6 +732,48 @@ public final class BottomScreenView extends View {
         drawKongPanel(canvas);
         drawCarrying(canvas);   // after the panel, so its icons can poke out over it
         if (buttonsShown) {
+            drawActions(canvas);
+        } else if (buttonsMode == GameState.BUTTONS_ON_Z) {
+            drawSlidingActions(canvas);
+        }
+    }
+
+    /**
+     * Appear on Z: while Z is held on the controller, the action buttons slide in over the right
+     * side, the top one first and the others just after; when it's let go they slide back out
+     * in the same order.
+     */
+    private void drawSlidingActions(Canvas canvas) {
+        long now = android.os.SystemClock.uptimeMillis();
+        float dt = slideTickAt == 0 ? 0f : Math.min(100f, now - slideTickAt);
+        slideTickAt = now;
+        boolean z = TouchInput.physicalZHeld();
+        if (z != zShown) {
+            zShown = z;
+            zChangedAt = now;
+        }
+        float target = zShown ? 1f : 0f;
+        boolean any = false;
+        float away = getWidth() - slideHome[0].left + unit * 0.03f;
+        for (int i = 0; i < 4; i++) {
+            if (slideIn[i] != target && now - zChangedAt >= i * SLIDE_STAGGER_MS) {
+                float step = dt / SLIDE_MS;
+                slideIn[i] = target > slideIn[i] ? Math.min(target, slideIn[i] + step) : Math.max(target, slideIn[i] - step);
+            }
+            if (slideIn[i] != target) {
+                animating = true;
+            }
+            if (slideIn[i] > 0f) {
+                any = true;
+                float t = 1f - slideIn[i];
+                float e = 1f - t * t * t;   // eased: quick, then settling into place
+                actionRects[i].set(slideHome[i]);
+                actionRects[i].offset((1f - e) * away, 0f);
+            } else {
+                actionRects[i].setEmpty();
+            }
+        }
+        if (any) {
             drawActions(canvas);
         }
     }
@@ -1632,8 +1688,11 @@ public final class BottomScreenView extends View {
         // ...and when you go to another level (DK Isles into Jungle Japes, say).
         watch("panelLevel", shownLevel(), "panelOpen");
         float open = animProgress("panelOpen", PANEL_OPEN_MS);
+        // The frame and the level's name stay where they are; only the counts grow out of the
+        // Kong's barrel.
+        float rowsTop = drawKongPanelFrame(c);
         if (open < 0f || tab < 0 || tab >= tabRects.length) {
-            drawKongPanelContents(c, tab);
+            drawKongPanelRows(c, tab, rowsTop);
             return;
         }
         RectF p = panelRect;
@@ -1646,17 +1705,14 @@ public final class BottomScreenView extends View {
         c.translate(x, y);
         c.scale(scale, scale);
         c.translate(-p.centerX(), -p.centerY());
-        drawKongPanelContents(c, tab);
+        drawKongPanelRows(c, tab, rowsTop);
         c.restoreToCount(saved);
     }
 
-    private void drawKongPanelContents(Canvas c, int tab) {
+    /** The panel's wooden frame, dark board and level name; returns where the counts start. */
+    private float drawKongPanelFrame(Canvas c) {
         RectF p = panelRect;
         woodPanel(c, p, unit * 0.03f, false);
-
-        java.util.List<Row> rows = rowsFor(tab, shownLevel());
-        rows.removeIf(r -> r.total == 0);   // nothing of that kind here (e.g. bananas in Helm)
-        rows.removeIf(r -> r.label.equals("Coins"));   // shown under Carrying
 
         // Dark inset board.
         float frame = unit * 0.035f;
@@ -1684,11 +1740,19 @@ public final class BottomScreenView extends View {
             text.setTextSize(fitText(title, board.width() * 0.8f, titleH * 0.62f));
             outlined(c, title, board.centerX(), board.top + titleH * 0.6f + text.getTextSize() * 0.36f, BANANA);
         }
+        return board.top + titleH;
+    }
+
+    /** The counts, as badges with tags, in two columns under the level name. */
+    private void drawKongPanelRows(Canvas c, int tab, float rowsTop) {
+        RectF board = boardRect;
+        java.util.List<Row> rows = rowsFor(tab, shownLevel());
+        rows.removeIf(r -> r.total == 0);   // nothing of that kind here (e.g. bananas in Helm)
+        rows.removeIf(r -> r.label.equals("Coins"));   // shown under Carrying
 
         int cols = 2;
         int lines = (rows.size() + cols - 1) / cols;
         float cellW = board.width() / cols;
-        float rowsTop = board.top + titleH;
         float cellH = (board.bottom - rowsTop) / Math.max(lines, 1);
         float badgeR = Math.min(cellH * 0.34f, cellW * 0.17f);
         for (int i = 0; i < rows.size(); i++) {
@@ -2044,7 +2108,7 @@ public final class BottomScreenView extends View {
             return true;
         }
         for (int i = 0; i < 4; i++) {
-            if (actionRects[i].contains(x, y)) {
+            if (actionRects[i].contains(x, y) && (buttonsShown || slideIn[i] > 0.6f)) {
                 if (owned(ACTIONS[i]) && moves.available(ACTIONS[i])) {
                     doMove(ACTIONS[i]);
                 }

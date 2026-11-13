@@ -69,6 +69,17 @@ final class TouchInput {
         }
     }
 
+    private static native boolean nativePhysicalZHeld();
+
+    /** Z held on the controller or keyboard right now (not the on-screen buttons). */
+    static boolean physicalZHeld() {
+        try {
+            return nativePhysicalZHeld();
+        } catch (UnsatisfiedLinkError e) {
+            return false;
+        }
+    }
+
     /** Buttons pressed for a moment by an on-screen button (replaces the previous ones). */
     static synchronized void setN64Buttons(int buttons) {
         pressedN64 = buttons;
