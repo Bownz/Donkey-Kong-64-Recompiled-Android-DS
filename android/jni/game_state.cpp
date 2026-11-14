@@ -638,10 +638,12 @@ Java_io_github_bownz_dk64recomp_GameState_nativeArea(JNIEnv*, jclass) {
 }
 
 extern "C" void dk64_android_perf_hint_add_thread();
+extern "C" void dk64_android_set_thread_role(int role);
 
 extern "C" void dk64_android_report_frame() {
     if (g_frames.fetch_add(1, std::memory_order_relaxed) == 0) {
-        dk64_android_perf_hint_add_thread();   // the game's own thread: performance hints
+        dk64_android_perf_hint_add_thread();   // the game's own thread: performance hints,
+        dk64_android_set_thread_role(0);       // and the prime core(s) (cpu_layout.cpp)
     }
     if (const uint8_t* rdram = g_rdram.load(std::memory_order_relaxed)) {
         read_area(rdram);

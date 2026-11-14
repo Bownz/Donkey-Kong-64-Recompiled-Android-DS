@@ -22,6 +22,7 @@
 #include <vector>
 
 extern "C" void dk64_android_record_line(const char* line);
+extern "C" void dk64_android_set_thread_role(int role);
 
 namespace {
     constexpr const char* log_tag = "DK64Recomp";
@@ -170,6 +171,7 @@ extern "C" void dk64_android_start_perf_monitor() {
     }
     std::thread([] {
         pthread_setname_np(pthread_self(), "Perf monitor");
+        dk64_android_set_thread_role(2);   // background: off the cores the game uses
         run();
     }).detach();
 }
