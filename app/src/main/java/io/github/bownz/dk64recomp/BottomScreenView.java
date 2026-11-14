@@ -56,17 +56,34 @@ public final class BottomScreenView extends View {
     private static final long Z_TAIL_MS = 60;
     private static final long POLL_MS = 150;
 
-    private enum Move { WEAPON, ORANGE, INSTRUMENT, CAMERA, FIRST_PERSON }
 
-    private static final Move[] ACTIONS = { Move.ORANGE, Move.WEAPON, Move.INSTRUMENT, Move.CAMERA };
+    private static final TouchMoves.Move[] ACTIONS = { TouchMoves.Move.ORANGE, TouchMoves.Move.WEAPON, TouchMoves.Move.INSTRUMENT, TouchMoves.Move.CAMERA };
 
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private final GameState state = new GameState();
+    // Moves (action buttons, first person, the dynamic button) are shared with the on-screen
+    // controller (TouchMoves), and so is the game state they read.
+    private final TouchMoves moves = TouchMoves.get();
+    private final GameState state = moves.state;
+    private final Runnable movesChanged = this::invalidate;
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint text = new Paint(Paint.ANTI_ALIAS_FLAG);
 
     // Layout, in pixels (computed in onSizeChanged).
     private final RectF[] actionRects = { new RectF(), new RectF(), new RectF(), new RectF() };
+    // Bottom Screen Buttons "Appear on Z": where the action buttons sit when slid in, and how far
+    // in each slot is (0 out of sight .. 1 in place). Slot 0 is the dynamic button (Cancel,
+    // Orangstand, a Z + B move), slots 1-4 the action buttons. They slide in top first while Z
+    // is held on the controller, and out again in the same order when it's let go.
+    private final RectF[] slideHome = { new RectF(), new RectF(), new RectF(), new RectF() };
+    private final float[] slideIn = new float[5];
+    private float zDynX, zDynY, zDynR;   // the dynamic button's slot, slid in
+    private float slideAway;
+    private boolean fpShown = true;      // Bottom Screen First Person Button
+    private boolean fpSetting = true;
+    private static final long SLIDE_MS = 170, SLIDE_STAGGER_MS = 60;
+    private int buttonsMode = GameState.BUTTONS_ON;
+    private boolean zShown;
+    private long zChangedAt, slideTickAt;
     /** Tabs: the five Kongs, then shared (non-Kong) collectibles. */
     private static final int SHARED_TAB = GameState.KONG_COUNT;
     private static final int TAB_COUNT = GameState.KONG_COUNT;   // shared items are on the pause screen
@@ -91,7 +108,6 @@ public final class BottomScreenView extends View {
     private float unit;
     private float rowText;
 
-    private Move running;
     private int selectedKong = -1;   // -1: follow the Kong being played
     private boolean buttonsShown = true;   // Bottom Screen Buttons (Input > Touch)
 
@@ -108,8 +124,7 @@ public final class BottomScreenView extends View {
     private final Runnable poll = new Runnable() {
         @Override
         public void run() {
-            int crystalsBefore = state.crystals;
-            boolean changed = state.refresh();
+            boolean changed = moves.refresh();
             if (state.paused && !wasPaused) {
                 pauseLevel = state.level >= 0 ? state.level : -1;   // open on where you are
                 pauseSlideFrom = NO_LEVEL;   // the table slides in from the right
@@ -117,13 +132,9 @@ public final class BottomScreenView extends View {
                 startAnim("pauseSlide");
             }
             wasPaused = state.paused;
-            if (state.inGame() && state.crystals < crystalsBefore) {
-                crystalsDrainedAt = android.os.SystemClock.uptimeMillis();
-            }
             boolean cancelBefore = cancelShown;
-            cancelShown = showCancel();
+            cancelShown = moves.showCancel();
             changed |= cancelShown != cancelBefore;
-            updateOrangstand();
             if (changed) {
                 invalidate();
             }
@@ -164,107 +175,27 @@ public final class BottomScreenView extends View {
         }
         this.active = active;
         if (active) {
+            moves.addListener(movesChanged);
+            moves.acquire();
             handler.post(poll);
         } else {
             cancel();
             handler.removeCallbacksAndMessages(null);
+            moves.release();
+            moves.removeListener(movesChanged);
         }
     }
 
     /** Stops any move in progress and lets go of every input (e.g. when the app pauses). */
     public void cancel() {
         handler.removeCallbacksAndMessages(null);
-        if (running != null) {
-            TouchInput.setN64Buttons(0);
-            running = null;
-            invalidate();
-        }
+        moves.cancel();
         if (swapTarget >= 0) {
             swapEnd();
-        }
-        if (orangstandBusy || orangstand) {
-            TouchInput.setN64Buttons(0);
-            TouchInput.setHeldN64Buttons(0);
-            orangstandBusy = false;
-            orangstand = false;
         }
         if (active) {
             handler.post(poll);
         }
-    }
-
-    // ------------------------------------------------------------------------------
-    // Moves
-    // ------------------------------------------------------------------------------
-
-    private void perform(Move move) {
-        if (running != null) {
-            return; // One move at a time; a sequence takes ~0.3 s.
-        }
-        running = move;
-        Haptics.tap(this);
-        startAnim("squash" + move);
-        startAnim("wiggle" + move);
-        invalidate();
-
-        // The buttons press N64 Z and C directly (not through the controller mappings).
-        final int c;
-        switch (move) {
-            case WEAPON:     c = TouchInput.N64_C_LEFT; break;
-            case ORANGE:     c = TouchInput.N64_C_RIGHT; break;
-            case INSTRUMENT: c = TouchInput.N64_C_UP; break;
-            case CAMERA:     c = TouchInput.N64_C_DOWN; break;
-            default:         c = TouchInput.N64_C_UP; break;
-        }
-
-        if (move == Move.CAMERA && state.camera) {
-            // Leaving the camera: C-Down on its own (code_EBBE0.c), then C-Up if that didn't.
-            TouchInput.setN64Buttons(TouchInput.N64_C_DOWN);
-            handler.postDelayed(() -> TouchInput.setN64Buttons(0), C_HOLD_MS);
-            handler.postDelayed(() -> {
-                state.refresh();
-                if (!state.camera) {
-                    running = null;
-                    invalidate();
-                    return;
-                }
-                TouchInput.setN64Buttons(TouchInput.N64_C_UP);
-                handler.postDelayed(() -> {
-                    TouchInput.setN64Buttons(0);
-                    running = null;
-                    invalidate();
-                }, C_HOLD_MS);
-            }, C_HOLD_MS + 250);
-            return;
-        }
-
-        if (move == Move.FIRST_PERSON) {
-            // C-Up on its own enters first-person view, and pressing it again leaves it.
-            TouchInput.setN64Buttons(c);
-            handler.postDelayed(() -> {
-                TouchInput.setN64Buttons(0);
-                running = null;
-                invalidate();
-            }, C_HOLD_MS);
-            return;
-        }
-
-        final int z = TouchInput.N64_Z;
-        // Putting the gun away from first-person aiming: leave first person first (C-Up), then
-        // Z + C-Left as usual, so the view doesn't stay in first person without the gun.
-        final long lead = (move == Move.WEAPON && state.gunOut && state.firstPerson) ? C_HOLD_MS + 250 : 0;
-        if (lead > 0) {
-            TouchInput.setN64Buttons(TouchInput.N64_C_UP);
-            handler.postDelayed(() -> TouchInput.setN64Buttons(0), C_HOLD_MS);
-        }
-        handler.postDelayed(() -> TouchInput.setN64Buttons(z), lead);                       // Z
-        handler.postDelayed(() -> TouchInput.setN64Buttons(z | c), lead + Z_LEAD_MS);       // + C
-        handler.postDelayed(() -> TouchInput.setN64Buttons(z), lead + Z_LEAD_MS + C_HOLD_MS);
-        handler.postDelayed(() -> {
-            TouchInput.setN64Buttons(0);
-            running = null;
-            invalidate();
-        }, lead + Z_LEAD_MS + C_HOLD_MS + Z_TAIL_MS);
     }
 
     // ------------------------------------------------------------------------------
@@ -309,7 +240,7 @@ public final class BottomScreenView extends View {
             return false;
         }
         selectedKong = -1;   // follow the Kong being played
-        if (current || swapTarget >= 0 || running != null) {
+        if (current || swapTarget >= 0 || moves.running != null) {
             invalidate();
             return true;
         }
@@ -404,143 +335,28 @@ public final class BottomScreenView extends View {
     };
 
     // ------------------------------------------------------------------------------
-    // Lanky's Orangstand toggle
+    // The dynamic button (Orangstand, Z + B moves, Cancel): the moves are in TouchMoves
     // ------------------------------------------------------------------------------
-    //
-    // A toggle: Z then B (as on a controller) puts Lanky on his hands, and Z stays held to
-    // keep him there, as the game needs. Tapping again lets go of Z. Pressing Z on the
-    // controller takes over (he stays up while it's held). It also lets go when he ends up
-    // back on his feet or in water (Z stays held through the pause menu).
-
-    private boolean orangstand;      // Lanky is on his hands (entered with this button)
-    private boolean orangstandBusy;
-
-    private boolean onFeet() {
-        return state.onFeet;
-    }
-
-    private boolean showOrangstand() {
-        return state.inGame() && state.currentKong == GameState.LANKY
-            && state.kongs[GameState.LANKY].moves >= 1;
-    }
-
-    /** Called on each poll: notice when Lanky is back on his feet (or isn't Lanky). */
-    private void updateOrangstand() {
-        int physicalZ = TouchInput.takePhysicalZ();
-        if (orangstand && !orangstandBusy && (physicalZ & 2) != 0) {
-            // The player pressed Z on the controller: hand over to it. While they hold Z,
-            // Lanky stays on his hands; letting go puts him back on his feet.
-            stopOrangstand();
-            return;
-        }
-        if (orangstand && !orangstandBusy && (!showOrangstand() || (!state.paused && (onFeet() || state.swimming)))) {
-            stopOrangstand();
-        }
-    }
-
-    private void toggleOrangstand() {
-        if (orangstandBusy || running != null || state.paused) {
-            return;
-        }
-        Haptics.tap(this);
-        if (orangstand) {
-            // Letting go of Z puts Lanky back on his feet.
-            stopOrangstand();
-            return;
-        }
-        if (!state.canZMoves || state.gunOut) {
-            return;
-        }
-        // Z, then B while Z is held; Z then stays held to keep him on his hands.
-        orangstandBusy = true;
-        invalidate();
-        final int z = TouchInput.N64_Z, b = TouchInput.N64_B;
-        TouchInput.setHeldN64Buttons(z);
-        handler.postDelayed(() -> TouchInput.setN64Buttons(b), Z_LEAD_MS);
-        handler.postDelayed(() -> TouchInput.setN64Buttons(0), Z_LEAD_MS + C_HOLD_MS);
-        handler.postDelayed(() -> {
-            state.refresh();
-            TouchInput.takePhysicalZ();   // forget Z presses from before he got on his hands
-            orangstandBusy = false;
-            orangstand = !onFeet() && !state.swimming;
-            if (!orangstand) {
-                TouchInput.setHeldN64Buttons(0);   // it didn't take: don't leave Z held
-            }
-            invalidate();
-        }, Z_LEAD_MS + C_HOLD_MS + 350);
-    }
-
-    private void stopOrangstand() {
-        orangstand = false;
-        TouchInput.setHeldN64Buttons(0);
-        invalidate();
-    }
-
-    // ------------------------------------------------------------------------------
-    // Other Z + B moves (same place): Diddy's Chimpy Charge, Chunky's Primate Punch
-    // ------------------------------------------------------------------------------
-    //
-    // Crouching then B (code_E4090.c): Diddy charges once he has his first Cranky move,
-    // Chunky punches once he has his second.
-
-    private boolean zbBusy;
-
-    /** The current Kong's Z + B move, if bought; null if none (Lanky's is the toggle above). */
-    private String zbMoveName() {
-        if (!state.inGame()) {
-            return null;
-        }
-        int k = state.currentKong;
-        if (k == GameState.DIDDY && state.kongs[k].moves >= 1) {
-            return "Charge";
-        }
-        if (k == GameState.CHUNKY && state.kongs[k].moves >= 2) {
-            return "Punch";
-        }
-        return null;
-    }
-
-    private boolean zbMoveUsable() {
-        return !state.paused && !state.swimming && !state.climbing && !state.gunOut;
-    }
-
-    private void performZbMove() {
-        if (zbBusy || running != null || !zbMoveUsable() || !state.canZMoves) {
-            return;
-        }
-        Haptics.tap(this);
-        zbBusy = true;
-        invalidate();
-        final int z = TouchInput.N64_Z, b = TouchInput.N64_B;
-        TouchInput.setN64Buttons(z);
-        handler.postDelayed(() -> TouchInput.setN64Buttons(z | b), Z_LEAD_MS);
-        handler.postDelayed(() -> TouchInput.setN64Buttons(z), Z_LEAD_MS + C_HOLD_MS);
-        handler.postDelayed(() -> {
-            TouchInput.setN64Buttons(0);
-            zbBusy = false;
-            invalidate();
-        }, Z_LEAD_MS + C_HOLD_MS + Z_TAIL_MS);
-    }
 
     /** A round orange badge with the Kong's face, named after the move. */
     private void drawZbMoveButton(Canvas c) {
-        String name = zbMoveName();
-        boolean enabled = zbMoveUsable();
+        String name = moves.zbMoveName();
+        boolean enabled = moves.zbMoveUsable();
         float r = osR * 0.92f;
         float cy = osY - osR * 0.08f;
         int saved = c.saveLayerAlpha(osX - osR * 1.1f, osY - osR * 1.1f, osX + osR * 1.1f, osY + osR * 1.1f, enabled ? 255 : 90);
         paint.setStyle(Paint.Style.FILL);
         paint.setColor(OUTLINE);
         c.drawCircle(osX, cy, r, paint);
-        int top = zbBusy ? Color.rgb(250, 200, 90) : Color.rgb(200, 130, 50);
-        int bottom = zbBusy ? Color.rgb(200, 120, 30) : Color.rgb(120, 70, 20);
+        int top = moves.zbBusy ? Color.rgb(250, 200, 90) : Color.rgb(200, 130, 50);
+        int bottom = moves.zbBusy ? Color.rgb(200, 120, 30) : Color.rgb(120, 70, 20);
         paint.setAlpha(255);
         paint.setShader(new LinearGradient(0, cy - r, 0, cy + r, top, bottom, Shader.TileMode.CLAMP));
         c.drawCircle(osX, cy, r * 0.87f, paint);
         paint.setShader(null);
         paint.setStyle(Paint.Style.STROKE);
         paint.setStrokeWidth(unit * 0.006f);
-        paint.setColor(zbBusy ? BANANA : Color.argb(140, 255, 255, 255));
+        paint.setColor(moves.zbBusy ? BANANA : Color.argb(140, 255, 255, 255));
         c.drawCircle(osX, cy, r * 0.87f, paint);
         paint.setStyle(Paint.Style.FILL);
         if (!RomIcons.draw(c, RomIcons.face[state.currentKong], osX, cy, r * 0.62f)) {
@@ -562,13 +378,7 @@ public final class BottomScreenView extends View {
     // up crystal coconuts while they last, and Z + C-Left ends them (code_CEAE0.c). The
     // button shows while the game reports one, or while crystals are running down.
 
-    private long crystalsDrainedAt;
     private boolean cancelShown;
-    private boolean cancelBusy;
-
-    private boolean showCancel() {
-        return state.inGame() && (state.transformed || android.os.SystemClock.uptimeMillis() - crystalsDrainedAt < 1500);
-    }
 
     // ---- Cutscene skip -----------------------------------------------------------------
 
@@ -646,27 +456,6 @@ public final class BottomScreenView extends View {
         invalidate();
     }
 
-    private void cancelAbility() {
-        if (cancelBusy || running != null || state.paused) {
-            return;
-        }
-        Haptics.tap(this);
-        cancelBusy = true;
-        invalidate();
-        final int z = TouchInput.N64_Z, c = TouchInput.N64_C_LEFT;
-        TouchInput.setN64Buttons(z);
-        handler.postDelayed(() -> TouchInput.setN64Buttons(z | c), Z_LEAD_MS);
-        handler.postDelayed(() -> TouchInput.setN64Buttons(z), Z_LEAD_MS + C_HOLD_MS);
-        handler.postDelayed(() -> {
-            TouchInput.setN64Buttons(0);
-            crystalsDrainedAt = 0;
-        }, Z_LEAD_MS + C_HOLD_MS + Z_TAIL_MS);
-        handler.postDelayed(() -> {
-            cancelBusy = false;
-            invalidate();
-        }, Z_LEAD_MS + C_HOLD_MS + Z_TAIL_MS + 400);
-    }
-
     /** A round red badge with the Kong's face and a cross: ends the barrel ability. */
     private void drawCancelButton(Canvas c) {
         boolean enabled = !state.paused;
@@ -676,15 +465,15 @@ public final class BottomScreenView extends View {
         paint.setStyle(Paint.Style.FILL);
         paint.setColor(OUTLINE);
         c.drawCircle(osX, cy, r, paint);
-        int top = cancelBusy ? Color.rgb(255, 140, 120) : Color.rgb(220, 70, 50);
-        int bottom = cancelBusy ? Color.rgb(200, 60, 40) : Color.rgb(120, 20, 15);
+        int top = moves.cancelBusy ? Color.rgb(255, 140, 120) : Color.rgb(220, 70, 50);
+        int bottom = moves.cancelBusy ? Color.rgb(200, 60, 40) : Color.rgb(120, 20, 15);
         paint.setAlpha(255);
         paint.setShader(new LinearGradient(0, cy - r, 0, cy + r, top, bottom, Shader.TileMode.CLAMP));
         c.drawCircle(osX, cy, r * 0.87f, paint);
         paint.setShader(null);
         paint.setStyle(Paint.Style.STROKE);
         paint.setStrokeWidth(unit * 0.006f);
-        paint.setColor(cancelBusy ? BANANA : Color.argb(140, 255, 255, 255));
+        paint.setColor(moves.cancelBusy ? BANANA : Color.argb(140, 255, 255, 255));
         c.drawCircle(osX, cy, r * 0.87f, paint);
         paint.setStyle(Paint.Style.FILL);
         int kong = state.currentKong;
@@ -715,8 +504,8 @@ public final class BottomScreenView extends View {
 
     /** A round badge like the first-person one: Lanky's face, upside down. */
     private void drawOrangstandButton(Canvas c) {
-        boolean pressed = orangstand || orangstandBusy;
-        boolean enabled = !state.paused && (orangstand || (!state.swimming && !state.climbing && !state.gunOut));
+        boolean pressed = moves.orangstand || moves.orangstandBusy;
+        boolean enabled = !state.paused && (moves.orangstand || (!state.swimming && !state.climbing && !state.gunOut));
         float r = osR * 0.92f;
         float cy = osY - osR * 0.08f;
         int saved = c.saveLayerAlpha(osX - osR * 1.1f, osY - osR * 1.1f, osX + osR * 1.1f, osY + osR * 1.1f, enabled ? 255 : 90);
@@ -775,78 +564,19 @@ public final class BottomScreenView extends View {
         return k < GameState.KONG_COUNT && state.inGame() && !state.isFreed(k);
     }
 
-    /**
-     * Whether the current Kong has this move at all; buttons for moves not bought yet are
-     * hidden. Before a game is running everything is shown.
-     */
-    private boolean owned(Move move) {
-        if (!state.inGame()) {
-            return true;
+    /** Performs a move from one of this screen's buttons, with its squash and wiggle. */
+    private void doMove(TouchMoves.Move move) {
+        if (moves.running == null) {
+            startAnim("squash" + move);
+            startAnim("wiggle" + move);
         }
-        GameState.Kong k = state.kongs[playingKong()];
-        switch (move) {
-            case WEAPON: return k.weapon > 0;
-            case ORANGE: return state.hasOranges() || state.oranges > 0;
-            case INSTRUMENT: return k.instrument > 0;
-            case CAMERA: return state.hasCamera() || state.film > 0;
-            default: return true;
-        }
+        moves.perform(move, this);
+        invalidate();
     }
 
-    /**
-     * Whether the game takes this move right now. When it doesn't only because of what the
-     * Kong is doing for a moment (jumping, attacking, rolling...), the button looks normal
-     * but does nothing; see {@link #greyed} for when it's greyed out.
-     */
-    private boolean usableNow(Move move) {
-        if (running == move) {
-            return true;
-        }
-        if (move == Move.CAMERA && state.camera) {
-            return true;   // tapping again puts the camera away
-        }
-        switch (move) {
-            case FIRST_PERSON: return state.canFirstPerson || state.firstPerson || state.gunOut;
-            case WEAPON: return state.canZMoves || state.gunOut;
-            default: return state.canZMoves && !state.gunOut;
-        }
-    }
-
-    /**
-     * Greyed out: nothing to use it with (no ammo, oranges, film or instrument energy),
-     * swimming, or (for the other moves) while the gun is out. The gun button stays lit while
-     * the gun is out so it can always be put away, even with no ammo left.
-     */
-    private boolean greyed(Move move) {
-        if (!state.inGame() || running == move) {
-            return false;
-        }
-        if (state.paused) {
-            return true;   // nothing works while the pause menu is open
-        }
-        if (orangstand || orangstandBusy) {
-            return true;   // Lanky is on his hands: none of these work until he's back up
-        }
-        GameState.Kong k = state.kongs[state.currentKong];
-        switch (move) {
-            case FIRST_PERSON: return state.climbing;
-            case WEAPON:
-                if (state.gunOut) {
-                    return false;
-                }
-                return state.swimming || state.climbing || (state.ammo <= 0 && state.homingAmmo <= 0);
-            case ORANGE: return state.swimming || state.climbing || state.gunOut || state.oranges <= 0;
-            // In first person (or the camera) Z + C-Up would just leave the view.
-            case INSTRUMENT: return state.swimming || state.climbing || state.gunOut || state.firstPerson || state.camera
-                || k.instrumentEnergy <= 0;
-            case CAMERA: return !state.camera && (state.swimming || state.climbing || state.gunOut || state.film <= 0);
-            default: return false;
-        }
-    }
-
-    /** A tap on this button does something now. */
-    private boolean available(Move move) {
-        return !state.inGame() || (!greyed(move) && usableNow(move));
+    /** Whether the Kong shown (the one played, or looked at in a Tag Barrel) has this move. */
+    private boolean owned(TouchMoves.Move move) {
+        return moves.owned(move, playingKong());
     }
 
     // ------------------------------------------------------------------------------
@@ -863,21 +593,34 @@ public final class BottomScreenView extends View {
         unit = Math.min(w, h);
         float m = unit * 0.03f;
 
-        buttonsShown = GameState.bottomButtons();
+        buttonsMode = GameState.bottomButtonsMode();
+        buttonsShown = buttonsMode == GameState.BUTTONS_ON;
+        fpSetting = GameState.bottomFirstPerson();
+        fpShown = buttonsMode != GameState.BUTTONS_OFF && fpSetting;
         float left = m, right;
+        // Right column: four action buttons. With Appear on Z it's five slots: the dynamic
+        // button on top, then the four action buttons.
+        float colW = Math.min(w * 0.27f, h * 0.27f);
+        float colLeft = w - m - colW;
+        float colGap = m * 0.7f;
+        int slots = buttonsMode == GameState.BUTTONS_ON_Z ? 5 : 4;
+        float cellH = (h - 2 * m - (slots - 1) * colGap) / slots;
+        for (int i = 0; i < 4; i++) {
+            float top = m + (i + slots - 4) * (cellH + colGap);
+            slideHome[i].set(colLeft, top, w - m, top + cellH);
+        }
+        zDynR = Math.min(cellH, colW) * 0.48f;
+        zDynX = colLeft + colW / 2f;
+        zDynY = m + cellH / 2f;
+        slideAway = w - colLeft + m;
         if (buttonsShown) {
-            // Right column: four action buttons.
-            float colW = Math.min(w * 0.27f, h * 0.27f);
-            float colLeft = w - m - colW;
-            float gap = m * 0.7f;
-            float cellH = (h - 2 * m - 3 * gap) / 4f;
             for (int i = 0; i < 4; i++) {
-                float top = m + i * (cellH + gap);
-                actionRects[i].set(colLeft, top, w - m, top + cellH);
+                actionRects[i].set(slideHome[i]);
             }
             right = colLeft - m;
         } else {
-            // Bottom Screen Buttons off: no button column; everything else spreads across.
+            // Bottom Screen Buttons off (or appearing on Z): no button column; everything else
+            // spreads across.
             for (RectF r : actionRects) {
                 r.setEmpty();
             }
@@ -891,7 +634,7 @@ public final class BottomScreenView extends View {
 
         melonR = fpR * 0.75f;
         // Without the first-person button the melons start at the left edge.
-        healthX = buttonsShown ? fpX + fpR + m * 1.8f + melonR : left + melonR;
+        healthX = fpShown ? fpX + fpR + m * 1.8f + melonR : left + melonR;
         healthY = fpY;
 
         // Lanky's Orangstand toggle, at the right end of the top row, after up to 3 melons.
@@ -982,26 +725,92 @@ public final class BottomScreenView extends View {
             return;
         }
         watch("kong", state.currentKong, "tab" + state.currentKong);
-        if (GameState.bottomButtons() != buttonsShown) {
+        if (GameState.bottomButtonsMode() != buttonsMode || GameState.bottomFirstPerson() != fpSetting) {
             layoutFor(getWidth(), getHeight());   // the setting changed
         }
-        if (buttonsShown) {
+        if (fpShown) {
             drawFirstPersonButton(canvas);
         }
         drawHealth(canvas);
         if (buttonsShown) {
-            if (showCancel()) {
-                drawCancelButton(canvas);
-            } else if (showOrangstand()) {
-                drawOrangstandButton(canvas);
-            } else if (zbMoveName() != null) {
-                drawZbMoveButton(canvas);
-            }
+            drawDynamic(canvas);
         }
         drawTabs(canvas);
         drawKongPanel(canvas);
         drawCarrying(canvas);   // after the panel, so its icons can poke out over it
         if (buttonsShown) {
+            drawActions(canvas);
+        } else if (buttonsMode == GameState.BUTTONS_ON_Z) {
+            drawSlidingActions(canvas);
+        }
+    }
+
+    /**
+     * Appear on Z: while Z is held on the controller, the action buttons slide in over the right
+     * side, the top one first and the others just after; when it's let go they slide back out
+     * in the same order.
+     */
+    /** The dynamic button (Cancel, Orangstand or a Z + B move), if there's one right now. */
+    private boolean hasDynamic() {
+        return moves.showCancel() || moves.showOrangstand() || moves.zbMoveName() != null;
+    }
+
+    private void drawDynamic(Canvas canvas) {
+        if (moves.showCancel()) {
+            drawCancelButton(canvas);
+        } else if (moves.showOrangstand()) {
+            drawOrangstandButton(canvas);
+        } else if (moves.zbMoveName() != null) {
+            drawZbMoveButton(canvas);
+        }
+    }
+
+    private static float slideEase(float in) {
+        float t = 1f - in;
+        return 1f - t * t * t;   // quick, then settling into place
+    }
+
+    private void drawSlidingActions(Canvas canvas) {
+        long now = android.os.SystemClock.uptimeMillis();
+        float dt = slideTickAt == 0 ? 0f : Math.min(100f, now - slideTickAt);
+        slideTickAt = now;
+        boolean z = TouchInput.physicalZHeld();
+        if (z != zShown) {
+            zShown = z;
+            zChangedAt = now;
+        }
+        float target = zShown ? 1f : 0f;
+        boolean any = false;
+        for (int i = 0; i < slideIn.length; i++) {
+            if (slideIn[i] != target && now - zChangedAt >= i * SLIDE_STAGGER_MS) {
+                float step = dt / SLIDE_MS;
+                slideIn[i] = target > slideIn[i] ? Math.min(target, slideIn[i] + step) : Math.max(target, slideIn[i] - step);
+            }
+            if (slideIn[i] != target) {
+                animating = true;
+            }
+            if (i == 0) {
+                continue;
+            }
+            RectF r = actionRects[i - 1];
+            if (slideIn[i] > 0f) {
+                any = true;
+                r.set(slideHome[i - 1]);
+                r.offset((1f - slideEase(slideIn[i])) * slideAway, 0f);
+            } else {
+                r.setEmpty();
+            }
+        }
+        if (slideIn[0] > 0f && hasDynamic()) {
+            // Drawn in its slot at the top of the column, by moving the button there for now.
+            float sx = osX, sy = osY, sr = osR;
+            osX = zDynX + (1f - slideEase(slideIn[0])) * slideAway;
+            osY = zDynY;
+            osR = zDynR;
+            drawDynamic(canvas);
+            osX = sx; osY = sy; osR = sr;
+        }
+        if (any) {
             drawActions(canvas);
         }
     }
@@ -1608,8 +1417,8 @@ public final class BottomScreenView extends View {
      * crosshair, and a small wooden tag naming it.
      */
     private void drawFirstPersonButton(Canvas c) {
-        boolean pressed = running == Move.FIRST_PERSON || state.firstPerson;
-        boolean enabled = !greyed(Move.FIRST_PERSON);
+        boolean pressed = moves.running == TouchMoves.Move.FIRST_PERSON || state.firstPerson;
+        boolean enabled = !moves.greyed(TouchMoves.Move.FIRST_PERSON);
         int saved = c.saveLayerAlpha(fpX - fpR * 1.1f, fpY - fpR * 1.1f, fpX + fpR * 1.1f, fpY + fpR * 1.1f, enabled ? 255 : 90);
         float r = fpR * 0.92f;
         float cy = fpY - fpR * 0.08f;
@@ -1916,8 +1725,11 @@ public final class BottomScreenView extends View {
         // ...and when you go to another level (DK Isles into Jungle Japes, say).
         watch("panelLevel", shownLevel(), "panelOpen");
         float open = animProgress("panelOpen", PANEL_OPEN_MS);
+        // The frame and the level's name stay where they are; only the counts grow out of the
+        // Kong's barrel.
+        float rowsTop = drawKongPanelFrame(c);
         if (open < 0f || tab < 0 || tab >= tabRects.length) {
-            drawKongPanelContents(c, tab);
+            drawKongPanelRows(c, tab, rowsTop);
             return;
         }
         RectF p = panelRect;
@@ -1930,17 +1742,14 @@ public final class BottomScreenView extends View {
         c.translate(x, y);
         c.scale(scale, scale);
         c.translate(-p.centerX(), -p.centerY());
-        drawKongPanelContents(c, tab);
+        drawKongPanelRows(c, tab, rowsTop);
         c.restoreToCount(saved);
     }
 
-    private void drawKongPanelContents(Canvas c, int tab) {
+    /** The panel's wooden frame, dark board and level name; returns where the counts start. */
+    private float drawKongPanelFrame(Canvas c) {
         RectF p = panelRect;
         woodPanel(c, p, unit * 0.03f, false);
-
-        java.util.List<Row> rows = rowsFor(tab, shownLevel());
-        rows.removeIf(r -> r.total == 0);   // nothing of that kind here (e.g. bananas in Helm)
-        rows.removeIf(r -> r.label.equals("Coins"));   // shown under Carrying
 
         // Dark inset board.
         float frame = unit * 0.035f;
@@ -1968,11 +1777,19 @@ public final class BottomScreenView extends View {
             text.setTextSize(fitText(title, board.width() * 0.8f, titleH * 0.62f));
             outlined(c, title, board.centerX(), board.top + titleH * 0.6f + text.getTextSize() * 0.36f, BANANA);
         }
+        return board.top + titleH;
+    }
+
+    /** The counts, as badges with tags, in two columns under the level name. */
+    private void drawKongPanelRows(Canvas c, int tab, float rowsTop) {
+        RectF board = boardRect;
+        java.util.List<Row> rows = rowsFor(tab, shownLevel());
+        rows.removeIf(r -> r.total == 0);   // nothing of that kind here (e.g. bananas in Helm)
+        rows.removeIf(r -> r.label.equals("Coins"));   // shown under Carrying
 
         int cols = 2;
         int lines = (rows.size() + cols - 1) / cols;
         float cellW = board.width() / cols;
-        float rowsTop = board.top + titleH;
         float cellH = (board.bottom - rowsTop) / Math.max(lines, 1);
         float badgeR = Math.min(cellH * 0.34f, cellW * 0.17f);
         for (int i = 0; i < rows.size(); i++) {
@@ -2167,7 +1984,7 @@ public final class BottomScreenView extends View {
         }
 
         for (int i = 0; i < 4; i++) {
-            Move move = ACTIONS[i];
+            TouchMoves.Move move = ACTIONS[i];
             RectF r = actionRects[i];
             if (!owned(move)) {
                 // Not bought yet: just an empty notch in the wood.
@@ -2176,9 +1993,9 @@ public final class BottomScreenView extends View {
                 continue;
             }
             // The gun and camera buttons stay lit while the gun is out / the camera is up.
-            boolean pressed = running == move || (move == Move.WEAPON && state.gunOut)
-                || (move == Move.CAMERA && state.camera);
-            boolean enabled = !greyed(move);
+            boolean pressed = moves.running == move || (move == TouchMoves.Move.WEAPON && state.gunOut)
+                || (move == TouchMoves.Move.CAMERA && state.camera);
+            boolean enabled = !moves.greyed(move);
 
             int saved = c.saveLayerAlpha(r.left - unit * 0.02f, r.top - unit * 0.02f,
                 r.right + unit * 0.02f, r.bottom + unit * 0.02f, enabled ? 255 : 90);
@@ -2207,7 +2024,7 @@ public final class BottomScreenView extends View {
                 c.rotate((float) Math.sin(t) * 10f * fade, iconX, iconY);
             }
             int iconKong = kong;
-            if (flip >= 0 && (move == Move.WEAPON || move == Move.INSTRUMENT)) {
+            if (flip >= 0 && (move == TouchMoves.Move.WEAPON || move == TouchMoves.Move.INSTRUMENT)) {
                 // Turns edge-on, then the other Kong's side comes round.
                 float sx = (float) Math.cos(Math.PI * flip);
                 iconKong = flip < 0.5f ? flipFromKong : kong;
@@ -2304,33 +2121,37 @@ public final class BottomScreenView extends View {
             return true;   // nothing to tap during a cutscene
         }
 
-        float ox = x - osX, oy = y - osY;
-        if (!buttonsShown) {
+        float ox = x - osX, oy = y - osY, dynR = osR;
+        if (buttonsMode == GameState.BUTTONS_ON_Z && slideIn[0] > 0.6f) {
+            ox = x - zDynX;   // the dynamic button, slid in at the top of the column
+            oy = y - zDynY;
+            dynR = zDynR;
+        } else if (!buttonsShown) {
             ox = oy = Float.MAX_VALUE / 4;   // no touch buttons: only the Kong barrels
         }
-        if (showCancel() && ox * ox + oy * oy <= osR * osR * 1.3f) {
-            cancelAbility();
+        if (moves.showCancel() && ox * ox + oy * oy <= dynR * dynR * 1.3f) {
+            moves.cancelAbility(this);
             return true;
         }
-        if (showOrangstand() && ox * ox + oy * oy <= osR * osR * 1.3f) {
-            toggleOrangstand();
+        if (moves.showOrangstand() && ox * ox + oy * oy <= dynR * dynR * 1.3f) {
+            moves.toggleOrangstand(this);
             return true;
         }
-        if (zbMoveName() != null && ox * ox + oy * oy <= osR * osR * 1.3f) {
-            performZbMove();
+        if (moves.zbMoveName() != null && ox * ox + oy * oy <= dynR * dynR * 1.3f) {
+            moves.performZbMove(this);
             return true;
         }
         float dx = x - fpX, dy = y - fpY;
-        if (buttonsShown && dx * dx + dy * dy <= fpR * fpR * 1.3f) {
-            if (available(Move.FIRST_PERSON)) {
-                perform(Move.FIRST_PERSON);
+        if (fpShown && dx * dx + dy * dy <= fpR * fpR * 1.3f) {
+            if (moves.available(TouchMoves.Move.FIRST_PERSON)) {
+                doMove(TouchMoves.Move.FIRST_PERSON);
             }
             return true;
         }
         for (int i = 0; i < 4; i++) {
-            if (actionRects[i].contains(x, y)) {
-                if (owned(ACTIONS[i]) && available(ACTIONS[i])) {
-                    perform(ACTIONS[i]);
+            if (actionRects[i].contains(x, y) && (buttonsShown || slideIn[i + 1] > 0.6f)) {
+                if (owned(ACTIONS[i]) && moves.available(ACTIONS[i])) {
+                    doMove(ACTIONS[i]);
                 }
                 return true;
             }

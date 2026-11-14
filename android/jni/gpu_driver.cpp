@@ -179,6 +179,14 @@ namespace dk64::android {
         return active_driver;
     }
 
+    void change_storage_location() {
+        call_activity("changeStorageLocation", "()Ljava/lang/String;", nullptr);
+    }
+
+    std::string storage_description() {
+        return call_activity("getStorageDescription", "()Ljava/lang/String;", nullptr);
+    }
+
     void share_log() {
         call_activity("shareLog", "()Ljava/lang/String;", nullptr);
     }
@@ -191,6 +199,19 @@ namespace dk64::android {
         const std::string value = enabled ? "1" : "0";
         call_activity("setBottomScreen", "(Ljava/lang/String;)Ljava/lang/String;", &value);
     }
+}
+
+// Whether the app is in front (DK64Activity onResume/onPause), for the audio watchdog
+// (src/main/main.cpp): Android pauses audio in the background on purpose.
+static std::atomic<int> app_in_foreground{1};
+
+extern "C" int dk64_android_app_in_foreground() {
+    return app_in_foreground.load(std::memory_order_relaxed);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_io_github_bownz_dk64recomp_DK64Activity_nativeSetForeground(JNIEnv*, jclass, jboolean foreground) {
+    app_in_foreground.store(foreground ? 1 : 0, std::memory_order_relaxed);
 }
 
 // Surface rotation (0-3) of the game's screen, for mapping the device's motion sensors

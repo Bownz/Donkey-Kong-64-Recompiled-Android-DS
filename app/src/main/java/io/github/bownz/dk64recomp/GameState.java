@@ -133,7 +133,8 @@ final class GameState {
     private static native int nativeOverlay();
     private static native boolean nativeFontMetrics(byte[] out);
     private static native int nativeTouchFeedback();
-    private static native boolean nativeBottomButtons();
+    private static native int nativeBottomButtonsMode();
+    private static native boolean nativeBottomFirstPerson();
     private static native int nativeTagBarrelKong();
     private static native int nativeHeldBananas(int kong, int level);
     private static native int[] nativeSpriteFrames(int table, int file, int width, int height);
@@ -165,12 +166,23 @@ final class GameState {
         }
     }
 
-    /** Bottom Screen Buttons (Input > Touch): false hides the touch buttons. */
-    static boolean bottomButtons() {
+    static final int BUTTONS_OFF = 0, BUTTONS_ON = 1, BUTTONS_ON_Z = 2;
+
+    /** Bottom Screen Buttons (Input > Touch): off, on, or appearing while Z is held. */
+    /** Bottom Screen First Person Button (with the buttons On or Appear on Z). */
+    static boolean bottomFirstPerson() {
         try {
-            return nativeBottomButtons();
+            return nativeBottomFirstPerson();
         } catch (UnsatisfiedLinkError e) {
             return true;
+        }
+    }
+
+    static int bottomButtonsMode() {
+        try {
+            return nativeBottomButtonsMode();
+        } catch (UnsatisfiedLinkError e) {
+            return BUTTONS_ON;
         }
     }
     private static native int nativeDisplayFrameCount();

@@ -69,6 +69,17 @@ final class TouchInput {
         }
     }
 
+    private static native boolean nativePhysicalZHeld();
+
+    /** Z held on the controller or keyboard right now (not the on-screen buttons). */
+    static boolean physicalZHeld() {
+        try {
+            return nativePhysicalZHeld();
+        } catch (UnsatisfiedLinkError e) {
+            return false;
+        }
+    }
+
     /** Buttons pressed for a moment by an on-screen button (replaces the previous ones). */
     static synchronized void setN64Buttons(int buttons) {
         pressedN64 = buttons;
@@ -87,9 +98,25 @@ final class TouchInput {
         pushN64();
     }
 
+    private static native void nativeSetOverlayActive(boolean active);
+    private static native void nativeAddCameraDrag(float dxDp, float dyDp);
+
+    /** The on-screen controller is in use: the game keeps its own N64 button icons. */
+    static void setOverlayActive(boolean active) {
+        try { nativeSetOverlayActive(active); } catch (UnsatisfiedLinkError ignored) { }
+    }
+
+    /** Finger movement (dp) for the touch-drag camera; the game takes it each frame. */
+    static void addCameraDrag(float dxDp, float dyDp) {
+        try { nativeAddCameraDrag(dxDp, dyDp); } catch (UnsatisfiedLinkError ignored) { }
+    }
+
     private static native int nativeUiState();
 
-    /** Bit 1: a menu is taking input. Bit 2: the Analog Camera is selected. */
+    /**
+     * Bit 1: a menu is taking input. Bit 2: the Analog Camera is selected. Bit 4: Drag to Move
+     * Camera is on. Bit 16: the game has started (not just the launcher).
+     */
     static int uiState() {
         try {
             return nativeUiState();

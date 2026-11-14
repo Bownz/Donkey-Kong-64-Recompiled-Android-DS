@@ -237,6 +237,9 @@ final class RomIcons {
     static volatile String dataDirectory;
 
     private static volatile boolean started;
+    // A load that found nothing (e.g. the ROM was being written as the game started) is
+    // tried again, but not before this time.
+    private static volatile long retryLoadAt;
     private static final Paint PAINT = new Paint(Paint.FILTER_BITMAP_FLAG);
     private static final RectF DST = new RectF();
 
@@ -248,7 +251,7 @@ final class RomIcons {
      */
     static void ensureLoaded(Runnable onLoaded) {
         String dataDir = dataDirectory;
-        if (started || dataDir == null) {
+        if (started || dataDir == null || android.os.SystemClock.uptimeMillis() < retryLoadAt) {
             return;
         }
         File rom = new File(dataDir, "DK64.z64");
@@ -257,9 +260,11 @@ final class RomIcons {
         }
         started = true;
         new Thread(() -> {
+            int loaded = 0;
             try (RandomAccessFile f = new RandomAccessFile(rom, "r")) {
                 if (!isUsRom(f)) {
-                    Log.w(TAG, "Bottom screen: ROM isn't the US release, using built-in icons");
+                    Log.w(TAG, "Bottom screen: ROM isn't the US release (or can't be read yet), using built-in icons for now");
+                    retryLater();
                     return;
                 }
                 melon = load(f, MELON);
@@ -308,13 +313,23 @@ final class RomIcons {
                     found += count(banana[k], weapon[k], instrument[k], face[k]);
                 }
                 Log.i(TAG, "Bottom screen: " + found + " of 46 icons loaded from the ROM");
+                loaded = found;
             } catch (IOException | RuntimeException e) {
                 Log.w(TAG, "Bottom screen: couldn't read icons from the ROM", e);
+            }
+            if (loaded == 0) {
+                retryLater();
             }
             if (onLoaded != null) {
                 onLoaded.run();
             }
         }, "DK64RomIcons").start();
+    }
+
+    /** Lets {@link #ensureLoaded} try again in a few seconds. */
+    private static void retryLater() {
+        retryLoadAt = android.os.SystemClock.uptimeMillis() + 3000;
+        started = false;
     }
 
     /**

@@ -33,11 +33,14 @@
 #if defined(__ANDROID__)
 #include <atomic>
 #include <jni.h>
+#include "ultramodern/ultramodern.hpp"
+extern "C" void dk64_android_set_gpu_keep_awake(bool on);
 // Read by the on-screen touch controls (TouchInput.nativeUiState).
 static std::atomic<bool> dk64_android_analog_camera{false};
 
 // Bit 1: a menu (the launcher, the menu bar, settings) is taking input, so the touch
 // buttons are hidden and touches go to it. Bit 2: the Analog Camera is selected.
+// Bit 4: Drag to Move Camera is on. Bit 16: the game has started (not just the launcher).
 extern "C" JNIEXPORT jint JNICALL
 Java_io_github_bownz_dk64recomp_TouchInput_nativeUiState(JNIEnv*, jclass) {
     jint bits = 0;
@@ -46,6 +49,12 @@ Java_io_github_bownz_dk64recomp_TouchInput_nativeUiState(JNIEnv*, jclass) {
     }
     if (dk64_android_analog_camera.load()) {
         bits |= 2;
+    }
+    if (dk64::android::drag_camera_enabled()) {
+        bits |= 4;
+    }
+    if (ultramodern::is_game_started()) {
+        bits |= 16;
     }
     return bits;
 }
@@ -460,19 +469,68 @@ static void add_dual_screen_options(recomp::config::Config &config) {
     static EnumOptionVector bottom_buttons_options = {
         {0u, "Off", "Off"},
         {1u, "On", "On"},
+        {2u, "AppearOnZ", "Appear on Z"},
     };
     config.add_enum_option(
         bottom_buttons_option,
         "Bottom Screen Buttons",
         "The touch buttons on the bottom screen (oranges, gun, instrument, camera, first person). "
-        "Turn them off to give the Kong barrels and collectibles the whole screen.",
+        "Turn them off to give the Kong barrels and collectibles the whole screen. With Appear on Z, "
+        "the Kong barrels and collectibles have the whole screen, and the oranges, gun, instrument and "
+        "camera buttons (and Cancel, Orangstand or a Z + B move when there is one) slide in from the right while you hold Z on your controller.",
         bottom_buttons_options,
         1u,
         one_screen
     );
     config.add_option_change_callback(bottom_buttons_option,
         [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
-            dk64::android::set_bottom_buttons(std::get<uint32_t>(cur) == 1u);
+            dk64::android::set_bottom_buttons(static_cast<int>(std::get<uint32_t>(cur)));
+            if (context == recomp::config::OptionChangeContext::Permanent) {
+                recompui::config::get_config("dual_screen").save_config();
+            }
+        });
+
+    // The bottom screen's first person button, kept separately so it can stay with Appear on Z.
+    static const std::string bottom_first_person_option = "android_bottom_first_person";
+    static EnumOptionVector bottom_first_person_options = {
+        {0u, "Off", "Off"},
+        {1u, "On", "On"},
+    };
+    config.add_enum_option(
+        bottom_first_person_option,
+        "Bottom Screen First Person Button",
+        "The first person button in the bottom screen's top-left corner. It stays on screen with "
+        "Bottom Screen Buttons set to On or Appear on Z (not Off).",
+        bottom_first_person_options,
+        1u,
+        one_screen
+    );
+    config.add_option_change_callback(bottom_first_person_option,
+        [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
+            dk64::android::set_bottom_first_person(std::get<uint32_t>(cur) == 1u);
+            if (context == recomp::config::OptionChangeContext::Permanent) {
+                recompui::config::get_config("dual_screen").save_config();
+            }
+        });
+
+    // Dragging a finger on the free part of the screen turns the camera (touch controls only).
+    static const std::string drag_camera_option = "android_drag_camera";
+    static EnumOptionVector drag_camera_options = {
+        {0u, "Off", "Off"},
+        {1u, "On", "On"},
+    };
+    config.add_enum_option(
+        drag_camera_option,
+        "Drag to Move Camera",
+        "With the touch controls on screen, drag a finger anywhere away from the buttons to turn "
+        "the camera left and right, or up and down to raise and lower it. Works with every camera "
+        "type; the speed follows Analog Camera Sensitivity.",
+        drag_camera_options,
+        1u
+    );
+    config.add_option_change_callback(drag_camera_option,
+        [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
+            dk64::android::set_drag_camera(std::get<uint32_t>(cur) == 1u);
             if (context == recomp::config::OptionChangeContext::Permanent) {
                 recompui::config::get_config("dual_screen").save_config();
             }
@@ -561,6 +619,29 @@ static void add_graphics_options(recomp::config::Config &config) {
         [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
             if (context != recomp::config::OptionChangeContext::Temporary) {
                 dk64::android::set_show_fps(std::get<uint32_t>(cur) == 1u);
+            }
+        });
+
+    // Android: RT64's "idle work", a tiny GPU job every millisecond between frames that stops
+    // the GPU clocking right down. The performance hints now do that job, so it's off by default
+    // (less heat, so less throttling later on); kept as an option to compare.
+    static const std::string keep_gpu_awake_option = "android_keep_gpu_awake";
+    static EnumOptionVector keep_gpu_awake_options = {
+        {0u, "Off", "Off"},
+        {1u, "On", "On"},
+    };
+    config.add_enum_option(
+        keep_gpu_awake_option,
+        "Keep GPU Awake",
+        "Sends the GPU a tiny job every millisecond between frames so it doesn't slow right down. "
+        "Off runs cooler; turn it on if the frame rate dips when little is happening on screen.",
+        keep_gpu_awake_options,
+        0u
+    );
+    config.add_option_change_callback(keep_gpu_awake_option,
+        [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
+            if (context != recomp::config::OptionChangeContext::Temporary) {
+                dk64_android_set_gpu_keep_awake(std::get<uint32_t>(cur) == 1u);
             }
         });
 #endif
@@ -755,6 +836,8 @@ void dk64::init_config() {
             edit_touch,
             option(d, "android_bottom_screen"),
             option(d, "android_bottom_buttons"),
+            option(d, "android_bottom_first_person"),
+            option(d, "android_drag_camera"),
             option(d, "android_touch_kong_swap"),
             option(d, "android_touch_feedback"),
             option(d, "android_touch_feedback_strength"),
@@ -771,11 +854,34 @@ void dk64::init_config() {
         auto &sound_config = recompui::config::create_sound_tab("Audio");
         add_sound_options(sound_config);
 
+        // Where saves, settings, mods and the ROM are kept: app storage or a shared folder.
+        // Moving them restarts the app, so (like the graphics driver) only from the main menu.
+        Entry files; files.kind = Kind::Button; files.text = "Game Files Location";
+        {
+            const std::string where = dk64::android::storage_description();
+            files.description = "Move your saves, settings, mods and ROM between app storage and a shared folder "
+                "(easy to reach from a PC, and kept if the app is uninstalled). Everything is copied, then the app restarts; "
+                "only from the main menu."
+                + (where.empty() ? std::string() : "<br />Now in " + where + ".");
+        }
+        files.on_press = []() {
+            if (ultramodern::is_game_started()) {
+                recompui::open_info_prompt("Game Files Location",
+                    "The game files can only be moved from the main menu, because the app restarts to use the new place. "
+                    "Use QUIT > Main Menu, then open Settings > Gameplay > Game Files Location.",
+                    "OK", []() {});
+                return;
+            }
+            dk64::android::change_storage_location();
+        };
+
         recompui::config::create_layout_tab("Gameplay", "gameplay", {
             option(g, "android_experience"),
             option(g, keys::story_skip),
             option(g, keys::lightning_flashes),
             option(g, keys::skip_launcher),
+            header("Storage"),
+            files,
         }, { g });
     }
 

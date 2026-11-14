@@ -15,6 +15,7 @@ import android.view.View;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -28,8 +29,11 @@ import java.util.Set;
  * (shown only with the Analog Camera) turns the camera.
  *
  * The default layout is in units of the view's shorter side, anchored to its edges. The
- * player can move and resize each group of controls ({@link #startEditing()}); the changes
- * are kept per camera mode (normal / Analog Camera) in SharedPreferences.
+ * player can move and resize each group of controls, and add or remove groups
+ * ({@link #startEditing()}); the changes are kept per camera mode (normal / Analog Camera)
+ * in SharedPreferences. Besides the N64 buttons there are the bottom screen's moves: the
+ * action buttons (oranges, gun, instrument, camera), first person and the dynamic button,
+ * shared with it through TouchMoves.
  *
  * The controller hides itself while a menu (the launcher, the menu bar, settings) takes
  * input, so touches reach the menu, and comes back when it closes.
@@ -56,6 +60,9 @@ public final class TouchControllerView extends View {
         final Place normal;   // null: not shown with the normal camera
         final Place analog;   // null: not shown with the Analog Camera
         final Runnable onPress, onRelease;
+        // Move buttons (TouchMoves) only: the move, or the dynamic button.
+        TouchMoves.Move move;
+        boolean dynamic;
         // Sticks only.
         final int axisX, axisY;
         final float captureSlack;
@@ -65,6 +72,11 @@ public final class TouchControllerView extends View {
         // Resolved on layout, in pixels.
         float cx, cy, r;
         boolean shown;
+        // The drawer: its handle, and the buttons that slide in (positions before sliding).
+        boolean drawerHandle, drawerItem;
+        int n64Bit;   // N64 buttons only: the button it presses
+        float baseCx;
+        boolean layoutShown;
 
         Control(Kind kind, String group, String label, int color, Place normal, Place analog,
                 Runnable onPress, Runnable onRelease, int axisX, int axisY, float captureSlack) {
@@ -84,6 +96,38 @@ public final class TouchControllerView extends View {
     private static final class Adjust {
         float dx, dy, scale = 1f;
     }
+
+    /**
+     * Groups the player can add or remove in the layout editor, with their names. The menu
+     * button can't be removed (it's the way back to the editor). On by default: the ones in
+     * {@link #DEFAULT_ON}.
+     */
+    private static final Map<String, String> GROUP_NAMES = new LinkedHashMap<>();
+    static {
+        GROUP_NAMES.put("stick", "Control stick");
+        GROUP_NAMES.put("dpad", "D-pad");
+        GROUP_NAMES.put("a", "A");
+        GROUP_NAMES.put("b", "B");
+        GROUP_NAMES.put("z", "Z");
+        GROUP_NAMES.put("r", "R");
+        GROUP_NAMES.put("start", "Start");
+        GROUP_NAMES.put("c", "C buttons (all four)");
+        GROUP_NAMES.put("c_up", "C-Up");
+        GROUP_NAMES.put("c_down", "C-Down");
+        GROUP_NAMES.put("c_left", "C-Left");
+        GROUP_NAMES.put("c_right", "C-Right");
+        GROUP_NAMES.put("camera", "Camera stick");
+        GROUP_NAMES.put("actions", "Action buttons (all four)");
+        GROUP_NAMES.put("act_orange", "Oranges");
+        GROUP_NAMES.put("act_gun", "Gun");
+        GROUP_NAMES.put("act_instrument", "Instrument");
+        GROUP_NAMES.put("act_film", "Camera (film)");
+        GROUP_NAMES.put("first_person", "First person");
+        GROUP_NAMES.put("dynamic", "Dynamic move (Orangstand, Charge, Punch, Cancel)");
+        GROUP_NAMES.put("drawer", "Action drawer (a handle that slides oranges, gun, instrument and camera in from the right)");
+    }
+    private static final Set<String> DEFAULT_ON = new HashSet<>(java.util.Arrays.asList(
+        "stick", "dpad", "a", "b", "z", "r", "start", "c", "camera", "menu"));
 
     private static final float BUTTON_SLACK = 1.25f;
     private static final float MIN_LAYOUT_ASPECT = 1.4f;
@@ -110,11 +154,58 @@ public final class TouchControllerView extends View {
     private float opacity = 0.55f;
     private boolean active = false;   // Touch controls wanted (setting / no controller)
     private boolean menuOpen = false; // A menu is taking input: hide and let touches through
+    private boolean gameStarted = false; // Until the game runs (startup, launcher) there's nothing to control
     private boolean analogMode = false;
+    // Drag to Move Camera (Input > Touch): a finger that lands away from the buttons turns the camera.
+    private boolean dragCamera = true;
+    private int cameraPointer = -1;
+    private float cameraLastX, cameraLastY;
+    // Floating stick (a toggle in the layout editor): touching anywhere on the left half brings
+    // a smaller control stick under the thumb. It works whether or not the stick itself is on
+    // screen; when it is, it goes back to its place when let go.
+    private static final String KEY_FLOATING = "floating_stick";
+    private static final float FLOATING_RADIUS = 0.11f;   // in units of the shorter side
+    private boolean floatingStick = false;
+    private boolean stickFloating = false;
+    // Double-tap the control stick for Z (a toggle in the layout editor): a quick tap, then a
+    // second touch soon after holds Z for as long as that touch lasts (the stick still works).
+    private static final String KEY_DOUBLE_TAP_Z = "double_tap_z";
+    private static final long TAP_MAX_MS = 250, DOUBLE_TAP_GAP_MS = 300;
+    private boolean doubleTapZ = false;
+    private boolean zFromStick = false;
+    // A button pressed while that Z is held: Z is let go when it's released (so A gives a
+    // crouch jump and Z is gone by the landing). Oranges (C-Right, or the oranges button)
+    // and B keep Z (see keepsZ).
+    private Control zEndsWith;
+    private long stickDownAt, stickUpAt;
+    private boolean lastStickTouchWasTap;
+    private float stickHomeX, stickHomeY, stickHomeR;
+    // Greys out move buttons that can't be used (not bought yet, nothing to use, swimming...).
+    private final Paint greyLayer = new Paint();
+    private final Paint alphaLayer = new Paint();
     private float unit = 1f;
 
     // Layout adjustments for the current camera mode, by group.
     private final Map<String, Adjust> adjust = new HashMap<>();
+    // Groups shown in the current camera mode (added or removed in the editor).
+    private final Set<String> on = new HashSet<>();
+
+    // The action drawer: a handle (group "drawer", placed anywhere) that slides a column of
+    // action buttons (group "drawer_items", placed separately) in from the right edge.
+    private static final long DRAWER_MS = 180;
+    private boolean drawerOpen = false;
+    private float drawerProgress = 0f;   // 0 closed .. 1 open
+    private long drawerAnimAt;
+    // It closes by itself this long after the last tap on it, unless something it started is
+    // still going (gun out, camera up, first person, Lanky on his hands), so that can be put
+    // away from the same place.
+    private static final long DRAWER_AUTO_CLOSE_MS = 3000;
+    private long drawerUsedAt;
+
+    // The moves (action buttons, first person, dynamic), shared with the bottom screen.
+    private final TouchMoves moves = TouchMoves.get();
+    private boolean usingMoves;
+    private final Runnable movesChanged = this::invalidate;
 
     // ---- Editing ----
     private boolean editing = false;
@@ -123,8 +214,10 @@ public final class TouchControllerView extends View {
     private float dragLastX, dragLastY;
     private int pinchPointer = -1;
     private float pinchStartDist, pinchStartScale;
-    private final RectF[] toolbar = { new RectF(), new RectF(), new RectF(), new RectF() };
-    private static final String[] TOOLBAR_LABELS = { "−", "+", "Reset", "Done" };
+    private final RectF[] toolbar = { new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF() };
+    private static final String[] TOOLBAR_LABELS = { "−", "+", "Remove", "Add", "Reset", "Done", "Floating stick", "Double-tap stick: Z", "Save", "Load" };
+    private static final int TB_SMALLER = 0, TB_BIGGER = 1, TB_REMOVE = 2, TB_ADD = 3, TB_RESET = 4, TB_DONE = 5, TB_FLOATING = 6, TB_DOUBLE_TAP = 7,
+        TB_SAVE = 8, TB_LOAD = 9;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable poll = new Runnable() {
@@ -140,6 +233,9 @@ public final class TouchControllerView extends View {
     public TouchControllerView(Context context) {
         super(context);
 
+        android.graphics.ColorMatrix grey = new android.graphics.ColorMatrix();
+        grey.setSaturation(0f);
+        greyLayer.setColorFilter(new android.graphics.ColorMatrixColorFilter(grey));
         stroke.setStyle(Paint.Style.STROKE);
         stroke.setColor(Color.WHITE);
         text.setColor(Color.WHITE);
@@ -194,7 +290,52 @@ public final class TouchControllerView extends View {
             new Place(AnchorX.CENTER, 0f, AnchorY.BOTTOM, 0.10f, 0.06f),
             new Place(AnchorX.CENTER, 0.09f, AnchorY.TOP, 0.08f, 0.05f), TouchInput.N64_START));
 
+        // ---- Added in the layout editor (off by default) ----
+        // Single C buttons, in a row across the middle.
+        float rowY = 0.40f, rowR = 0.05f;
+        controls.add(button("c_up", "C▲", COLOR_C, both(AnchorX.CENTER, -0.27f, AnchorY.TOP, rowY, rowR), TouchInput.N64_C_UP));
+        controls.add(button("c_down", "C▼", COLOR_C, both(AnchorX.CENTER, -0.09f, AnchorY.TOP, rowY, rowR), TouchInput.N64_C_DOWN));
+        controls.add(button("c_left", "C◀", COLOR_C, both(AnchorX.CENTER, 0.09f, AnchorY.TOP, rowY, rowR), TouchInput.N64_C_LEFT));
+        controls.add(button("c_right", "C▶", COLOR_C, both(AnchorX.CENTER, 0.27f, AnchorY.TOP, rowY, rowR), TouchInput.N64_C_RIGHT));
+        // The action buttons as a cluster, laid out like the C buttons they use (Z + C):
+        // instrument up, camera down, gun left, oranges right.
+        float ax = 0f, ay = 0.62f, aOff = 0.085f, aR = 0.05f;
+        controls.add(moveButton("actions", TouchMoves.Move.INSTRUMENT, both(AnchorX.CENTER, ax, AnchorY.TOP, ay - aOff, aR)));
+        controls.add(moveButton("actions", TouchMoves.Move.CAMERA, both(AnchorX.CENTER, ax, AnchorY.TOP, ay + aOff, aR)));
+        controls.add(moveButton("actions", TouchMoves.Move.WEAPON, both(AnchorX.CENTER, ax - aOff, AnchorY.TOP, ay, aR)));
+        controls.add(moveButton("actions", TouchMoves.Move.ORANGE, both(AnchorX.CENTER, ax + aOff, AnchorY.TOP, ay, aR)));
+        // Single action buttons, in a row above the C buttons' row.
+        float actY = 0.25f;
+        controls.add(moveButton("act_orange", TouchMoves.Move.ORANGE, both(AnchorX.CENTER, -0.27f, AnchorY.TOP, actY, rowR)));
+        controls.add(moveButton("act_gun", TouchMoves.Move.WEAPON, both(AnchorX.CENTER, -0.09f, AnchorY.TOP, actY, rowR)));
+        controls.add(moveButton("act_instrument", TouchMoves.Move.INSTRUMENT, both(AnchorX.CENTER, 0.09f, AnchorY.TOP, actY, rowR)));
+        controls.add(moveButton("act_film", TouchMoves.Move.CAMERA, both(AnchorX.CENTER, 0.27f, AnchorY.TOP, actY, rowR)));
+        controls.add(moveButton("first_person", TouchMoves.Move.FIRST_PERSON, both(AnchorX.CENTER, -0.18f, AnchorY.TOP, 0.55f, 0.055f)));
+        Control dyn = new Control(Kind.BUTTON, "dynamic", "", COLOR_NEUTRAL,
+            both(AnchorX.CENTER, 0.18f, AnchorY.TOP, 0.55f, 0.055f), both(AnchorX.CENTER, 0.18f, AnchorY.TOP, 0.55f, 0.055f),
+            () -> moves.performDynamic(null), () -> { }, 0, 0, 1f);
+        dyn.dynamic = true;
+        controls.add(dyn);
+
+        // The action drawer: the handle on the right edge, and a column of moves beside it.
+        // (The dynamic move isn't in it: it only appears when usable, so it's placed on its own.
+        // Nor is first person: that's C-Up, a way of looking rather than an item.)
+        Control handle = new Control(Kind.BUTTON, "drawer", "", COLOR_NEUTRAL,
+            both(AnchorX.RIGHT, 0.045f, AnchorY.TOP, 0.50f, 0.04f), both(AnchorX.RIGHT, 0.045f, AnchorY.TOP, 0.50f, 0.04f),
+            this::toggleDrawer, () -> { }, 0, 0, 1f);
+        handle.drawerHandle = true;
+        controls.add(handle);
+        TouchMoves.Move[] drawerMoves = { TouchMoves.Move.ORANGE, TouchMoves.Move.WEAPON, TouchMoves.Move.INSTRUMENT,
+            TouchMoves.Move.CAMERA };
+        for (int i = 0; i < drawerMoves.length; i++) {
+            Control item = moveButton("drawer_items", drawerMoves[i], both(AnchorX.RIGHT, 0.15f, AnchorY.TOP, 0.20f + i * 0.14f, 0.055f));
+            item.drawerItem = true;
+            controls.add(item);
+        }
+
         loadLayout();
+        floatingStick = getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_FLOATING, false);
+        doubleTapZ = getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_DOUBLE_TAP_Z, false);
         setContentDescription("On-screen N64 controller");
         setHapticFeedbackEnabled(true);
         setVisibility(GONE);
@@ -209,9 +350,11 @@ public final class TouchControllerView extends View {
     }
 
     private Control button(String group, String label, int color, Place normal, Place analog, int n64Bit) {
-        return new Control(Kind.BUTTON, group, label, color, normal, analog,
+        Control c = new Control(Kind.BUTTON, group, label, color, normal, analog,
             () -> TouchInput.setOverlayN64Button(n64Bit, true),
             () -> TouchInput.setOverlayN64Button(n64Bit, false), 0, 0, 1f);
+        c.n64Bit = n64Bit;
+        return c;
     }
 
     /** A button on the virtual SDL gamepad (the menu button: opens the game's menu). */
@@ -219,6 +362,18 @@ public final class TouchControllerView extends View {
         return new Control(Kind.BUTTON, group, label, color, normal, analog,
             () -> TouchInput.setButton(sdlButton, true),
             () -> TouchInput.setButton(sdlButton, false), 0, 0, 1f);
+    }
+
+    /** One of the bottom screen's moves (TouchMoves): does it on press, if it can now. */
+    private Control moveButton(String group, TouchMoves.Move move, Place place) {
+        Control c = new Control(Kind.BUTTON, group, "", COLOR_NEUTRAL, place, place,
+            () -> {
+                if (moves.owned(move, -1) && moves.available(move)) {
+                    moves.perform(move, null);
+                }
+            }, () -> { }, 0, 0, 1f);
+        c.move = move;
+        return c;
     }
 
     private void addStick(Control c) {
@@ -236,6 +391,7 @@ public final class TouchControllerView extends View {
             return;
         }
         this.active = active;
+        TouchInput.setOverlayActive(active);
         if (!active) {
             releaseAll();
             TouchInput.release();
@@ -243,6 +399,7 @@ public final class TouchControllerView extends View {
             TouchInput.acquire();
             startPolling();
         }
+        updateMovesUse();
         refreshVisibility();
     }
 
@@ -262,12 +419,15 @@ public final class TouchControllerView extends View {
         }
         pressed.clear();
         buttonPointers.clear();
+        cameraPointer = -1;
         for (Control s : sticks) {
             if (s.pointerId != -1 || s.sx != 0f || s.sy != 0f) {
                 s.pointerId = -1;
                 setStick(s, 0f, 0f);
             }
+            stickReleased(s);
         }
+        releaseStickZ();
         invalidate();
     }
 
@@ -278,6 +438,7 @@ public final class TouchControllerView extends View {
         editing = true;
         selected = null;
         dragPointer = pinchPointer = -1;
+        updateMovesUse();
         startPolling();
         refreshVisibility();
         invalidate();
@@ -288,8 +449,96 @@ public final class TouchControllerView extends View {
         selected = null;
         dragPointer = pinchPointer = -1;
         saveLayout();
+        layoutControls();
         refreshVisibility();
         invalidate();
+    }
+
+    /** Reads the game's state (for the move buttons) only while any are shown. */
+    private void updateMovesUse() {
+        boolean want = (active || editing) && anyMoveGroupOn();
+        if (want == usingMoves) {
+            return;
+        }
+        usingMoves = want;
+        if (want) {
+            moves.addListener(movesChanged);
+            moves.acquire();
+        } else {
+            moves.release();
+            moves.removeListener(movesChanged);
+        }
+    }
+
+    /** A group is shown; the drawer's buttons go with its handle. */
+    private boolean groupOn(String group) {
+        return on.contains(group.equals("drawer_items") ? "drawer" : group);
+    }
+
+    private void toggleDrawer() {
+        drawerOpen = !drawerOpen;
+        drawerAnimAt = drawerUsedAt = android.os.SystemClock.uptimeMillis();
+        invalidate();
+    }
+
+    /** Called on each poll: closes the drawer once it's been left alone for a moment. */
+    private void autoCloseDrawer() {
+        if (!drawerOpen || editing) {
+            return;
+        }
+        long now = android.os.SystemClock.uptimeMillis();
+        GameState st = moves.state;
+        boolean inUse = moves.busy() || moves.orangstand || st.gunOut || st.camera || st.firstPerson;
+        for (Control c : pressed) {
+            if (c.drawerItem || c.drawerHandle) {
+                inUse = true;
+            }
+        }
+        if (inUse) {
+            drawerUsedAt = now;   // the pause starts once it's put away
+        } else if (now - drawerUsedAt >= DRAWER_AUTO_CLOSE_MS) {
+            toggleDrawer();
+        }
+    }
+
+    /**
+     * Slides the drawer's buttons: from just off the right edge (closed) to where they were
+     * placed (open). Hidden while closed; touchable once mostly open.
+     */
+    private void applyDrawer() {
+        float target = (drawerOpen || editing) ? 1f : 0f;
+        if (drawerProgress != target) {
+            long now = android.os.SystemClock.uptimeMillis();
+            float step = Math.max(0f, now - drawerAnimAt) / DRAWER_MS;
+            drawerAnimAt = now;
+            drawerProgress = target > drawerProgress ? Math.min(target, drawerProgress + step) : Math.max(target, drawerProgress - step);
+        }
+        float minLeft = Float.MAX_VALUE, maxR = 0f;
+        for (Control c : controls) {
+            if (c.drawerItem && c.layoutShown) {
+                minLeft = Math.min(minLeft, c.baseCx - c.r);
+                maxR = Math.max(maxR, c.r);
+            }
+        }
+        float slide = minLeft == Float.MAX_VALUE ? 0f : Math.max(0f, getWidth() - minLeft + maxR);
+        // Eased, so it slows as it settles.
+        float p = 1f - (1f - drawerProgress) * (1f - drawerProgress);
+        for (Control c : controls) {
+            if (!c.drawerItem) {
+                continue;
+            }
+            c.cx = c.baseCx + (1f - p) * slide;
+            c.shown = c.layoutShown && drawerProgress > 0f;
+        }
+    }
+
+    private boolean anyMoveGroupOn() {
+        for (Control c : controls) {
+            if ((c.move != null || c.dynamic) && groupOn(c.group)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void startPolling() {
@@ -298,9 +547,22 @@ public final class TouchControllerView extends View {
     }
 
     private void pollUiState() {
+        autoCloseDrawer();
+        if (usingMoves && moves.state.inGame()) {
+            RomIcons.ensureLoaded(this::postInvalidate);   // the move buttons' icons (from the ROM)
+        }
         int state = TouchInput.uiState();
         boolean menu = (state & 1) != 0;
+        boolean started = (state & 16) != 0;
+        if (started != gameStarted) {
+            gameStarted = started;
+            refreshVisibility();
+        }
         boolean analog = (state & 2) != 0;
+        dragCamera = (state & 4) != 0;
+        if (!dragCamera) {
+            cameraPointer = -1;
+        }
         if (analog != analogMode && !editing) {
             releaseAll();
             analogMode = analog;
@@ -318,7 +580,7 @@ public final class TouchControllerView extends View {
     }
 
     private void refreshVisibility() {
-        boolean show = editing || (active && !menuOpen);
+        boolean show = editing || (active && !menuOpen && gameStarted);
         if (!show) {
             releaseAll();
         }
@@ -333,10 +595,59 @@ public final class TouchControllerView extends View {
         return analogMode ? "analog." : "normal.";
     }
 
+    // ---- Layouts per screen shape, and saved layouts ----
+    //
+    // Each screen shape (landscape, portrait, square - e.g. a foldable opened) keeps its own
+    // layout, per camera mode, as one string "group=dx,dy,scale,on;..." under
+    // "layout.<shape>.<mode>". A shape with none yet starts from the older per-group keys
+    // ("<mode>.<group>", "<mode>.on.<group>"), i.e. the layout from before shapes existed.
+    // Saved layouts ("saved.<name>") use the same string and load onto any shape.
+
+    private String loadedShape = "";
+
+    /** The screen's shape, from its aspect ratio. */
+    private String shape() {
+        int w = getWidth(), h = getHeight();
+        if (w <= 0 || h <= 0) {
+            android.util.DisplayMetrics m = getResources().getDisplayMetrics();
+            w = m.widthPixels;
+            h = m.heightPixels;
+        }
+        float ratio = h > 0 ? (float) w / h : 1.6f;
+        if (ratio >= 1.45f) {
+            return "landscape";
+        }
+        return ratio < 0.9f ? "portrait" : "square";
+    }
+
+    private static String shapeName(String shape) {
+        switch (shape) {
+            case "portrait": return "Portrait";
+            case "square": return "Square screen";
+            default: return "Landscape";
+        }
+    }
+
+    private String layoutKey() {
+        return "layout." + loadedShape + "." + (analogMode ? "analog" : "normal");
+    }
+
     private void loadLayout() {
-        adjust.clear();
+        loadedShape = shape();
         SharedPreferences prefs = getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        String layout = prefs.getString(layoutKey(), null);
+        if (layout != null) {
+            applyLayoutString(layout);
+            return;
+        }
+        // Not set up on this shape yet: the layout from before shapes were kept apart.
+        adjust.clear();
+        on.clear();
         for (Control c : controls) {
+            String shown = prefs.getString(prefix() + "on." + c.group, null);
+            if (shown != null ? shown.equals("1") : DEFAULT_ON.contains(c.group)) {
+                on.add(c.group);
+            }
             if (adjust.containsKey(c.group)) {
                 continue;
             }
@@ -357,17 +668,143 @@ public final class TouchControllerView extends View {
     }
 
     private void saveLayout() {
-        SharedPreferences.Editor editor = getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit();
+        getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(layoutKey(), layoutString()).apply();
+        updateMovesUse();
+    }
+
+    /** The current layout as "group=dx,dy,scale,on;...". */
+    private String layoutString() {
+        StringBuilder b = new StringBuilder();
         for (Map.Entry<String, Adjust> e : adjust.entrySet()) {
             Adjust a = e.getValue();
-            String key = prefix() + e.getKey();
-            if (a.dx == 0f && a.dy == 0f && a.scale == 1f) {
-                editor.remove(key);
-            } else {
-                editor.putString(key, a.dx + "," + a.dy + "," + a.scale);
+            b.append(e.getKey()).append('=').append(a.dx).append(',').append(a.dy).append(',').append(a.scale)
+                .append(',').append(on.contains(e.getKey()) ? 1 : 0).append(';');
+        }
+        return b.toString();
+    }
+
+    /** Applies a layout string; groups it doesn't mention get their defaults. */
+    private void applyLayoutString(String layout) {
+        adjust.clear();
+        on.clear();
+        Set<String> mentioned = new HashSet<>();
+        for (String entry : layout.split(";")) {
+            int eq = entry.indexOf('=');
+            if (eq <= 0) {
+                continue;
+            }
+            String group = entry.substring(0, eq);
+            String[] parts = entry.substring(eq + 1).split(",");
+            Adjust a = new Adjust();
+            try {
+                a.dx = Float.parseFloat(parts[0]);
+                a.dy = Float.parseFloat(parts[1]);
+                a.scale = clampScale(Float.parseFloat(parts[2]));
+                if (parts.length > 3 && parts[3].equals("1")) {
+                    on.add(group);
+                }
+                mentioned.add(group);
+            } catch (RuntimeException ignored) {
+                a = new Adjust();
+            }
+            adjust.put(group, a);
+        }
+        for (Control c : controls) {
+            if (!adjust.containsKey(c.group)) {
+                adjust.put(c.group, new Adjust());
+            }
+            if (!mentioned.contains(c.group) && DEFAULT_ON.contains(c.group)) {
+                on.add(c.group);
             }
         }
-        editor.apply();
+        on.add("menu");   // always there: it's the way back to this editor
+    }
+
+    /** Names of the saved layouts, sorted. */
+    private List<String> savedLayoutNames() {
+        List<String> names = new ArrayList<>();
+        for (String key : getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE).getAll().keySet()) {
+            if (key.startsWith("saved.")) {
+                names.add(key.substring("saved.".length()));
+            }
+        }
+        java.util.Collections.sort(names, String.CASE_INSENSITIVE_ORDER);
+        return names;
+    }
+
+    /** Asks for a name, then saves the current layout under it (replacing one of the same name). */
+    private void showSaveDialog() {
+        final android.widget.EditText input = new android.widget.EditText(getContext());
+        input.setSingleLine(true);
+        input.setHint("Layout name");
+        int pad = Math.round(20 * getResources().getDisplayMetrics().density);
+        android.widget.FrameLayout box = new android.widget.FrameLayout(getContext());
+        box.setPadding(pad, pad / 2, pad, 0);
+        box.addView(input);
+        new android.app.AlertDialog.Builder(getContext())
+            .setTitle("Save this layout")
+            .setView(box)
+            .setPositiveButton("Save", (d, w) -> {
+                String name = input.getText().toString().trim().replace(";", "").replace("=", "");
+                if (name.isEmpty()) {
+                    return;
+                }
+                getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                    .putString("saved." + name, layoutString()).apply();
+                android.widget.Toast.makeText(getContext(), "Saved \"" + name + "\"", android.widget.Toast.LENGTH_SHORT).show();
+            })
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+
+    /** Lists the saved layouts: tap one to use it here, or delete them. */
+    private void showLoadDialog() {
+        final List<String> names = savedLayoutNames();
+        if (names.isEmpty()) {
+            android.widget.Toast.makeText(getContext(), "No saved layouts yet: use Save first.", android.widget.Toast.LENGTH_SHORT).show();
+            return;
+        }
+        new android.app.AlertDialog.Builder(getContext())
+            .setTitle("Load a layout")
+            .setItems(names.toArray(new String[0]), (d, which) -> {
+                String layout = getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .getString("saved." + names.get(which), null);
+                if (layout != null) {
+                    applyLayoutString(layout);
+                    selected = null;
+                    updateMovesUse();
+                    layoutControls();
+                    invalidate();
+                }
+            })
+            .setNeutralButton("Delete…", (d, w) -> showDeleteDialog())
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+
+    private void showDeleteDialog() {
+        final List<String> names = savedLayoutNames();
+        final boolean[] checked = new boolean[names.size()];
+        new android.app.AlertDialog.Builder(getContext())
+            .setTitle("Delete saved layouts")
+            .setMultiChoiceItems(names.toArray(new String[0]), checked, (d, which, isChecked) -> checked[which] = isChecked)
+            .setPositiveButton("Delete", (d, w) -> {
+                SharedPreferences.Editor editor = getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit();
+                for (int i = 0; i < names.size(); i++) {
+                    if (checked[i]) {
+                        editor.remove("saved." + names.get(i));
+                    }
+                }
+                editor.apply();
+            })
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+
+    /** The toolbar's four rows, centred on the screen. */
+    private static float toolbarTop(int h, float bh, float gap) {
+        return h * 0.5f - (4 * bh + 3 * gap) / 2f;
     }
 
     private static float clampScale(float s) {
@@ -377,6 +814,15 @@ public final class TouchControllerView extends View {
     @Override
     protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         super.onSizeChanged(w, h, oldw, oldh);
+        if (!shape().equals(loadedShape)) {
+            // Folded, unfolded or rotated: this shape's own layout.
+            if (editing) {
+                saveLayout();   // keep the edits made on the shape before
+            }
+            releaseAll();
+            selected = null;
+            loadLayout();
+        }
         layoutControls();
         if (active || editing) {
             startPolling();
@@ -396,7 +842,7 @@ public final class TouchControllerView extends View {
         Map<String, float[]> centres = new HashMap<>(); // group -> sum x, sum y, count
         for (Control c : controls) {
             Place p = analogMode ? c.analog : c.normal;
-            c.shown = p != null;
+            c.shown = p != null && groupOn(c.group);
             if (p == null) {
                 continue;
             }
@@ -429,18 +875,35 @@ public final class TouchControllerView extends View {
             c.cy = gy + (c.cy - gy) * a.scale + a.dy * h;
             c.r *= a.scale;
         }
+        for (Control c : controls) {
+            c.baseCx = c.cx;
+            c.layoutShown = c.shown;
+        }
+        applyDrawer();
         stroke.setStrokeWidth(Math.max(2f, unit * 0.006f));
 
-        // Editor toolbar, in the middle of the screen.
+        // Editor toolbar, in the middle of the screen: − + Remove / Add Reset Done.
         float bh = unit * 0.10f, gap = unit * 0.03f;
-        float[] widths = { unit * 0.14f, unit * 0.14f, unit * 0.24f, unit * 0.24f };
-        float total = gap * 3;
-        for (float bw : widths) total += bw;
-        float x = (w - total) / 2f, top = h * 0.5f - bh / 2f;
-        for (int i = 0; i < toolbar.length; i++) {
-            toolbar[i].set(x, top, x + widths[i], top + bh);
-            x += widths[i] + gap;
+        float[] widths = { unit * 0.14f, unit * 0.14f, unit * 0.26f, unit * 0.22f, unit * 0.22f, unit * 0.22f };
+        for (int row = 0; row < 2; row++) {
+            float total = gap * 2;
+            for (int i = row * 3; i < row * 3 + 3; i++) total += widths[i];
+            float x = (w - total) / 2f, top = toolbarTop(h, bh, gap) + row * (bh + gap);
+            for (int i = row * 3; i < row * 3 + 3; i++) {
+                toolbar[i].set(x, top, x + widths[i], top + bh);
+                x += widths[i] + gap;
+            }
         }
+        // Third row: the stick toggles (floating stick, double-tap for Z), side by side.
+        float half = unit * 0.40f;
+        float top3 = toolbarTop(h, bh, gap) + 2 * (bh + gap);
+        float left3 = (w - (half * 2 + gap)) / 2f;
+        toolbar[TB_FLOATING].set(left3, top3, left3 + half, top3 + bh);
+        toolbar[TB_DOUBLE_TAP].set(left3 + half + gap, top3, left3 + half * 2 + gap, top3 + bh);
+        // Fourth row: save and load layouts.
+        float top4 = top3 + bh + gap;
+        toolbar[TB_SAVE].set(left3, top4, left3 + half, top4 + bh);
+        toolbar[TB_LOAD].set(left3 + half + gap, top4, left3 + half * 2 + gap, top4 + bh);
     }
 
     // ------------------------------------------------------------------------------
@@ -449,16 +912,29 @@ public final class TouchControllerView extends View {
 
     @Override
     protected void onDraw(Canvas canvas) {
+        float before = drawerProgress;
+        applyDrawer();
+        if (drawerProgress != ((drawerOpen || editing) ? 1f : 0f) || before != drawerProgress) {
+            postInvalidateOnAnimation();
+        }
         int baseAlpha = Math.round(255 * (editing ? Math.max(opacity, 0.8f) : opacity));
         if (editing) {
             canvas.drawColor(Color.argb(150, 0, 0, 0));
         }
         for (Control c : controls) {
-            if (!c.shown) {
+            boolean floatingNow = stickFloating && c.group.equals("stick");
+            if (!c.shown && !floatingNow) {
                 continue;
             }
             if (c.kind == Kind.STICK) {
                 drawStick(canvas, c, baseAlpha);
+            } else if (c.move != null || c.dynamic) {
+                if (c.dynamic && !editing && !dynamicUsable()) {
+                    continue;
+                }
+                drawMoveButton(canvas, c, baseAlpha);
+            } else if (c.drawerHandle) {
+                drawDrawerHandle(canvas, c, baseAlpha);
             } else {
                 boolean down = pressed.contains(c);
                 fill.setColor(c.color);
@@ -487,6 +963,108 @@ public final class TouchControllerView extends View {
         }
     }
 
+    /** The drawer's handle: a tab with an arrow (◀ to open, ▶ to close). */
+    private void drawDrawerHandle(Canvas canvas, Control c, int baseAlpha) {
+        boolean open = drawerOpen || editing;
+        fill.setColor(Color.rgb(150, 100, 55));
+        fill.setAlpha(pressed.contains(c) ? Math.min(255, baseAlpha + 90) : Math.max(baseAlpha / 2, 80));
+        RectF tab = new RectF(c.cx - c.r * 0.7f, c.cy - c.r * 1.3f, c.cx + c.r * 0.7f, c.cy + c.r * 1.3f);
+        canvas.drawRoundRect(tab, c.r * 0.5f, c.r * 0.5f, fill);
+        stroke.setAlpha(baseAlpha);
+        canvas.drawRoundRect(tab, c.r * 0.5f, c.r * 0.5f, stroke);
+        text.setAlpha(Math.min(255, baseAlpha + 60));
+        text.setTextSize(c.r * 0.9f);
+        float baseline = c.cy - (text.descent() + text.ascent()) / 2f;
+        canvas.drawText(open ? "▶" : "◀", c.cx, baseline, text);
+    }
+
+    /** A move button: the bottom screen's icon on a round button, dimmed when it can't be used. */
+    private void drawMoveButton(Canvas canvas, Control c, int baseAlpha) {
+        boolean lit, usable;
+        String label = null;
+        int kong = moves.state.currentKong;
+        if (kong < 0 || kong >= GameState.KONG_COUNT) {
+            kong = GameState.DK;
+        }
+        TouchMoves.Dynamic dyn = c.dynamic ? moves.dynamic() : TouchMoves.Dynamic.NONE;
+        if (c.dynamic) {
+            switch (dyn) {
+                case CANCEL: label = "Cancel"; lit = moves.cancelBusy; usable = !moves.state.paused; break;
+                case ORANGSTAND: label = "Orangstand"; lit = moves.orangstand || moves.orangstandBusy;
+                    usable = !moves.state.paused && (moves.orangstand || (!moves.state.swimming && !moves.state.climbing && !moves.state.gunOut));
+                    break;
+                case ZB_MOVE: label = moves.zbMoveName(); lit = moves.zbBusy; usable = moves.zbMoveUsable(); break;
+                default: lit = false; usable = editing; break;
+            }
+        } else {
+            lit = moves.lit(c.move);
+            usable = editing || (moves.owned(c.move, -1) && !moves.greyed(c.move));
+        }
+        int alpha = usable ? baseAlpha : baseAlpha / 3;
+        boolean down = usable && (pressed.contains(c) || lit);
+        fill.setColor(!usable ? Color.rgb(90, 90, 90)
+            : c.dynamic && dyn == TouchMoves.Dynamic.CANCEL ? Color.rgb(200, 60, 45)
+            : c.dynamic ? Color.rgb(200, 130, 50) : Color.rgb(150, 100, 55));
+        fill.setAlpha(down ? Math.min(255, alpha + 90) : alpha / 2);
+        canvas.drawCircle(c.cx, c.cy, c.r, fill);
+        stroke.setAlpha(alpha);
+        canvas.drawCircle(c.cx, c.cy, c.r, stroke);
+
+        Paint layer = usable ? alphaLayer : greyLayer;
+        layer.setAlpha(usable ? Math.min(255, alpha + 60) : Math.min(255, baseAlpha / 2 + 30));
+        int saved = canvas.saveLayer(c.cx - c.r, c.cy - c.r, c.cx + c.r, c.cy + c.r, layer);
+        float iconY = label != null ? c.cy - c.r * 0.12f : c.cy, iconR = c.r * (label != null ? 0.5f : 0.62f);
+        if (c.dynamic) {
+            if (dyn == TouchMoves.Dynamic.ORANGSTAND) {
+                canvas.rotate(180f, c.cx, iconY);   // Lanky upside down
+            }
+            if (!RomIcons.draw(canvas, RomIcons.face[kong], c.cx, iconY, iconR)) {
+                DkIcons.eye(canvas, c.cx, iconY, iconR * 0.8f);
+            }
+            if (dyn == TouchMoves.Dynamic.ORANGSTAND) {
+                canvas.rotate(-180f, c.cx, iconY);
+            }
+        } else {
+            switch (c.move) {
+                case WEAPON:
+                    if (!RomIcons.draw(canvas, RomIcons.of(RomIcons.weapon, kong), c.cx, iconY, iconR)) {
+                        DkIcons.weapon(canvas, kong, c.cx, iconY, iconR);
+                    }
+                    break;
+                case ORANGE:
+                    if (!RomIcons.draw(canvas, RomIcons.orange, c.cx, iconY, iconR)) {
+                        DkIcons.orange(canvas, c.cx, iconY, iconR);
+                    }
+                    break;
+                case INSTRUMENT:
+                    if (!RomIcons.draw(canvas, RomIcons.of(RomIcons.instrument, kong), c.cx, iconY, iconR)) {
+                        DkIcons.instrument(canvas, kong, c.cx, iconY, iconR);
+                    }
+                    break;
+                case CAMERA:
+                    if (!RomIcons.draw(canvas, RomIcons.film, c.cx, iconY, iconR)) {
+                        DkIcons.camera(canvas, c.cx, iconY, iconR);
+                    }
+                    break;
+                default:   // first person
+                    if (!RomIcons.draw(canvas, RomIcons.crosshair, c.cx, iconY, iconR)) {
+                        DkIcons.eye(canvas, c.cx, iconY, iconR * 0.8f);
+                    }
+                    break;
+            }
+        }
+        canvas.restoreToCount(saved);
+        if (label != null) {
+            text.setAlpha(Math.min(255, alpha + 60));
+            text.setTextSize(c.r * 0.3f);
+            canvas.drawText(label, c.cx, c.cy + c.r * 0.72f, text);
+        } else if (c.dynamic && editing) {
+            text.setAlpha(255);
+            text.setTextSize(c.r * 0.26f);
+            canvas.drawText("Dynamic", c.cx, c.cy + c.r * 0.72f, text);
+        }
+    }
+
     private void drawStick(Canvas canvas, Control c, int baseAlpha) {
         fill.setColor(Color.BLACK);
         fill.setAlpha(baseAlpha / 3);
@@ -499,7 +1077,12 @@ public final class TouchControllerView extends View {
         fill.setAlpha(c.pointerId != -1 ? Math.min(255, baseAlpha + 90) : baseAlpha);
         canvas.drawCircle(knobX, knobY, c.r * 0.45f, fill);
         canvas.drawCircle(knobX, knobY, c.r * 0.45f, stroke);
-        if (!c.label.isEmpty()) {
+        if (zFromStick && c.group.equals("stick")) {
+            text.setAlpha(255);
+            text.setTextSize(c.r * 0.4f);
+            float baseline = knobY - (text.descent() + text.ascent()) / 2f;
+            canvas.drawText("Z", knobX, baseline, text);
+        } else if (!c.label.isEmpty()) {
             text.setAlpha(Math.min(255, baseAlpha + 30));
             text.setTextSize(c.r * 0.22f);
             float baseline = knobY - (text.descent() + text.ascent()) / 2f;
@@ -511,23 +1094,36 @@ public final class TouchControllerView extends View {
         text.setAlpha(255);
         text.setTextSize(unit * 0.045f);
         float y = toolbar[0].top - unit * 0.10f;
-        canvas.drawText(analogMode ? "Touch layout (Analog Camera)" : "Touch layout", getWidth() / 2f, y, text);
+        canvas.drawText("Touch layout · " + shapeName(loadedShape) + (analogMode ? " · Analog Camera" : ""), getWidth() / 2f, y, text);
         text.setTextSize(unit * 0.032f);
-        canvas.drawText(selected == null ? "Tap a control to select it, drag to move, pinch to resize"
-                : "Drag to move · pinch or − / + to resize", getWidth() / 2f, y + unit * 0.05f, text);
+        canvas.drawText(selected == null ? "Tap a control to select it, drag to move, pinch to resize · Add for more"
+                : (selected.equals("drawer_items") ? "Action drawer buttons: " : selected.equals("drawer") ? "Action drawer handle: "
+                    : GROUP_NAMES.containsKey(selected) ? GROUP_NAMES.get(selected) + ": " : "")
+                    + "drag to move · pinch or − / + to resize · Remove to hide", getWidth() / 2f, y + unit * 0.05f, text);
 
         float radius = unit * 0.02f;
         for (int i = 0; i < toolbar.length; i++) {
             RectF rect = toolbar[i];
-            boolean primary = i == 3;
-            fill.setColor(primary ? Color.rgb(46, 158, 79) : Color.rgb(60, 60, 68));
-            fill.setAlpha(235);
+            boolean primary = i == TB_DONE;
+            boolean disabled = i == TB_REMOVE && (selected == null || !(GROUP_NAMES.containsKey(selected) || selected.equals("drawer_items")));
+            fill.setColor(primary ? Color.rgb(46, 158, 79) : i == TB_REMOVE && !disabled ? Color.rgb(170, 60, 50)
+                : (i == TB_FLOATING && floatingStick) || (i == TB_DOUBLE_TAP && doubleTapZ) ? Color.rgb(59, 111, 216) : Color.rgb(60, 60, 68));
+            fill.setAlpha(disabled ? 110 : 235);
             canvas.drawRoundRect(rect, radius, radius, fill);
             stroke.setAlpha(255);
             canvas.drawRoundRect(rect, radius, radius, stroke);
             text.setTextSize(rect.height() * 0.45f);
             float baseline = rect.centerY() - (text.descent() + text.ascent()) / 2f;
-            canvas.drawText(TOOLBAR_LABELS[i], rect.centerX(), baseline, text);
+            String label = i == TB_FLOATING ? "Floating stick: " + (floatingStick ? "On" : "Off")
+                : i == TB_DOUBLE_TAP ? "Double-tap stick for Z: " + (doubleTapZ ? "On" : "Off") : TOOLBAR_LABELS[i];
+            if (i == TB_FLOATING || i == TB_DOUBLE_TAP) {
+                text.setTextSize(rect.height() * 0.38f);
+                while (text.getTextSize() > 8f && text.measureText(label) > rect.width() * 0.92f) {
+                    text.setTextSize(text.getTextSize() * 0.92f);
+                }
+                baseline = rect.centerY() - (text.descent() + text.ascent()) / 2f;
+            }
+            canvas.drawText(label, rect.centerX(), baseline, text);
         }
     }
 
@@ -555,16 +1151,35 @@ public final class TouchControllerView extends View {
                 float x = event.getX(index), y = event.getY(index);
                 Control stick = null;
                 for (Control s : sticks) {
-                    if (s.shown && s.pointerId == -1 && s.hit(x, y, s.captureSlack)) {
+                    if (s.shown && s.pointerId == -1 && !(stickFloating && s.group.equals("stick")) && s.hit(x, y, s.captureSlack)) {
                         stick = s;
                         break;
                     }
                 }
+                Control left = floatingStick ? leftStick() : null;
                 if (stick != null) {
                     stick.pointerId = pointerId;
+                    stickDown(stick);
                     updateStick(stick, x, y);
                 } else if (hitButton(x, y) != null) {
                     buttonPointers.put(pointerId, new float[] { x, y });
+                } else if (left != null && left.pointerId == -1 && inFloatingZone(x, y)) {
+                    // Floating stick: a smaller stick comes to the thumb, centred under it.
+                    stickHomeX = left.cx;
+                    stickHomeY = left.cy;
+                    stickHomeR = left.r;
+                    stickFloating = true;
+                    left.cx = x;
+                    left.cy = y;
+                    left.r = FLOATING_RADIUS * unit;
+                    left.pointerId = pointerId;
+                    stickDown(left);
+                    updateStick(left, x, y);
+                } else if (dragCamera && cameraPointer == -1) {
+                    // Away from the buttons: this finger turns the camera (Drag to Move Camera).
+                    cameraPointer = pointerId;
+                    cameraLastX = x;
+                    cameraLastY = y;
                 } else if (action == MotionEvent.ACTION_DOWN) {
                     return false;
                 }
@@ -577,6 +1192,12 @@ public final class TouchControllerView extends View {
                     Control stick = stickFor(id);
                     if (stick != null) {
                         updateStick(stick, event.getX(i), event.getY(i));
+                    } else if (id == cameraPointer) {
+                        float x = event.getX(i), y = event.getY(i);
+                        float density = getResources().getDisplayMetrics().density;
+                        TouchInput.addCameraDrag((x - cameraLastX) / density, (y - cameraLastY) / density);
+                        cameraLastX = x;
+                        cameraLastY = y;
                     } else {
                         float[] pos = buttonPointers.get(id);
                         if (pos != null) {
@@ -592,10 +1213,13 @@ public final class TouchControllerView extends View {
             case MotionEvent.ACTION_CANCEL: {
                 if (action == MotionEvent.ACTION_CANCEL || action == MotionEvent.ACTION_UP) {
                     buttonPointers.clear();
+                    cameraPointer = -1;
                     for (Control s : sticks) {
                         if (s.pointerId != -1) {
                             s.pointerId = -1;
                             setStick(s, 0f, 0f);
+                            stickUp(s);
+                            stickReleased(s);
                         }
                     }
                 } else {
@@ -603,6 +1227,10 @@ public final class TouchControllerView extends View {
                     if (stick != null) {
                         stick.pointerId = -1;
                         setStick(stick, 0f, 0f);
+                        stickUp(stick);
+                        stickReleased(stick);
+                    } else if (pointerId == cameraPointer) {
+                        cameraPointer = -1;
                     } else {
                         buttonPointers.remove(pointerId);
                     }
@@ -618,6 +1246,82 @@ public final class TouchControllerView extends View {
         return true;
     }
 
+    /**
+     * Where the floating stick can appear: the lower-left, like Roblox's dynamic thumbstick
+     * (the left half, below the top third). The rest of the screen turns the camera.
+     */
+    private boolean inFloatingZone(float x, float y) {
+        return x < getWidth() / 2f && y > getHeight() / 3f;
+    }
+
+    /** The left (control) stick. */
+    private Control leftStick() {
+        for (Control s : sticks) {
+            if (s.group.equals("stick")) {
+                return s;
+            }
+        }
+        return null;
+    }
+
+    /** The control stick was touched: a second touch right after a quick tap holds Z. */
+    private void stickDown(Control s) {
+        if (!s.group.equals("stick")) {
+            return;
+        }
+        long now = android.os.SystemClock.uptimeMillis();
+        if (doubleTapZ && lastStickTouchWasTap && now - stickUpAt <= DOUBLE_TAP_GAP_MS && !zFromStick) {
+            zFromStick = true;
+            zEndsWith = null;
+            TouchInput.setOverlayN64Button(TouchInput.N64_Z, true);
+            Haptics.tap(this);
+            invalidate();
+        }
+        stickDownAt = now;
+    }
+
+    private void releaseStickZ() {
+        if (zFromStick) {
+            zFromStick = false;
+            zEndsWith = null;
+            TouchInput.setOverlayN64Button(TouchInput.N64_Z, false);
+            invalidate();
+        }
+    }
+
+    /**
+     * Buttons used with Z held, which don't end the double-tap Z: oranges (thrown while
+     * crouched) and B (the Z + B moves, e.g. Lanky's Orangstand needs Z kept down).
+     */
+    private static boolean keepsZ(Control c) {
+        return c.move == TouchMoves.Move.ORANGE || c.n64Bit == TouchInput.N64_C_RIGHT || c.n64Bit == TouchInput.N64_B;
+    }
+
+    /** The thumb left the control stick: let go of Z if the double tap was holding it. */
+    private void stickUp(Control s) {
+        if (!s.group.equals("stick")) {
+            return;
+        }
+        long now = android.os.SystemClock.uptimeMillis();
+        if (zFromStick) {
+            releaseStickZ();
+            lastStickTouchWasTap = false;   // a third tap starts over
+        } else {
+            lastStickTouchWasTap = now - stickDownAt <= TAP_MAX_MS;
+        }
+        stickUpAt = now;
+    }
+
+    /** Puts a floating stick back in its place once the thumb lifts. */
+    private void stickReleased(Control s) {
+        if (stickFloating && s.group.equals("stick")) {
+            stickFloating = false;
+            s.cx = stickHomeX;
+            s.cy = stickHomeY;
+            s.r = stickHomeR;
+        }
+    }
+
     private Control stickFor(int pointerId) {
         for (Control s : sticks) {
             if (s.pointerId == pointerId) {
@@ -627,9 +1331,30 @@ public final class TouchControllerView extends View {
         return null;
     }
 
+    /**
+     * Shown but not drawn or touchable right now: the dynamic button while there's nothing
+     * for it to do (outside the layout editor).
+     */
+    private boolean hiddenNow(Control c) {
+        if (c.drawerItem && !editing && drawerProgress < 0.6f) {
+            return true;   // the drawer is closed or still sliding
+        }
+        return c.dynamic && !editing && !dynamicUsable();
+    }
+
+    private boolean dynamicUsable() {
+        switch (moves.dynamic()) {
+            case CANCEL: return !moves.state.paused;
+            case ORANGSTAND: return !moves.state.paused && (moves.orangstand || moves.orangstandBusy
+                || (!moves.state.swimming && !moves.state.climbing && !moves.state.gunOut));
+            case ZB_MOVE: return moves.zbBusy || moves.zbMoveUsable();
+            default: return false;
+        }
+    }
+
     private Control hitButton(float x, float y) {
         for (Control c : controls) {
-            if (c.shown && c.kind == Kind.BUTTON && c.hit(x, y, BUTTON_SLACK)) {
+            if (c.shown && c.kind == Kind.BUTTON && !hiddenNow(c) && c.hit(x, y, BUTTON_SLACK)) {
                 return c;
             }
         }
@@ -651,10 +1376,19 @@ public final class TouchControllerView extends View {
             if (!now.contains(c)) {
                 c.onRelease.run();
                 pressed.remove(c);
+                if (c == zEndsWith) {
+                    releaseStickZ();   // e.g. after the crouch jump
+                }
             }
         }
         for (Control c : now) {
             if (pressed.add(c)) {
+                if (c.drawerItem) {
+                    drawerUsedAt = android.os.SystemClock.uptimeMillis();
+                }
+                if (zFromStick && zEndsWith == null && !c.drawerHandle && !keepsZ(c)) {
+                    zEndsWith = c;
+                }
                 c.onPress.run();
                 newPress = true;
             }
@@ -819,9 +1553,48 @@ public final class TouchControllerView extends View {
     private void onToolbar(int i) {
         Haptics.tap(this);
         switch (i) {
-            case 0:
-            case 1: {
-                float step = i == 0 ? -0.1f : 0.1f;
+            case TB_REMOVE:
+                if ("drawer_items".equals(selected)) {
+                    selected = "drawer";   // the drawer's buttons go with its handle
+                }
+                if (selected != null && GROUP_NAMES.containsKey(selected)) {
+                    on.remove(selected);
+                    selected = null;
+                    updateMovesUse();
+                }
+                break;
+            case TB_ADD:
+                showAddMenu();
+                return;
+            case TB_SAVE:
+                showSaveDialog();
+                return;
+            case TB_LOAD:
+                showLoadDialog();
+                return;
+            case TB_DOUBLE_TAP:
+                doubleTapZ = !doubleTapZ;
+                getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_DOUBLE_TAP_Z, doubleTapZ).apply();
+                if (doubleTapZ) {
+                    android.widget.Toast.makeText(getContext(),
+                        "Tap the control stick, then touch it again and hold for Z. You can still move while holding.",
+                        android.widget.Toast.LENGTH_LONG).show();
+                }
+                invalidate();
+                return;
+            case TB_FLOATING:
+                floatingStick = !floatingStick;
+                getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_FLOATING, floatingStick).apply();
+                if (floatingStick) {
+                    android.widget.Toast.makeText(getContext(),
+                        "Touch anywhere in the lower-left to bring up the stick; drag elsewhere to turn the camera. Remove the control stick if you only want the floating one.",
+                        android.widget.Toast.LENGTH_LONG).show();
+                }
+                invalidate();
+                return;
+            case TB_SMALLER:
+            case TB_BIGGER: {
+                float step = i == TB_SMALLER ? -0.1f : 0.1f;
                 if (selected != null) {
                     Adjust a = adjust.get(selected);
                     a.scale = clampScale(a.scale + step);
@@ -832,12 +1605,15 @@ public final class TouchControllerView extends View {
                 }
                 break;
             }
-            case 2:
+            case TB_RESET:
                 for (Adjust a : adjust.values()) {
                     a.dx = a.dy = 0f;
                     a.scale = 1f;
                 }
+                on.clear();
+                on.addAll(DEFAULT_ON);
                 selected = null;
+                updateMovesUse();
                 break;
             default:
                 stopEditing();
@@ -845,6 +1621,37 @@ public final class TouchControllerView extends View {
         }
         layoutControls();
         invalidate();
+    }
+
+    /** Lists the groups not on screen; picking one adds it (selected, ready to move). */
+    private void showAddMenu() {
+        final List<String> groups = new ArrayList<>();
+        List<String> names = new ArrayList<>();
+        for (Map.Entry<String, String> e : GROUP_NAMES.entrySet()) {
+            String group = e.getKey();
+            if (on.contains(group) || (group.equals("camera") && !analogMode)) {
+                continue;   // the camera stick is only there with the Analog Camera
+            }
+            groups.add(group);
+            names.add(e.getValue());
+        }
+        if (groups.isEmpty()) {
+            android.widget.Toast.makeText(getContext(), "Everything is already on screen.", android.widget.Toast.LENGTH_SHORT).show();
+            return;
+        }
+        new android.app.AlertDialog.Builder(getContext())
+            .setTitle("Add to the touch controls")
+            .setItems(names.toArray(new String[0]), (dialog, which) -> {
+                String group = groups.get(which);
+                on.add(group);
+                selected = group;
+                updateMovesUse();
+                layoutControls();
+                keepGroupOnScreen(group);
+                invalidate();
+            })
+            .setNegativeButton("Cancel", null)
+            .show();
     }
 
     // Folding or unfolding a foldable can take the view off its window and put it back:

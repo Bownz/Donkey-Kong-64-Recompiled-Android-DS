@@ -242,6 +242,22 @@ const u8 banned_analog_states[] = {
     0x67, // Instrument
 };
 
+// @recomp (Android): whether the camera may be turned by hand right now (not in DK TV mode or
+// one of the states above). Used by touch drag, which works with every camera type.
+static u8 camera_turn_allowed(void) {
+    u32 i;
+
+    if (gameIsInDKTVMode()) {
+        return FALSE;
+    }
+    for (i = 0; i < sizeof(banned_analog_states); i++) {
+        if (banned_analog_states[i] == gCurrentPlayer->control_state) {
+            return FALSE;
+        }
+    }
+    return TRUE;
+}
+
 u8 get_analog_allowed(void) {
     // When using the analog control scheme, whether the stick does anything
     u32 i;
@@ -445,10 +461,24 @@ RECOMP_PATCH void func_global_asm_8061D1FC(Actor* arg0) {
     } else {
         arg0->distance_from_floor += ((CaaD->unkB8 - arg0->distance_from_floor) * 0.2);
     }
-    if (analog_cam_enabled() && get_analog_allowed()) {
-        recomp_analog_camera_get(&dRStickX, &dRStickY);
-        dRStickX *= recomp_get_analog_cam_sensitivity() * -5.7f * getFrameDelta();
-        dRStickY *= recomp_get_analog_cam_sensitivity() * 1.0f * getFrameDelta();
+    // @recomp (Android): dragging a finger on the touch screen turns the camera (and moves it up
+    // and down), with any camera type. The app returns the drag since the last frame, already
+    // in the camera's units (recomp_touch_camera_get, src/game/recomp_api.cpp).
+    f32 touchCamX = 0.0f, touchCamY = 0.0f;
+    s32 touchCamMoved = recomp_touch_camera_get(&touchCamX, &touchCamY) && camera_turn_allowed();
+    if ((analog_cam_enabled() && get_analog_allowed()) || touchCamMoved) {
+        if (analog_cam_enabled() && get_analog_allowed()) {
+            recomp_analog_camera_get(&dRStickX, &dRStickY);
+            dRStickX *= recomp_get_analog_cam_sensitivity() * -5.7f * getFrameDelta();
+            dRStickY *= recomp_get_analog_cam_sensitivity() * 1.0f * getFrameDelta();
+        } else {
+            dRStickX = 0.0f;
+            dRStickY = 0.0f;
+        }
+        if (touchCamMoved) {
+            dRStickX += touchCamX;
+            dRStickY += touchCamY;
+        }
         if (CaaD->unkF3 != 2) {
             if (dRStickX != 0.0f) {
                 CaaD->unkB0 = 0;

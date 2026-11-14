@@ -17,11 +17,14 @@
 #include "gpu_driver.h"
 #include <cstdint>
 
+extern "C" void dk64_android_slowdown_second(float fps, int map, int chunk);
+
 namespace {
     std::atomic<uint8_t*> g_rdram{nullptr};
     std::atomic<bool> g_touch_kong_swap{false};
     std::atomic<bool> g_touch_feedback{true};
-    std::atomic<bool> g_bottom_buttons{true};
+    std::atomic<int> g_bottom_buttons{1};
+    std::atomic<bool> g_bottom_first_person{true};   // 0 off, 1 on, 2 appear while Z is held
     std::atomic<int> g_touch_feedback_strength{2};
     // patches/android_hooks.c reports each input-handler set the game runs; a frame can run
     // several (e.g. a mode's own set plus shared ones). They're collected per frame.
@@ -484,13 +487,22 @@ void dk64::android::set_touch_kong_swap(bool enabled) {
     g_touch_kong_swap.store(enabled);
 }
 
-void dk64::android::set_bottom_buttons(bool shown) {
-    g_bottom_buttons.store(shown);
+void dk64::android::set_bottom_buttons(int mode) {
+    g_bottom_buttons.store(mode);
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_io_github_bownz_dk64recomp_GameState_nativeBottomButtonsMode(JNIEnv*, jclass) {
+    return g_bottom_buttons.load();
+}
+
+void dk64::android::set_bottom_first_person(bool shown) {
+    g_bottom_first_person.store(shown);
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_io_github_bownz_dk64recomp_GameState_nativeBottomButtons(JNIEnv*, jclass) {
-    return g_bottom_buttons.load() ? JNI_TRUE : JNI_FALSE;
+Java_io_github_bownz_dk64recomp_GameState_nativeBottomFirstPerson(JNIEnv*, jclass) {
+    return g_bottom_first_person.load() ? JNI_TRUE : JNI_FALSE;
 }
 
 void dk64::android::set_touch_feedback(bool enabled) {
@@ -587,7 +599,7 @@ namespace {
         return false;
     }
 
-    // Logs places that run slow (at most once every 5 seconds).
+    // Logs places that run slow (at most once every 5 seconds), and feeds the slowdown recorder.
     std::chrono::steady_clock::time_point g_fps_start{};
     uint32_t g_fps_frames = 0;
     std::chrono::steady_clock::time_point g_last_slow_log{};
@@ -604,6 +616,9 @@ namespace {
         }
         const float fps = (g_fps_frames - 1) / elapsed;
         g_fps_frames = 0;
+        if (elapsed < 2.0f) {   // longer gaps are pauses (app in the background), not slowness
+            dk64_android_slowdown_second(fps, g_area_map.load(), g_area_chunk.load());
+        }
         if (elapsed < 2.0f && fps < 27.5f && now - g_last_slow_log > std::chrono::seconds(5)) {
             g_last_slow_log = now;
             __android_log_print(ANDROID_LOG_INFO, "DK64Recomp", "Slow area: map 0x%02X chunk %d, %.1f FPS%s",
@@ -622,8 +637,14 @@ Java_io_github_bownz_dk64recomp_GameState_nativeArea(JNIEnv*, jclass) {
     return (g_area_map.load() & 0xFFFF) << 16 | (g_area_chunk.load() & 0xFFFF);
 }
 
+extern "C" void dk64_android_perf_hint_add_thread();
+extern "C" void dk64_android_set_thread_role(int role);
+
 extern "C" void dk64_android_report_frame() {
-    g_frames.fetch_add(1, std::memory_order_relaxed);
+    if (g_frames.fetch_add(1, std::memory_order_relaxed) == 0) {
+        dk64_android_perf_hint_add_thread();   // the game's own thread: performance hints,
+        dk64_android_set_thread_role(0);       // and the prime core(s) (cpu_layout.cpp)
+    }
     if (const uint8_t* rdram = g_rdram.load(std::memory_order_relaxed)) {
         read_area(rdram);
     }

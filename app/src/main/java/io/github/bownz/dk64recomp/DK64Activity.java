@@ -192,7 +192,11 @@ public class DK64Activity extends SDLActivity
         storage.onResume();
         inputManager.registerInputDeviceListener(this, null);
         displayManager.registerDisplayListener(this, null);
+        setForeground(true);
+        thermalHandler.removeCallbacks(thermalTick);
+        thermalHandler.post(thermalTick);
         hideSystemBars();
+        preferSixtyHz();
         // Controllers or displays may have changed while we were away.
         updateTouchControls();
         Diagnostics.markPlaying(this);
@@ -204,6 +208,9 @@ public class DK64Activity extends SDLActivity
         if (overlay != null) {
             overlay.releaseAll();
         }
+        // Moves from the touch buttons (on either screen) stop, and Z is let go.
+        TouchMoves.get().cancel();
+        thermalHandler.removeCallbacks(thermalTick);
         if (presentation != null && presentation.getBottomScreen() != null) {
             presentation.getBottomScreen().cancel();
         }
@@ -211,6 +218,7 @@ public class DK64Activity extends SDLActivity
         displayManager.unregisterDisplayListener(this);
         Diagnostics.markLeaving(this);
         super.onPause();
+        setForeground(false);
     }
 
     @Override
@@ -235,6 +243,7 @@ public class DK64Activity extends SDLActivity
         if (hasFocus) {
             // System bars come back after dialogs, the notification shade, etc.
             hideSystemBars();
+            preferSixtyHz();
             // By now the game has usually started SDL: create the shared virtual gamepad if
             // the overlay or action pad wanted it before SDL was ready.
             TouchInput.ensure();
@@ -338,6 +347,76 @@ public class DK64Activity extends SDLActivity
     }
 
     /** From the in-game Graphics settings: install or remove driver packages. */
+    private static native void nativeSetForeground(boolean foreground);
+
+    private static native void nativeRecordLine(String line);
+
+    /**
+     * Every 5 seconds while playing: the phone's temperature and thermal state, into the log and
+     * the slowdown recorder, so a slowdown report shows whether the phone was throttling.
+     */
+    private final android.os.Handler thermalHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable thermalTick = new Runnable() {
+        @Override
+        public void run() {
+            String line = thermalLine();
+            if (line != null) {
+                Log.i("DK64Recomp", line);
+                try { nativeRecordLine(line); } catch (UnsatisfiedLinkError ignored) { }
+            }
+            thermalHandler.postDelayed(this, 5000);
+        }
+    };
+
+    private static final String[] THERMAL_NAMES = {
+        "none", "light", "moderate", "severe", "critical", "emergency", "shutdown" };
+
+    private String thermalLine() {
+        StringBuilder b = new StringBuilder("Phone heat:");
+        try {
+            Intent battery = registerReceiver(null, new android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+            if (battery != null) {
+                int tenths = battery.getIntExtra(android.os.BatteryManager.EXTRA_TEMPERATURE, Integer.MIN_VALUE);
+                if (tenths != Integer.MIN_VALUE) {
+                    b.append(String.format(java.util.Locale.US, " battery %.1f C", tenths / 10f));
+                }
+                int plugged = battery.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED, 0);
+                b.append(plugged != 0 ? " (charging)" : "");
+            }
+        } catch (RuntimeException ignored) { }
+        if (Build.VERSION.SDK_INT >= 29) {
+            PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+            if (pm != null) {
+                int status = pm.getCurrentThermalStatus();
+                b.append(" | thermal ").append(status >= 0 && status < THERMAL_NAMES.length ? THERMAL_NAMES[status] : String.valueOf(status));
+                if (Build.VERSION.SDK_INT >= 30) {
+                    // 1.0 = the point where the phone starts throttling hard.
+                    float headroom = pm.getThermalHeadroom(0);
+                    if (!Float.isNaN(headroom)) {
+                        b.append(String.format(java.util.Locale.US, ", headroom %.2f", headroom));
+                    }
+                }
+            }
+        }
+        return b.length() > "Phone heat:".length() ? b.toString() : null;
+    }
+
+    /** Tells the audio watchdog whether the app is in front (sound pauses in the background). */
+    private static void setForeground(boolean foreground) {
+        try { nativeSetForeground(foreground); } catch (UnsatisfiedLinkError ignored) { }
+    }
+
+    /** From native code (Settings > Gameplay > Game Files Location): offers to move the files. */
+    public String changeStorageLocation() {
+        runOnUiThread(storage::startChange);
+        return null;
+    }
+
+    /** From native code: where the game's files are now, for that button's description. */
+    public String getStorageDescription() {
+        return storage.describeLocation();
+    }
+
     public String openGpuDriverManager() {
         runOnUiThread(() -> startActivity(new Intent(this, GpuDriverActivity.class)
             .putExtra(GpuDriverActivity.EXTRA_DRIVERS, true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)));
@@ -559,7 +638,57 @@ public class DK64Activity extends SDLActivity
     @Override public void onInputDeviceChanged(int deviceId) { updateTouchControls(); }
     @Override public void onDisplayAdded(int displayId) { updateTouchControls(); }
     @Override public void onDisplayRemoved(int displayId) { updateTouchControls(); }
-    @Override public void onDisplayChanged(int displayId) { }
+    @Override public void onDisplayChanged(int displayId) {
+        // Folding or unfolding moves the window to a different screen with its own modes.
+        Display d = getWindow().getDecorView().getDisplay();
+        if (d != null && d.getDisplayId() == displayId) {
+            preferSixtyHz();
+        }
+    }
+
+    /**
+     * Asks for a steady 60 Hz while the game runs. Screens with adaptive refresh (e.g. a
+     * Galaxy Z Fold, 1-120 Hz) otherwise keep changing their rate, and 30 or 60 FPS lands on
+     * the refreshes unevenly, so the frame rate looks all over the place even when the game
+     * keeps up. 60 Hz divides evenly by both of the game's rates. Screens that only do one
+     * rate are left alone.
+     */
+    private int preferredModeId = -1;
+
+    private void preferSixtyHz() {
+        Display display = getWindow().getDecorView().getDisplay();
+        if (display == null) {
+            display = getWindowManager().getDefaultDisplay();
+        }
+        if (display == null) {
+            return;
+        }
+        Display.Mode current = display.getMode();
+        Display.Mode best = null;
+        for (Display.Mode m : display.getSupportedModes()) {
+            if (m.getPhysicalWidth() != current.getPhysicalWidth() || m.getPhysicalHeight() != current.getPhysicalHeight()) {
+                continue;   // only change the refresh rate, never the resolution
+            }
+            float rate = m.getRefreshRate();
+            if (rate < 59f || rate > 61f) {
+                continue;
+            }
+            best = m;
+        }
+        if (best == null) {
+            return;
+        }
+        WindowManager.LayoutParams lp = getWindow().getAttributes();
+        if (lp.preferredDisplayModeId == best.getModeId() && preferredModeId == best.getModeId()) {
+            return;
+        }
+        lp.preferredDisplayModeId = best.getModeId();
+        lp.preferredRefreshRate = best.getRefreshRate();
+        getWindow().setAttributes(lp);
+        preferredModeId = best.getModeId();
+        Log.i(TAG, "Display: asked for " + best.getRefreshRate() + " Hz (mode " + best.getModeId() + ", "
+            + best.getPhysicalWidth() + "x" + best.getPhysicalHeight() + "; was " + current.getRefreshRate() + " Hz)");
+    }
 
     // ------------------------------------------------------------------------------
     // Asset extraction

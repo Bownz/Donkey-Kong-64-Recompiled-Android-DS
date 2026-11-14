@@ -21,6 +21,8 @@
 #include <cstdint>
 #include <mutex>
 
+#include "gpu_driver.h"
+
 namespace {
     // N64 buttons (recompinput bit values) held by the second screen's action buttons. These
     // go straight into the game's input, so they work whatever the controller mappings are
@@ -133,6 +135,62 @@ Java_io_github_bownz_dk64recomp_TouchInput_nativeSetAxis(JNIEnv*, jclass, jint a
     }
 }
 
+// --- Touch controls in use, and the touch-drag camera ---------------------------------------
+
+// The on-screen controller is in use (TouchControllerView.setActive). The game's button
+// icons then stay as the N64's own, matching the on-screen buttons (recomp_api.cpp).
+static std::atomic<bool> overlay_active{false};
+
+bool dk64_android_touch_overlay_active() {
+    return overlay_active.load(std::memory_order_relaxed);
+}
+
+JNIEXPORT void JNICALL
+Java_io_github_bownz_dk64recomp_TouchInput_nativeSetOverlayActive(JNIEnv*, jclass, jboolean active) {
+    overlay_active.store(active, std::memory_order_relaxed);
+}
+
+bool dk64_android_take_camera_drag(float* dx, float* dy);
+
+// Input > Touch > Drag to Move Camera.
+static std::atomic<bool> drag_camera{true};
+
+} // extern "C"
+
+void dk64::android::set_drag_camera(bool enabled) {
+    drag_camera.store(enabled, std::memory_order_relaxed);
+    if (!enabled) {
+        float dx, dy;
+        dk64_android_take_camera_drag(&dx, &dy);
+    }
+}
+
+bool dk64::android::drag_camera_enabled() {
+    return drag_camera.load(std::memory_order_relaxed);
+}
+
+extern "C" {
+
+// Finger movement (in dp) on the free part of the screen, not yet taken by the game's camera.
+static std::mutex camera_drag_mutex;
+static float camera_drag_x = 0.0f, camera_drag_y = 0.0f;
+
+JNIEXPORT void JNICALL
+Java_io_github_bownz_dk64recomp_TouchInput_nativeAddCameraDrag(JNIEnv*, jclass, jfloat dx, jfloat dy) {
+    std::lock_guard lock{camera_drag_mutex};
+    camera_drag_x += dx;
+    camera_drag_y += dy;
+}
+
+// Takes the drag since the last call. Returns false if there was none.
+bool dk64_android_take_camera_drag(float* dx, float* dy) {
+    std::lock_guard lock{camera_drag_mutex};
+    *dx = camera_drag_x;
+    *dy = camera_drag_y;
+    camera_drag_x = camera_drag_y = 0.0f;
+    return *dx != 0.0f || *dy != 0.0f;
+}
+
 // Read by recompinput's get_n64_input (RecompFrontend Android patch) for player 1.
 uint16_t dk64_android_touch_n64_buttons() {
     return direct_n64_buttons.load(std::memory_order_relaxed);
@@ -166,6 +224,12 @@ Java_io_github_bownz_dk64recomp_TouchInput_nativeTakePhysicalZ(JNIEnv*, jclass) 
         bits |= 2;
     }
     return bits;
+}
+
+// Whether Z is held on the controller (or keyboard) right now, without taking the press.
+JNIEXPORT jboolean JNICALL
+Java_io_github_bownz_dk64recomp_TouchInput_nativePhysicalZHeld(JNIEnv*, jclass) {
+    return physical_z_down.load(std::memory_order_relaxed) ? JNI_TRUE : JNI_FALSE;
 }
 
 } // extern "C"

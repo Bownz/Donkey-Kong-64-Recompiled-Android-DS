@@ -158,7 +158,7 @@ def ensureSdlPatch = {
 }
 
 // App version for testers' reports: the release number plus the commit it was built from.
-def appVersion = '0.2.3-beta'
+def appVersion = '0.2.4-beta'
 def gitCommit = {
     def sha = System.getenv('GITHUB_SHA')
     if (sha) {
@@ -200,7 +200,7 @@ android {
         // Android 9: the UI's slot map uses aligned_alloc, which Android's libc has from API 28.
         minSdk 28
         targetSdk 36
-        versionCode 4
+        versionCode 5
         // Shown in the app (DK64 Tools, settings, bottom screen) and in log reports, so bug
         // reports name the exact build.
         versionName "${appVersion} (${gitCommit})"
