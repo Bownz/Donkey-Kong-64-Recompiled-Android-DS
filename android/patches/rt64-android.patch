@@ -1474,6 +1474,55 @@ index d1c5273..0f14d91 100644
              pipelineDesc.renderTargetBlend[0] = RenderBlendDesc::Copy();
              pipelineDesc.renderTargetCount = 1;
              pipelineDesc.pipelineLayout = videoInterfaceNearest.pipelineLayout.get();
+diff --git a/src/render/rt64_texture_cache.cpp b/src/render/rt64_texture_cache.cpp
+index 0848f3e..c8521de 100644
+--- a/src/render/rt64_texture_cache.cpp
++++ b/src/render/rt64_texture_cache.cpp
+@@ -22,6 +22,10 @@
+ 
+ #define ONLY_USE_LOW_MIP_CACHE 0
+ 
++#if defined(__ANDROID__)
++extern "C" void dk64_android_perf_hint_add_thread() __attribute__((weak));
++#endif
++
+ namespace RT64 {
+     // ReplacementMap
+     
+@@ -337,7 +341,18 @@ namespace RT64 {
+             const uint64_t MinimumMaxAge = WORKLOAD_QUEUE_SIZE * 2;
+             const uint64_t MaximumMaxAge = WORKLOAD_QUEUE_SIZE * 32;
+             const uint64_t age = submissionFrame - it->second;
++#       if defined(__ANDROID__)
++            // Android: while the cache is within its budget, keep textures for about 30 seconds
++            // after their last use (instead of ~4), so turning around or going back into a room
++            // doesn't upload and decode them all again (the DL thread waits for uploads).
++            const uint64_t AndroidKeepFrames = 900;
++            const size_t AndroidTextureBudget = 2500;
++            const size_t liveTextures = textures.size() - freeSpaces.size();
++            const uint64_t usualMaxAge = std::clamp(it->second - creationFrames[it->first], MinimumMaxAge, MaximumMaxAge);
++            const uint64_t maxAge = (liveTextures <= AndroidTextureBudget) ? std::max(usualMaxAge, AndroidKeepFrames) : usualMaxAge;
++#       else
+             const uint64_t maxAge = std::clamp(it->second - creationFrames[it->first], MinimumMaxAge, MaximumMaxAge);
++#       endif
+ 
+             // Evict all entries that are present in the access list and are older than the frame by the specified margin.
+             if (age >= maxAge) {
+@@ -967,6 +982,14 @@ namespace RT64 {
+ 
+     void TextureCache::uploadThreadLoop() {
+         Thread::setCurrentThreadName("RT64 Texture");
++#   if defined(__ANDROID__)
++        // The display-list thread waits for this one's uploads every frame, so it gets the same
++        // priority as the render threads, and is part of the performance hints.
++        Thread::setCurrentThreadPriority(Thread::Priority::High);
++        if (dk64_android_perf_hint_add_thread != nullptr) {
++            dk64_android_perf_hint_add_thread();
++        }
++#   endif
+ 
+         uploadThreadRunning = true;
+ 
 diff --git a/src/shaders/FbCommon.hlsli b/src/shaders/FbCommon.hlsli
 index 973ee67..51aea3b 100644
 --- a/src/shaders/FbCommon.hlsli
