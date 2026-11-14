@@ -26,6 +26,7 @@ namespace dk64::android {
     // The "Touch Kong Swap" setting (android/jni/game_state.cpp reports it to the bottom screen).
     void set_touch_kong_swap(bool enabled);
     void set_touch_feedback(bool enabled);
+    void set_bottom_first_person(bool shown);   // the bottom screen's first person button
     void set_bottom_buttons(int mode);   // the bottom screen's touch buttons: 0 off, 1 on, 2 appear on Z
     // Settings > Gameplay > Game Files Location (StorageAccess.startChange / describeLocation).
     void change_storage_location();

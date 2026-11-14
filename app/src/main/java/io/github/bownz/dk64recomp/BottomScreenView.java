@@ -71,10 +71,15 @@ public final class BottomScreenView extends View {
     // Layout, in pixels (computed in onSizeChanged).
     private final RectF[] actionRects = { new RectF(), new RectF(), new RectF(), new RectF() };
     // Bottom Screen Buttons "Appear on Z": where the action buttons sit when slid in, and how far
-    // in each one is (0 out of sight .. 1 in place). They slide in top first while Z is held on
-    // the controller, and out again in the same order when it's let go.
+    // in each slot is (0 out of sight .. 1 in place). Slot 0 is the dynamic button (Cancel,
+    // Orangstand, a Z + B move), slots 1-4 the action buttons. They slide in top first while Z
+    // is held on the controller, and out again in the same order when it's let go.
     private final RectF[] slideHome = { new RectF(), new RectF(), new RectF(), new RectF() };
-    private final float[] slideIn = new float[4];
+    private final float[] slideIn = new float[5];
+    private float zDynX, zDynY, zDynR;   // the dynamic button's slot, slid in
+    private float slideAway;
+    private boolean fpShown = true;      // Bottom Screen First Person Button
+    private boolean fpSetting = true;
     private static final long SLIDE_MS = 170, SLIDE_STAGGER_MS = 60;
     private int buttonsMode = GameState.BUTTONS_ON;
     private boolean zShown;
@@ -590,16 +595,24 @@ public final class BottomScreenView extends View {
 
         buttonsMode = GameState.bottomButtonsMode();
         buttonsShown = buttonsMode == GameState.BUTTONS_ON;
+        fpSetting = GameState.bottomFirstPerson();
+        fpShown = buttonsMode != GameState.BUTTONS_OFF && fpSetting;
         float left = m, right;
-        // Right column: four action buttons (where they slide in to with Appear on Z).
+        // Right column: four action buttons. With Appear on Z it's five slots: the dynamic
+        // button on top, then the four action buttons.
         float colW = Math.min(w * 0.27f, h * 0.27f);
         float colLeft = w - m - colW;
         float colGap = m * 0.7f;
-        float cellH = (h - 2 * m - 3 * colGap) / 4f;
+        int slots = buttonsMode == GameState.BUTTONS_ON_Z ? 5 : 4;
+        float cellH = (h - 2 * m - (slots - 1) * colGap) / slots;
         for (int i = 0; i < 4; i++) {
-            float top = m + i * (cellH + colGap);
+            float top = m + (i + slots - 4) * (cellH + colGap);
             slideHome[i].set(colLeft, top, w - m, top + cellH);
         }
+        zDynR = Math.min(cellH, colW) * 0.48f;
+        zDynX = colLeft + colW / 2f;
+        zDynY = m + cellH / 2f;
+        slideAway = w - colLeft + m;
         if (buttonsShown) {
             for (int i = 0; i < 4; i++) {
                 actionRects[i].set(slideHome[i]);
@@ -621,7 +634,7 @@ public final class BottomScreenView extends View {
 
         melonR = fpR * 0.75f;
         // Without the first-person button the melons start at the left edge.
-        healthX = buttonsShown ? fpX + fpR + m * 1.8f + melonR : left + melonR;
+        healthX = fpShown ? fpX + fpR + m * 1.8f + melonR : left + melonR;
         healthY = fpY;
 
         // Lanky's Orangstand toggle, at the right end of the top row, after up to 3 melons.
@@ -712,21 +725,15 @@ public final class BottomScreenView extends View {
             return;
         }
         watch("kong", state.currentKong, "tab" + state.currentKong);
-        if (GameState.bottomButtonsMode() != buttonsMode) {
+        if (GameState.bottomButtonsMode() != buttonsMode || GameState.bottomFirstPerson() != fpSetting) {
             layoutFor(getWidth(), getHeight());   // the setting changed
         }
-        if (buttonsShown) {
+        if (fpShown) {
             drawFirstPersonButton(canvas);
         }
         drawHealth(canvas);
         if (buttonsShown) {
-            if (moves.showCancel()) {
-                drawCancelButton(canvas);
-            } else if (moves.showOrangstand()) {
-                drawOrangstandButton(canvas);
-            } else if (moves.zbMoveName() != null) {
-                drawZbMoveButton(canvas);
-            }
+            drawDynamic(canvas);
         }
         drawTabs(canvas);
         drawKongPanel(canvas);
@@ -743,6 +750,26 @@ public final class BottomScreenView extends View {
      * side, the top one first and the others just after; when it's let go they slide back out
      * in the same order.
      */
+    /** The dynamic button (Cancel, Orangstand or a Z + B move), if there's one right now. */
+    private boolean hasDynamic() {
+        return moves.showCancel() || moves.showOrangstand() || moves.zbMoveName() != null;
+    }
+
+    private void drawDynamic(Canvas canvas) {
+        if (moves.showCancel()) {
+            drawCancelButton(canvas);
+        } else if (moves.showOrangstand()) {
+            drawOrangstandButton(canvas);
+        } else if (moves.zbMoveName() != null) {
+            drawZbMoveButton(canvas);
+        }
+    }
+
+    private static float slideEase(float in) {
+        float t = 1f - in;
+        return 1f - t * t * t;   // quick, then settling into place
+    }
+
     private void drawSlidingActions(Canvas canvas) {
         long now = android.os.SystemClock.uptimeMillis();
         float dt = slideTickAt == 0 ? 0f : Math.min(100f, now - slideTickAt);
@@ -754,8 +781,7 @@ public final class BottomScreenView extends View {
         }
         float target = zShown ? 1f : 0f;
         boolean any = false;
-        float away = getWidth() - slideHome[0].left + unit * 0.03f;
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < slideIn.length; i++) {
             if (slideIn[i] != target && now - zChangedAt >= i * SLIDE_STAGGER_MS) {
                 float step = dt / SLIDE_MS;
                 slideIn[i] = target > slideIn[i] ? Math.min(target, slideIn[i] + step) : Math.max(target, slideIn[i] - step);
@@ -763,15 +789,26 @@ public final class BottomScreenView extends View {
             if (slideIn[i] != target) {
                 animating = true;
             }
+            if (i == 0) {
+                continue;
+            }
+            RectF r = actionRects[i - 1];
             if (slideIn[i] > 0f) {
                 any = true;
-                float t = 1f - slideIn[i];
-                float e = 1f - t * t * t;   // eased: quick, then settling into place
-                actionRects[i].set(slideHome[i]);
-                actionRects[i].offset((1f - e) * away, 0f);
+                r.set(slideHome[i - 1]);
+                r.offset((1f - slideEase(slideIn[i])) * slideAway, 0f);
             } else {
-                actionRects[i].setEmpty();
+                r.setEmpty();
             }
+        }
+        if (slideIn[0] > 0f && hasDynamic()) {
+            // Drawn in its slot at the top of the column, by moving the button there for now.
+            float sx = osX, sy = osY, sr = osR;
+            osX = zDynX + (1f - slideEase(slideIn[0])) * slideAway;
+            osY = zDynY;
+            osR = zDynR;
+            drawDynamic(canvas);
+            osX = sx; osY = sy; osR = sr;
         }
         if (any) {
             drawActions(canvas);
@@ -2084,31 +2121,35 @@ public final class BottomScreenView extends View {
             return true;   // nothing to tap during a cutscene
         }
 
-        float ox = x - osX, oy = y - osY;
-        if (!buttonsShown) {
+        float ox = x - osX, oy = y - osY, dynR = osR;
+        if (buttonsMode == GameState.BUTTONS_ON_Z && slideIn[0] > 0.6f) {
+            ox = x - zDynX;   // the dynamic button, slid in at the top of the column
+            oy = y - zDynY;
+            dynR = zDynR;
+        } else if (!buttonsShown) {
             ox = oy = Float.MAX_VALUE / 4;   // no touch buttons: only the Kong barrels
         }
-        if (moves.showCancel() && ox * ox + oy * oy <= osR * osR * 1.3f) {
+        if (moves.showCancel() && ox * ox + oy * oy <= dynR * dynR * 1.3f) {
             moves.cancelAbility(this);
             return true;
         }
-        if (moves.showOrangstand() && ox * ox + oy * oy <= osR * osR * 1.3f) {
+        if (moves.showOrangstand() && ox * ox + oy * oy <= dynR * dynR * 1.3f) {
             moves.toggleOrangstand(this);
             return true;
         }
-        if (moves.zbMoveName() != null && ox * ox + oy * oy <= osR * osR * 1.3f) {
+        if (moves.zbMoveName() != null && ox * ox + oy * oy <= dynR * dynR * 1.3f) {
             moves.performZbMove(this);
             return true;
         }
         float dx = x - fpX, dy = y - fpY;
-        if (buttonsShown && dx * dx + dy * dy <= fpR * fpR * 1.3f) {
+        if (fpShown && dx * dx + dy * dy <= fpR * fpR * 1.3f) {
             if (moves.available(TouchMoves.Move.FIRST_PERSON)) {
                 doMove(TouchMoves.Move.FIRST_PERSON);
             }
             return true;
         }
         for (int i = 0; i < 4; i++) {
-            if (actionRects[i].contains(x, y) && (buttonsShown || slideIn[i] > 0.6f)) {
+            if (actionRects[i].contains(x, y) && (buttonsShown || slideIn[i + 1] > 0.6f)) {
                 if (owned(ACTIONS[i]) && moves.available(ACTIONS[i])) {
                     doMove(ACTIONS[i]);
                 }

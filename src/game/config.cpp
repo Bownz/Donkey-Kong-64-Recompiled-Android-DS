@@ -476,7 +476,7 @@ static void add_dual_screen_options(recomp::config::Config &config) {
         "The touch buttons on the bottom screen (oranges, gun, instrument, camera, first person). "
         "Turn them off to give the Kong barrels and collectibles the whole screen. With Appear on Z, "
         "the Kong barrels and collectibles have the whole screen, and the oranges, gun, instrument and "
-        "camera buttons slide in from the right while you hold Z on your controller.",
+        "camera buttons (and Cancel, Orangstand or a Z + B move when there is one) slide in from the right while you hold Z on your controller.",
         bottom_buttons_options,
         1u,
         one_screen
@@ -484,6 +484,29 @@ static void add_dual_screen_options(recomp::config::Config &config) {
     config.add_option_change_callback(bottom_buttons_option,
         [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
             dk64::android::set_bottom_buttons(static_cast<int>(std::get<uint32_t>(cur)));
+            if (context == recomp::config::OptionChangeContext::Permanent) {
+                recompui::config::get_config("dual_screen").save_config();
+            }
+        });
+
+    // The bottom screen's first person button, kept separately so it can stay with Appear on Z.
+    static const std::string bottom_first_person_option = "android_bottom_first_person";
+    static EnumOptionVector bottom_first_person_options = {
+        {0u, "Off", "Off"},
+        {1u, "On", "On"},
+    };
+    config.add_enum_option(
+        bottom_first_person_option,
+        "Bottom Screen First Person Button",
+        "The first person button in the bottom screen's top-left corner. It stays on screen with "
+        "Bottom Screen Buttons set to On or Appear on Z (not Off).",
+        bottom_first_person_options,
+        1u,
+        one_screen
+    );
+    config.add_option_change_callback(bottom_first_person_option,
+        [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
+            dk64::android::set_bottom_first_person(std::get<uint32_t>(cur) == 1u);
             if (context == recomp::config::OptionChangeContext::Permanent) {
                 recompui::config::get_config("dual_screen").save_config();
             }
@@ -789,6 +812,7 @@ void dk64::init_config() {
             edit_touch,
             option(d, "android_bottom_screen"),
             option(d, "android_bottom_buttons"),
+            option(d, "android_bottom_first_person"),
             option(d, "android_drag_camera"),
             option(d, "android_touch_kong_swap"),
             option(d, "android_touch_feedback"),
