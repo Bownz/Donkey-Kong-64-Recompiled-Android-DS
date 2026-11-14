@@ -175,6 +175,16 @@ extern "C" int SDL_main(int argc, char* argv[]) {
     setenv("XDG_CONFIG_HOME", (data_dir / ".config").c_str(), 1);
     setenv("XDG_DATA_HOME", (data_dir / ".local" / "share").c_str(), 1);
 
+    // Compiled shaders kept between sessions (in app storage, not the game files folder):
+    // the GPU driver's pipeline cache (plume) and the list of shaders the game has used, which
+    // RT64 compiles again at startup, so places don't stutter on the first visit each launch.
+    {
+        const std::filesystem::path shader_dir = std::filesystem::path{internal_path} / "shaders";
+        std::filesystem::create_directories(shader_dir, ec);
+        setenv("PLUME_PIPELINE_CACHE", (shader_dir / "pipeline-cache.bin").c_str(), 0);
+        setenv("RT64_SHADER_LIST", (shader_dir / "shader-list.bin").c_str(), 0);
+    }
+
     // The UI loads "assets/...", "icons/..." and "recompcontrollerdb.txt" relative to
     // the working directory, exactly like running the desktop build from the repo root.
     if (chdir(game_dir.c_str()) != 0) {

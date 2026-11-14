@@ -130,7 +130,8 @@ function(dk64_configure_android_target target)
         "${CMAKE_SOURCE_DIR}/android/jni/gpu_driver.cpp"
         "${CMAKE_SOURCE_DIR}/android/jni/device_motion.cpp"
         "${CMAKE_SOURCE_DIR}/android/jni/perf_monitor.cpp"
-        "${CMAKE_SOURCE_DIR}/android/jni/slowdown_recorder.cpp")
+        "${CMAKE_SOURCE_DIR}/android/jni/slowdown_recorder.cpp"
+        "${CMAKE_SOURCE_DIR}/android/jni/perf_hint.cpp")
     if (DK64_ANDROID_HAVE_ADRENOTOOLS)
         target_link_libraries(${target} PRIVATE adrenotools)
         target_compile_definitions(${target} PRIVATE DK64_HAVE_ADRENOTOOLS=1)

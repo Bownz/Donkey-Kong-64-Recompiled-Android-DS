@@ -637,8 +637,12 @@ Java_io_github_bownz_dk64recomp_GameState_nativeArea(JNIEnv*, jclass) {
     return (g_area_map.load() & 0xFFFF) << 16 | (g_area_chunk.load() & 0xFFFF);
 }
 
+extern "C" void dk64_android_perf_hint_add_thread();
+
 extern "C" void dk64_android_report_frame() {
-    g_frames.fetch_add(1, std::memory_order_relaxed);
+    if (g_frames.fetch_add(1, std::memory_order_relaxed) == 0) {
+        dk64_android_perf_hint_add_thread();   // the game's own thread: performance hints
+    }
     if (const uint8_t* rdram = g_rdram.load(std::memory_order_relaxed)) {
         read_area(rdram);
     }

@@ -1,5 +1,5 @@
 diff --git a/plume_vulkan.cpp b/plume_vulkan.cpp
-index f1dd503..ca9530c 100644
+index f1dd503..49ef931 100644
 --- a/plume_vulkan.cpp
 +++ b/plume_vulkan.cpp
 @@ -27,7 +27,18 @@
@@ -21,7 +21,31 @@ index f1dd503..ca9530c 100644
      // Backend constants.
  
      // Required buffer alignment for acceleration structures.
-@@ -1880,6 +1891,10 @@ namespace plume {
+@@ -1390,7 +1401,10 @@ namespace plume {
+         pipelineInfo.layout = pipelineLayout->vk;
+         pipelineInfo.stage = stageInfo;
+ 
+-        VkResult res = vkCreateComputePipelines(device->vk, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &vk);
++        VkResult res = vkCreateComputePipelines(device->vk, device->pipelineCache, 1, &pipelineInfo, nullptr, &vk);
++#   if defined(__ANDROID__)
++        device->pipelinesCreated++;
++#   endif
+         if (res != VK_SUCCESS) {
+             fprintf(stderr, "vkCreateComputePipelines failed with error code 0x%X.\n", res);
+             return;
+@@ -1649,7 +1663,10 @@ namespace plume {
+         pipelineInfo.layout = pipelineLayout->vk;
+         pipelineInfo.renderPass = renderPass;
+ 
+-        VkResult res = vkCreateGraphicsPipelines(device->vk, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &vk);
++        VkResult res = vkCreateGraphicsPipelines(device->vk, device->pipelineCache, 1, &pipelineInfo, nullptr, &vk);
++#   if defined(__ANDROID__)
++        device->pipelinesCreated++;
++#   endif
+         if (res != VK_SUCCESS) {
+             fprintf(stderr, "vkCreateGraphicsPipelines failed with error code 0x%X.\n", res);
+             return;
+@@ -1880,6 +1897,10 @@ namespace plume {
          return it->second;
      }
  
@@ -32,7 +56,7 @@ index f1dd503..ca9530c 100644
      // VulkanDescriptorSet
  
      VulkanDescriptorSet::VulkanDescriptorSet(VulkanDevice *device, const RenderDescriptorSetDesc &desc) {
-@@ -1899,7 +1914,14 @@ namespace plume {
+@@ -1899,7 +1920,14 @@ namespace plume {
              boundlessRangeSize = std::max(desc.boundlessRangeSize, 1U);
  
              const RenderDescriptorRange &lastDescriptorRange = desc.descriptorRanges[desc.descriptorRangesCount - 1];
@@ -47,7 +71,7 @@ index f1dd503..ca9530c 100644
              rangeCount--;
          }
  
-@@ -1991,6 +2013,13 @@ namespace plume {
+@@ -1991,6 +2019,13 @@ namespace plume {
              imageInfo.imageView = (interfaceTexture != nullptr) ? interfaceTexture->imageView : VK_NULL_HANDLE;
          }
  
@@ -61,7 +85,7 @@ index f1dd503..ca9530c 100644
          setDescriptor(descriptorIndex, nullptr, &imageInfo, nullptr, nullptr);
      }
  
-@@ -2310,6 +2339,20 @@ namespace plume {
+@@ -2310,6 +2345,20 @@ namespace plume {
      }
  
      bool VulkanSwapChain::resize() {
@@ -82,7 +106,7 @@ index f1dd503..ca9530c 100644
          getWindowSize(width, height);
  
          // Don't recreate the swap chain at all if the window doesn't have a valid size.
-@@ -2349,6 +2392,12 @@ namespace plume {
+@@ -2349,6 +2398,12 @@ namespace plume {
          VkResult res = vkCreateSwapchainKHR(commandQueue->device->vk, &createInfo, nullptr, &vk);
          if (res != VK_SUCCESS) {
              fprintf(stderr, "vkCreateSwapchainKHR failed with error code 0x%X.\n", res);
@@ -95,7 +119,7 @@ index f1dd503..ca9530c 100644
              return false;
          }
  
-@@ -2401,6 +2450,12 @@ namespace plume {
+@@ -2401,6 +2456,12 @@ namespace plume {
      }
  
      bool VulkanSwapChain::needsResize() const {
@@ -108,7 +132,7 @@ index f1dd503..ca9530c 100644
          uint32_t windowWidth, windowHeight;
          getWindowSize(windowWidth, windowHeight);
          return (vk == VK_NULL_HANDLE) || (windowWidth != width) || (windowHeight != height) || (requiredPresentMode != createdPresentMode);
-@@ -2494,6 +2549,42 @@ namespace plume {
+@@ -2494,6 +2555,42 @@ namespace plume {
          return true;
      }
  
@@ -151,7 +175,7 @@ index f1dd503..ca9530c 100644
      void VulkanSwapChain::releaseSwapChain() {
          if (vk != VK_NULL_HANDLE) {
              vkDestroySwapchainKHR(commandQueue->device->vk, vk, nullptr);
-@@ -2631,6 +2722,41 @@ namespace plume {
+@@ -2631,6 +2728,41 @@ namespace plume {
              return;
          }
          
@@ -193,7 +217,7 @@ index f1dd503..ca9530c 100644
          VkFramebufferCreateInfo fbInfo = {};
          fbInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
          fbInfo.renderPass = renderPass;
-@@ -3077,12 +3203,36 @@ namespace plume {
+@@ -3077,12 +3209,36 @@ namespace plume {
      }
  
      void VulkanCommandList::setScissors(const RenderRect *scissorRects, uint32_t count) {
@@ -231,7 +255,7 @@ index f1dd503..ca9530c 100644
              }
  
              if (!scissorVector.empty()) {
-@@ -3091,7 +3241,7 @@ namespace plume {
+@@ -3091,7 +3247,7 @@ namespace plume {
          }
          else {
              // Single element fast path.
@@ -240,7 +264,7 @@ index f1dd503..ca9530c 100644
              vkCmdSetScissor(vk, 0, 1, &scissor);
          }
      }
-@@ -3102,6 +3252,12 @@ namespace plume {
+@@ -3102,6 +3258,12 @@ namespace plume {
          if (framebuffer != nullptr) {
              const VulkanFramebuffer *interfaceFramebuffer = static_cast<const VulkanFramebuffer *>(framebuffer);
              targetFramebuffer = interfaceFramebuffer;
@@ -253,7 +277,7 @@ index f1dd503..ca9530c 100644
          }
          else {
              targetFramebuffer = nullptr;
-@@ -3118,10 +3274,26 @@ namespace plume {
+@@ -3118,10 +3280,26 @@ namespace plume {
          if (clearRectsCount > 0) {
              for (uint32_t i = 0; i < clearRectsCount; i++) {
                  VkClearRect clearRect;
@@ -280,7 +304,7 @@ index f1dd503..ca9530c 100644
                  clearRect.baseArrayLayer = 0;
                  clearRect.layerCount = 1;
                  rectVector.emplace_back(clearRect);
-@@ -3157,6 +3329,9 @@ namespace plume {
+@@ -3157,6 +3335,9 @@ namespace plume {
          rgba[3] = colorValue.a;
          attachment.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
          attachment.colorAttachment = attachmentIndex;
@@ -290,7 +314,7 @@ index f1dd503..ca9530c 100644
          vkCmdClearAttachments(vk, 1, &attachment, uint32_t(rectVector.size()), rectVector.data());
      }
  
-@@ -3180,6 +3355,9 @@ namespace plume {
+@@ -3180,6 +3361,9 @@ namespace plume {
              attachment.aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
          }
  
@@ -300,7 +324,7 @@ index f1dd503..ca9530c 100644
          vkCmdClearAttachments(vk, 1, &attachment, uint32_t(rectVector.size()), rectVector.data());
      }
  
-@@ -3703,13 +3881,29 @@ namespace plume {
+@@ -3703,13 +3887,29 @@ namespace plume {
      
      // VulkanQueueFamily
  
@@ -331,7 +355,7 @@ index f1dd503..ca9530c 100644
              uint32_t virtualQueueCount = uint32_t(queues[i].virtualQueues.size());
              if (virtualQueueCount < lowestCount) {
                  queueIndex = i;
-@@ -3828,6 +4022,12 @@ namespace plume {
+@@ -3828,6 +4028,12 @@ namespace plume {
  
          // Store properties.
          vkGetPhysicalDeviceProperties(physicalDevice, &physicalDeviceProperties);
@@ -344,7 +368,7 @@ index f1dd503..ca9530c 100644
  
          // Check for supported features.
          void *featuresChain = nullptr;
-@@ -4018,12 +4218,22 @@ namespace plume {
+@@ -4018,12 +4224,22 @@ namespace plume {
          // Create the logical device with the desired family queues.
          std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
          std::vector<float> queuePriorities(MaxQueuesPerFamilyCount, 1.0f);
@@ -367,7 +391,7 @@ index f1dd503..ca9530c 100644
                  queueCreateInfo.queueFamilyIndex = i;
                  queueCreateInfo.pQueuePriorities = queuePriorities.data();
                  queueCreateInfos.emplace_back(queueCreateInfo);
-@@ -4149,7 +4359,15 @@ namespace plume {
+@@ -4149,17 +4365,127 @@ namespace plume {
  #   endif
  
          // Fill Vulkan-only capabilities.
@@ -383,7 +407,144 @@ index f1dd503..ca9530c 100644
  
          if (!nullDescriptorSupported) {
              nullBuffer = createBuffer(RenderBufferDesc::DefaultBuffer(16, RenderBufferFlag::VERTEX));
-@@ -4464,7 +4682,19 @@ namespace plume {
+         }
++
++#   if defined(__ANDROID__)
++        loadPipelineCache();
++#   endif
+     }
+ 
+     VulkanDevice::~VulkanDevice() {
+         release();
+     }
+ 
++#if defined(__ANDROID__)
++    void VulkanDevice::loadPipelineCache() {
++        const char *path = getenv("PLUME_PIPELINE_CACHE");
++        if ((path == nullptr) || (path[0] == '\0')) {
++            return;
++        }
++
++        pipelineCachePath = path;
++        std::vector<char> data;
++        if (FILE *file = fopen(path, "rb")) {
++            fseek(file, 0, SEEK_END);
++            const long size = ftell(file);
++            fseek(file, 0, SEEK_SET);
++            if ((size > 0) && (size < 256L * 1024L * 1024L)) {
++                data.resize(size_t(size));
++                if (fread(data.data(), 1, data.size(), file) != data.size()) {
++                    data.clear();
++                }
++            }
++
++            fclose(file);
++        }
++
++        // The driver checks the data's header (vendor, device, driver build) and ignores data
++        // from another GPU or driver, so a stale file just starts an empty cache.
++        VkPipelineCacheCreateInfo cacheInfo = {};
++        cacheInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
++        cacheInfo.initialDataSize = data.size();
++        cacheInfo.pInitialData = data.empty() ? nullptr : data.data();
++        VkResult res = vkCreatePipelineCache(vk, &cacheInfo, nullptr, &pipelineCache);
++        if ((res != VK_SUCCESS) && !data.empty()) {
++            cacheInfo.initialDataSize = 0;
++            cacheInfo.pInitialData = nullptr;
++            data.clear();
++            res = vkCreatePipelineCache(vk, &cacheInfo, nullptr, &pipelineCache);
++        }
++
++        if (res != VK_SUCCESS) {
++            pipelineCache = VK_NULL_HANDLE;
++            fprintf(stderr, "Pipeline cache: couldn't create one (0x%X).\n", res);
++            return;
++        }
++
++        fprintf(stderr, "Pipeline cache: loaded %zu KB from %s\n", data.size() / 1024, path);
++
++        // Saved in the background every half minute while new pipelines are being made (the
++        // app can be closed from the recents screen without a clean shutdown).
++        pipelineCacheSaver = std::thread([this]() {
++            std::unique_lock<std::mutex> lock(pipelineCacheMutex);
++            while (!pipelineCacheStop) {
++                pipelineCacheCondition.wait_for(lock, std::chrono::seconds(30));
++                if (!pipelineCacheStop) {
++                    lock.unlock();
++                    savePipelineCache();
++                    lock.lock();
++                }
++            }
++        });
++    }
++
++    void VulkanDevice::savePipelineCache() {
++        if ((pipelineCache == VK_NULL_HANDLE) || pipelineCachePath.empty()) {
++            return;
++        }
++
++        const uint32_t created = pipelinesCreated.load();
++        if (created == pipelinesSaved) {
++            return;
++        }
++
++        size_t size = 0;
++        if ((vkGetPipelineCacheData(vk, pipelineCache, &size, nullptr) != VK_SUCCESS) || (size == 0)) {
++            return;
++        }
++
++        std::vector<char> data(size);
++        if (vkGetPipelineCacheData(vk, pipelineCache, &size, data.data()) != VK_SUCCESS) {
++            return;
++        }
++
++        const std::string tempPath = pipelineCachePath + ".tmp";
++        FILE *file = fopen(tempPath.c_str(), "wb");
++        if (file == nullptr) {
++            return;
++        }
++
++        const bool written = (fwrite(data.data(), 1, size, file) == size);
++        fclose(file);
++        if (written && (rename(tempPath.c_str(), pipelineCachePath.c_str()) == 0)) {
++            pipelinesSaved = created;
++            fprintf(stderr, "Pipeline cache: saved %zu KB (%u new pipelines this session)\n", size / 1024, created);
++        }
++        else {
++            remove(tempPath.c_str());
++        }
++    }
++#endif
++
+     std::unique_ptr<RenderDescriptorSet> VulkanDevice::createDescriptorSet(const RenderDescriptorSetDesc &desc) {
+         return std::make_unique<VulkanDescriptorSet>(this, desc);
+     }
+@@ -4432,6 +4758,24 @@ namespace plume {
+     void VulkanDevice::release() {
+         nullBuffer = nullptr; // force destruction before destroying allocator
+ 
++#   if defined(__ANDROID__)
++        if (pipelineCacheSaver.joinable()) {
++            {
++                std::scoped_lock<std::mutex> lock(pipelineCacheMutex);
++                pipelineCacheStop = true;
++            }
++
++            pipelineCacheCondition.notify_all();
++            pipelineCacheSaver.join();
++        }
++
++        if (pipelineCache != VK_NULL_HANDLE) {
++            savePipelineCache();
++            vkDestroyPipelineCache(vk, pipelineCache, nullptr);
++            pipelineCache = VK_NULL_HANDLE;
++        }
++#   endif
++
+         if (allocator != VK_NULL_HANDLE) {
+             vmaDestroyAllocator(allocator);
+             allocator = VK_NULL_HANDLE;
+@@ -4464,7 +4808,19 @@ namespace plume {
  #else
      VulkanInterface::VulkanInterface() {
  #endif
@@ -404,10 +565,25 @@ index f1dd503..ca9530c 100644
              fprintf(stderr, "volkInitialize failed with error code 0x%X.\n", res);
              return;
 diff --git a/plume_vulkan.h b/plume_vulkan.h
-index 0a1edbe..3477b4b 100644
+index 0a1edbe..564e1a7 100644
 --- a/plume_vulkan.h
 +++ b/plume_vulkan.h
-@@ -42,6 +42,14 @@
+@@ -7,6 +7,14 @@
+ 
+ #pragma once
+ 
++#if defined(__ANDROID__)
++#include <atomic>
++#include <chrono>
++#include <condition_variable>
++#include <mutex>
++#include <string>
++#include <thread>
++#endif
+ #include "plume_render_interface.h"
+ 
+ #include <mutex>
+@@ -42,6 +50,14 @@
  #endif
  
  namespace plume {
@@ -422,7 +598,7 @@ index 0a1edbe..3477b4b 100644
      struct VulkanCommandQueue;
      struct VulkanDevice;
      struct VulkanInterface;
-@@ -261,6 +269,9 @@ namespace plume {
+@@ -261,6 +277,9 @@ namespace plume {
          void getWindowSize(uint32_t &dstWidth, uint32_t &dstHeight) const;
          void releaseSwapChain();
          void releaseImageViews();
@@ -432,7 +608,7 @@ index 0a1edbe..3477b4b 100644
      };
  
      struct VulkanFramebuffer : RenderFramebuffer {
-@@ -298,6 +309,10 @@ namespace plume {
+@@ -298,6 +317,10 @@ namespace plume {
          VkCommandPool commandPool = VK_NULL_HANDLE;
          VulkanCommandQueue *queue = nullptr;
          const VulkanFramebuffer *targetFramebuffer = nullptr;
@@ -443,7 +619,7 @@ index 0a1edbe..3477b4b 100644
          const VulkanPipelineLayout *activeComputePipelineLayout = nullptr;
          const VulkanPipelineLayout *activeGraphicsPipelineLayout = nullptr;
          const VulkanPipelineLayout *activeRaytracingPipelineLayout = nullptr;
-@@ -395,6 +410,15 @@ namespace plume {
+@@ -395,6 +418,15 @@ namespace plume {
          std::unordered_set<const VulkanCommandQueue *> virtualQueues;
      };
  
@@ -459,3 +635,26 @@ index 0a1edbe..3477b4b 100644
      struct VulkanQueueFamily {
          std::vector<VulkanQueue> queues;
  
+@@ -417,6 +449,22 @@ namespace plume {
+         std::unique_ptr<RenderBuffer> nullBuffer;
+         bool loadStoreOpNoneSupported = false;
+         bool nullDescriptorSupported = false;
++#if defined(__ANDROID__)
++        // Android: the driver's compiled pipelines, kept in a file between sessions (the file
++        // named by PLUME_PIPELINE_CACHE) so they aren't all compiled again on every launch.
++        VkPipelineCache pipelineCache = VK_NULL_HANDLE;
++        std::string pipelineCachePath;
++        std::atomic<uint32_t> pipelinesCreated{ 0 };
++        uint32_t pipelinesSaved = 0;
++        std::thread pipelineCacheSaver;
++        std::mutex pipelineCacheMutex;
++        std::condition_variable pipelineCacheCondition;
++        bool pipelineCacheStop = false;
++        void loadPipelineCache();
++        void savePipelineCache();
++#else
++        static constexpr VkPipelineCache pipelineCache = VK_NULL_HANDLE;
++#endif
+ 
+         VulkanDevice(VulkanInterface *renderInterface, const std::string &preferredDeviceName);
+         ~VulkanDevice() override;
