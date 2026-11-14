@@ -197,6 +197,17 @@ extern "C" void dk64_android_perf_hint_frame(int64_t start_ns, int64_t wall_ns, 
     }
 }
 
+// Keep GPU Awake (Graphics): whether RT64 keeps sending its idle GPU work between frames.
+static std::atomic<bool> g_gpu_keep_awake{false};
+
+extern "C" void dk64_android_set_gpu_keep_awake(bool on) {
+    g_gpu_keep_awake.store(on);
+}
+
+extern "C" bool dk64_android_gpu_keep_awake() {
+    return g_gpu_keep_awake.load();
+}
+
 extern "C" int64_t dk64_android_perf_hint_now_ns() {
     return now_ns();
 }

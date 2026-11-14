@@ -34,6 +34,7 @@
 #include <atomic>
 #include <jni.h>
 #include "ultramodern/ultramodern.hpp"
+extern "C" void dk64_android_set_gpu_keep_awake(bool on);
 // Read by the on-screen touch controls (TouchInput.nativeUiState).
 static std::atomic<bool> dk64_android_analog_camera{false};
 
@@ -618,6 +619,29 @@ static void add_graphics_options(recomp::config::Config &config) {
         [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
             if (context != recomp::config::OptionChangeContext::Temporary) {
                 dk64::android::set_show_fps(std::get<uint32_t>(cur) == 1u);
+            }
+        });
+
+    // Android: RT64's "idle work", a tiny GPU job every millisecond between frames that stops
+    // the GPU clocking right down. The performance hints now do that job, so it's off by default
+    // (less heat, so less throttling later on); kept as an option to compare.
+    static const std::string keep_gpu_awake_option = "android_keep_gpu_awake";
+    static EnumOptionVector keep_gpu_awake_options = {
+        {0u, "Off", "Off"},
+        {1u, "On", "On"},
+    };
+    config.add_enum_option(
+        keep_gpu_awake_option,
+        "Keep GPU Awake",
+        "Sends the GPU a tiny job every millisecond between frames so it doesn't slow right down. "
+        "Off runs cooler; turn it on if the frame rate dips when little is happening on screen.",
+        keep_gpu_awake_options,
+        0u
+    );
+    config.add_option_change_callback(keep_gpu_awake_option,
+        [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
+            if (context != recomp::config::OptionChangeContext::Temporary) {
+                dk64_android_set_gpu_keep_awake(std::get<uint32_t>(cur) == 1u);
             }
         });
 #endif

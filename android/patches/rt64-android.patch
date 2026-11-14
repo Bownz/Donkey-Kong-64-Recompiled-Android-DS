@@ -710,10 +710,10 @@ index 7a8c13b..bd198be 100644
          VI lastScreenVI;
          uint64_t lastScreenHash;
 diff --git a/src/hle/rt64_workload_queue.cpp b/src/hle/rt64_workload_queue.cpp
-index 5a331aa..9ad86cb 100644
+index 5a331aa..5dc6015 100644
 --- a/src/hle/rt64_workload_queue.cpp
 +++ b/src/hle/rt64_workload_queue.cpp
-@@ -4,6 +4,13 @@
+@@ -4,6 +4,14 @@
  
  #include "rt64_workload_queue.h"
  
@@ -722,12 +722,13 @@ index 5a331aa..9ad86cb 100644
 +extern "C" void dk64_android_perf_hint_add_thread() __attribute__((weak));
 +extern "C" void dk64_android_perf_hint_frame(int64_t start_ns, int64_t wall_ns, int64_t target_ns) __attribute__((weak));
 +extern "C" int64_t dk64_android_perf_hint_now_ns() __attribute__((weak));
++extern "C" bool dk64_android_gpu_keep_awake() __attribute__((weak));
 +#endif
 +
  #include "common/rt64_thread.h"
  
  #include "rt64_present_queue.h"
-@@ -11,6 +18,7 @@
+@@ -11,6 +19,7 @@
  #define ENABLE_HIGH_RESOLUTION_RENDERER 1
  
  namespace RT64 {
@@ -735,7 +736,7 @@ index 5a331aa..9ad86cb 100644
      // WorkloadQueue
  
      WorkloadQueue::WorkloadQueue() {
-@@ -188,7 +196,18 @@ namespace RT64 {
+@@ -188,7 +197,18 @@ namespace RT64 {
          switch (resolutionMode) {
          case UserConfiguration::Resolution::WindowIntegerScale:
              if (ext.sharedResources->swapChainHeight > 0) {
@@ -754,7 +755,34 @@ index 5a331aa..9ad86cb 100644
              }
              else {
                  resolutionMultiplier = 1.0f;
-@@ -301,6 +320,10 @@ namespace RT64 {
+@@ -273,12 +293,26 @@ namespace RT64 {
+             ext.sharedResources->interpolatedColorTargets.clear();
+         }
+ 
++#   if defined(__ANDROID__)
++        // Android: the idle work only runs with Keep GPU Awake on (Graphics), checked every
++        // frame so the option works straight away; the performance hints do its job.
++        {
++            const bool wantIdle = ext.sharedResources->userConfig.idleWorkActive && (dk64_android_gpu_keep_awake != nullptr) && dk64_android_gpu_keep_awake();
++            if (wantIdle != idleActive) {
++                idleMutex.lock();
++                idleActive = wantIdle;
++                idleMutex.unlock();
++                idleCondition.notify_all();
++            }
++        }
++#   else
+         if (ext.sharedResources->userConfigChanged) {
+             idleMutex.lock();
+             idleActive = ext.sharedResources->userConfig.idleWorkActive;
+             idleMutex.unlock();
+             idleCondition.notify_all();
+         }
++#   endif
+     }
+ 
+     void WorkloadQueue::threadConfigurationValidate() {
+@@ -301,6 +335,10 @@ namespace RT64 {
          const bool usingMSAA = (targetManager.multisampling.sampleCount > 1);
  
          rendererCPUProfiler.start();
@@ -765,7 +793,7 @@ index 5a331aa..9ad86cb 100644
  
          const bool aspectRatioAdjustment = (abs(workloadConfig.aspectRatioScale - 1.0f) > 1e-6f);
          const bool processProjections = aspectRatioAdjustment || prevFrame.matched|| curFrame.isDebuggerCameraEnabled(*this);
-@@ -484,6 +507,10 @@ namespace RT64 {
+@@ -484,6 +522,10 @@ namespace RT64 {
  
                      if (colorTarget != nullptr) {
                          rtWidth = std::max(rtWidth, colorTarget->width);
@@ -776,7 +804,7 @@ index 5a331aa..9ad86cb 100644
                          rtHeight = std::max(rtHeight, colorTarget->height);
                          chosenRt = colorTarget;
                      }
-@@ -840,8 +867,15 @@ namespace RT64 {
+@@ -840,8 +882,15 @@ namespace RT64 {
              ext.workloadGraphicsWorker->commandList->writeTimestamp(queryPool.get(), 1);
              ext.workloadGraphicsWorker->commandList->end();
              framebufferRenderer->waitForUploaders();
@@ -792,7 +820,7 @@ index 5a331aa..9ad86cb 100644
              workerMutex.unlock();
  
              // Update the GPU profiler with the results from the timestamps of the frame.
-@@ -880,6 +914,12 @@ namespace RT64 {
+@@ -880,6 +929,12 @@ namespace RT64 {
  
      void WorkloadQueue::renderThreadLoop() {
          Thread::setCurrentThreadName("RT64 Workload");
@@ -805,7 +833,7 @@ index 5a331aa..9ad86cb 100644
  
          WorkloadConfiguration workloadConfig;
          int64_t logicalTicks = 0;
-@@ -1070,7 +1110,19 @@ namespace RT64 {
+@@ -1070,7 +1125,19 @@ namespace RT64 {
                          const int64_t currentTimeMicro = workloadTimer.elapsedMicroseconds() - setupTimeMicro;
                          const int64_t expectedTimeMicro = frame * maxTimePerFrameMicro;
                          const int64_t measuredFrameMicro = renderTimeTotalMicro / framesRendered;
@@ -826,7 +854,7 @@ index 5a331aa..9ad86cb 100644
                              displayTicks += workload.viOriginalRate;
                              skippedFrames = true;
                              continue;
-@@ -1117,11 +1169,22 @@ namespace RT64 {
+@@ -1117,11 +1184,22 @@ namespace RT64 {
                      }
  
                      int64_t renderTimeMicro = workloadTimer.elapsedMicroseconds();
