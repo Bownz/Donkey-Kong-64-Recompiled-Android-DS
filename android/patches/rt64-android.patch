@@ -1513,7 +1513,7 @@ index d1c5273..0f14d91 100644
              pipelineDesc.renderTargetCount = 1;
              pipelineDesc.pipelineLayout = videoInterfaceNearest.pipelineLayout.get();
 diff --git a/src/render/rt64_texture_cache.cpp b/src/render/rt64_texture_cache.cpp
-index 0848f3e..c8521de 100644
+index 0848f3e..8586467 100644
 --- a/src/render/rt64_texture_cache.cpp
 +++ b/src/render/rt64_texture_cache.cpp
 @@ -22,6 +22,10 @@
@@ -1561,6 +1561,131 @@ index 0848f3e..c8521de 100644
  
          uploadThreadRunning = true;
  
+@@ -1070,8 +1093,17 @@ namespace RT64 {
+                     newTexture->format = RenderFormat::R8_UINT;
+                     newTexture->width = upload.width;
+                     newTexture->height = upload.height;
+-                    newTexture->tmem = copyWorker->device->createTexture(RenderTextureDesc::Texture1D(std::max(uint32_t(upload.bytesTMEM.size()), 1U), 1, newTexture->format));
+-                    newTexture->tmem->setName("Texture Cache TMEM #" + std::to_string(TMEMGlobalCounter++));
++#               if defined(__ANDROID__)
++                    if (upload.bytesTMEM.size() == TMEMSize) {
++                        newTexture->tmem = takeTMEMTexture();
++                    }
++
++                    if (newTexture->tmem == nullptr)
++#               endif
++                    {
++                        newTexture->tmem = copyWorker->device->createTexture(RenderTextureDesc::Texture1D(std::max(uint32_t(upload.bytesTMEM.size()), 1U), 1, newTexture->format));
++                        newTexture->tmem->setName("Texture Cache TMEM #" + std::to_string(TMEMGlobalCounter++));
++                    }
+                     newTexture->bytesTMEM = upload.bytesTMEM;
+                     newTexture->loadTile = upload.loadTile;
+                     newTexture->tlut = upload.tlut;
+@@ -1105,8 +1137,14 @@ namespace RT64 {
+                         static uint32_t TextureGlobalCounter = 0;
+                         TextureDecodeDescriptorSet *descSet = descriptorSets[i].get();
+                         dstTexture->format = RenderFormat::R8G8B8A8_UNORM;
+-                        dstTexture->texture = directWorker->device->createTexture(RenderTextureDesc::Texture2D(upload.width, upload.height, 1, dstTexture->format, RenderTextureFlag::STORAGE | RenderTextureFlag::UNORDERED_ACCESS));
+-                        dstTexture->texture->setName("Texture Cache RGBA32 #" + std::to_string(TextureGlobalCounter++));
++#                   if defined(__ANDROID__)
++                        dstTexture->texture = takeDecodedTexture(upload.width, upload.height);
++                        if (dstTexture->texture == nullptr)
++#                   endif
++                        {
++                            dstTexture->texture = directWorker->device->createTexture(RenderTextureDesc::Texture2D(upload.width, upload.height, 1, dstTexture->format, RenderTextureFlag::STORAGE | RenderTextureFlag::UNORDERED_ACCESS));
++                            dstTexture->texture->setName("Texture Cache RGBA32 #" + std::to_string(TextureGlobalCounter++));
++                        }
+                         descSet->setTexture(descSet->TMEM, dstTexture->tmem.get(), RenderTextureLayout::SHADER_READ);
+                         descSet->setTexture(descSet->RGBA32, dstTexture->texture.get(), RenderTextureLayout::GENERAL);
+                         beforeDecodeBarriers.emplace_back(dstTexture->texture.get(), RenderTextureLayout::GENERAL);
+@@ -1718,6 +1756,54 @@ namespace RT64 {
+         return textureMap.evict(submissionFrame, evictedHashes);
+     }
+ 
++#if defined(__ANDROID__)
++    static constexpr size_t TMEMPoolMax = 1024;
++    static constexpr size_t DecodedPoolMax = 768;
++
++    static uint64_t decodedPoolKey(uint32_t width, uint32_t height) {
++        return (uint64_t(width) << 32) | height;
++    }
++
++    // Called once the GPU can no longer be using the texture (the lock counter reached zero).
++    void TextureCache::recycleTexture(Texture *texture) {
++        std::unique_lock lock(texturePoolMutex);
++        if ((texture->tmem != nullptr) && (texture->bytesTMEM.size() == 0x1000) && (tmemPool.size() < TMEMPoolMax)) {
++            tmemPool.emplace_back(std::move(texture->tmem));
++        }
++
++        if ((texture->texture != nullptr) && texture->decodeTMEM && (texture->format == RenderFormat::R8G8B8A8_UNORM) &&
++            (texture->width > 0) && (texture->height > 0) && (decodedPoolCount < DecodedPoolMax))
++        {
++            decodedPool[decodedPoolKey(texture->width, texture->height)].emplace_back(std::move(texture->texture));
++            decodedPoolCount++;
++        }
++    }
++
++    std::unique_ptr<RenderTexture> TextureCache::takeTMEMTexture() {
++        std::unique_lock lock(texturePoolMutex);
++        if (tmemPool.empty()) {
++            return nullptr;
++        }
++
++        std::unique_ptr<RenderTexture> texture = std::move(tmemPool.back());
++        tmemPool.pop_back();
++        return texture;
++    }
++
++    std::unique_ptr<RenderTexture> TextureCache::takeDecodedTexture(uint32_t width, uint32_t height) {
++        std::unique_lock lock(texturePoolMutex);
++        auto it = decodedPool.find(decodedPoolKey(width, height));
++        if ((it == decodedPool.end()) || it->second.empty()) {
++            return nullptr;
++        }
++
++        std::unique_ptr<RenderTexture> texture = std::move(it->second.back());
++        it->second.pop_back();
++        decodedPoolCount--;
++        return texture;
++    }
++#endif
++
+     void TextureCache::incrementLock() {
+         std::unique_lock lock(textureMapMutex);
+         lockCounter++;
+@@ -1730,6 +1816,9 @@ namespace RT64 {
+         if (lockCounter == 0) {
+             // Delete evicted textures from texture map.
+             for (Texture *texture : textureMap.evictedTextures) {
++#           if defined(__ANDROID__)
++                recycleTexture(texture);
++#           endif
+                 delete texture;
+             }
+ 
+diff --git a/src/render/rt64_texture_cache.h b/src/render/rt64_texture_cache.h
+index 9131697..d215c02 100644
+--- a/src/render/rt64_texture_cache.h
++++ b/src/render/rt64_texture_cache.h
+@@ -228,6 +228,18 @@ namespace RT64 {
+         std::unique_ptr<RenderPool> uploadResourcePool;
+         std::mutex uploadResourcePoolMutex;
+         uint32_t lockCounter;
++#   if defined(__ANDROID__)
++        // Android: GPU textures of evicted cache entries, kept for reuse instead of freed, so
++        // a new area's textures don't each need two fresh GPU allocations (a source of stutter).
++        // The raw TMEM copies are all 4 KB; decoded textures are pooled by size.
++        std::mutex texturePoolMutex;
++        std::vector<std::unique_ptr<RenderTexture>> tmemPool;
++        std::unordered_map<uint64_t, std::vector<std::unique_ptr<RenderTexture>>> decodedPool;
++        size_t decodedPoolCount = 0;
++        void recycleTexture(Texture *texture);
++        std::unique_ptr<RenderTexture> takeTMEMTexture();
++        std::unique_ptr<RenderTexture> takeDecodedTexture(uint32_t width, uint32_t height);
++#   endif
+         bool developerMode;
+ 
+         TextureCache(RenderWorker *directWorker, RenderWorker *copyWorker, uint32_t threadCount, const ShaderLibrary *shaderLibrary);
 diff --git a/src/shaders/FbCommon.hlsli b/src/shaders/FbCommon.hlsli
 index 973ee67..51aea3b 100644
 --- a/src/shaders/FbCommon.hlsli
