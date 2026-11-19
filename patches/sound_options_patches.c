@@ -613,7 +613,7 @@ RECOMP_PATCH void func_global_asm_8061C39C(Actor *camera) {
     target = aaD->unk0;
 
     active = modern_cam_enabled() && get_analog_allowed() && (target != NULL) && (target == gCurrentPlayer) &&
-        ((aaD->unkF3 == 1) || (aaD->unkF3 == 5)) && !(aaD->unkAC & 0x2000);
+        ((aaD->unkF3 == 1) || (aaD->unkF3 == 2) || (aaD->unkF3 == 5)) && !(aaD->unkAC & 0x2000);
     mc_focus_weight += ((active ? 1.0f : 0.0f) - mc_focus_weight) * 0.2f;
     if (mc_focus_weight < 0.01f) {
         mc_focus_weight = 0.0f;
@@ -690,7 +690,17 @@ RECOMP_PATCH void func_global_asm_8061D1FC(Actor* arg0) {
     // in the camera's units (recomp_touch_camera_get, src/game/recomp_api.cpp).
     f32 touchCamX = 0.0f, touchCamY = 0.0f;
     s32 touchCamMoved = recomp_touch_camera_get(&touchCamX, &touchCamY) && camera_turn_allowed();
-    if (modern_cam_enabled() && get_analog_allowed() && (CaaD->unkF3 != 2)) {
+    // Modern Camera also stays in charge in the game's fixed camera mode (2: trees, vines...).
+    // Each change of camera mode or Kong state is logged, to find any place this misbehaves.
+    {
+        static s32 lastMode = -1, lastState = -1;
+        if ((CaaD->unkF3 != lastMode) || (gCurrentPlayer->control_state != lastState)) {
+            lastMode = CaaD->unkF3;
+            lastState = gCurrentPlayer->control_state;
+            recomp_printf("Camera: mode %d, Kong state 0x%02X, map 0x%02X\n", lastMode, lastState, current_map);
+        }
+    }
+    if (modern_cam_enabled() && get_analog_allowed()) {
         modern_camera_update(arg0, CaaD, touchCamMoved, touchCamX, touchCamY);
         return;
     }
