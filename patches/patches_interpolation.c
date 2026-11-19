@@ -83,6 +83,8 @@ Gfx *handle_interpolation(Gfx * dl, interpolationIDs id, u8 decrement) {
     return dl;
 }
 
+void modern_camera_frame(CameraPaad *AAD, f32 *atX, f32 *atY, f32 *atZ);
+
 RECOMP_PATCH void func_global_asm_8061DBD4(Actor* arg0, f32* arg1, f32* arg2, f32* arg3, f32* arg4, f32* arg5, f32* arg6, f32* arg7, f32* arg8, f32* arg9) {
     CameraPaad* AAD;
     OSTime temp_v0_9;
@@ -388,6 +390,9 @@ RECOMP_PATCH void func_global_asm_8061DBD4(Actor* arg0, f32* arg1, f32* arg2, f3
     if (AAD->unkF2 != 0) {
         func_global_asm_8061EDA0(AAD, arg4, arg5, arg6, AAD->unkC0 * 0.333, 1);
     }
+    // @recomp: Modern Camera looks at the Kong rather than the spot in front of it
+    // (sound_options_patches.c); before the up direction is worked out from eye and look-at.
+    modern_camera_frame(AAD, arg4, arg5, arg6);
     if (!(AAD->unkAC & 0x100)) {
         func_global_asm_80627490(&sp84, &sp80, *arg4, *arg5, *arg6, *arg1, *arg2, *arg3);
         temp_f20 = func_global_asm_80612D10(sp80);
