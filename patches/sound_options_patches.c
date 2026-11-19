@@ -747,11 +747,22 @@ static void modern_camera_input(Actor *camera, CameraPaad *CaaD, s32 touchMoved,
     CaaD->unkB0 = 0;
 }
 
-// Whether something solid is at this point (the level's collision, as the game's own camera
-// search tests it). Small, so the camera slips through fences and railings.
+// Whether something solid is at this point: a wall or object (the level's collision, as the
+// game's own camera search tests it; small, so the camera slips through fences and railings),
+// or the ground (the point is under a floor: slopes, hills, ramps, ledges; the wall test
+// doesn't see floors). The game's floor lookup finds the first floor below a point, so it's
+// asked from a little above: a floor found within 4 units under the point or anywhere above
+// it means the point is in (or just at) the ground.
 static u8 mc_blocked(f32 x, f32 y, f32 z) {
     s16 hitA = 0, hitB = 0xFFF;
-    return func_global_asm_80671E00(x, y, z, 5.0f, &hitA, &hitB, 1U, 0xBCU) != 0;
+    f32 floorY = y + 40.0f;
+    if (func_global_asm_80671E00(x, y, z, 5.0f, &hitA, &hitB, 1U, 0xBCU) != 0) {
+        return TRUE;
+    }
+    if (func_global_asm_80667110(x, z, &floorY) && (floorY <= y + 40.0f) && (floorY > y - 4.0f)) {
+        return TRUE;
+    }
+    return FALSE;
 }
 
 // The Kong fades when the camera is right up against it (Odyssey does the same with Mario):
@@ -984,15 +995,13 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
     // Floors and ceilings (the wall test above doesn't see them), with the game's own floor
     // lookup (the first floor below a point):
     //  - a floor under the camera keeps it at least 6 units above (climbing, swimming, low
-    //    angles), unless that floor is above the Kong's head (e.g. the top of a cliff the Kong
-    //    stands under: the camera may legitimately be up there);
+    //    angles; slopes are also caught by the trace, mc_blocked);
     //  - a surface directly above the Kong, below the camera, is a ceiling (or an upper floor):
     //    the camera comes down under it.
     {
         f32 floorY = camY + 1.0f;
         f32 aboveY = camY + 1.0f;
-        if (func_global_asm_80667110(camX, camZ, &floorY) && (floorY <= camY + 1.0f) && (floorY <= kongY + 30.0f) &&
-            (camY < floorY + 6.0f)) {
+        if (func_global_asm_80667110(camX, camZ, &floorY) && (floorY <= camY + 1.0f) && (camY < floorY + 6.0f)) {
             camY = floorY + 6.0f;
         }
         if (func_global_asm_80667110(target->x_position, target->z_position, &aboveY) && (aboveY <= camY + 1.0f) &&
