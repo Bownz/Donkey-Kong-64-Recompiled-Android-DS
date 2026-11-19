@@ -407,6 +407,29 @@ public class DK64Activity extends SDLActivity
     }
 
     /** From native code (Settings > Gameplay > Game Files Location): offers to move the files. */
+    /**
+     * Haptic Feedback (Input) with the touch controls: a short buzz of the phone's vibrator.
+     * From native code (gpu_driver.cpp, phone_haptic_pulse) as "ms,amplitude" (amplitude 1-255).
+     */
+    public String hapticPulse(String spec) {
+        try {
+            String[] parts = spec.split(",");
+            long ms = Math.max(5, Math.min(300, Long.parseLong(parts[0].trim())));
+            int amplitude = Math.max(1, Math.min(255, Integer.parseInt(parts[1].trim())));
+            android.os.Vibrator vibrator = (android.os.Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+            if (vibrator != null && vibrator.hasVibrator()) {
+                if (Build.VERSION.SDK_INT >= 26) {
+                    vibrator.vibrate(android.os.VibrationEffect.createOneShot(ms,
+                        vibrator.hasAmplitudeControl() ? amplitude : android.os.VibrationEffect.DEFAULT_AMPLITUDE));
+                } else {
+                    vibrator.vibrate(ms);
+                }
+            }
+        } catch (RuntimeException ignored) {
+        }
+        return "";
+    }
+
     public String changeStorageLocation() {
         runOnUiThread(storage::startChange);
         return null;

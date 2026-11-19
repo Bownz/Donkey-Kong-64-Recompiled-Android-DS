@@ -46,5 +46,6 @@ typedef struct {
 DECLARE_FUNC(s32, recomp_fill_button_icon, ButtonIconRequest *request, u8 *out);
 // Android: the touch-drag camera turn since the last call (see recomp_api.cpp). Returns 1 if any.
 DECLARE_FUNC(s32, recomp_touch_camera_get, f32 *x, f32 *y);
+DECLARE_FUNC(void, recomp_haptic_pulse, f32 strength, s32 ms);
 
 #endif

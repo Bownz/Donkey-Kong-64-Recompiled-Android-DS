@@ -1,3 +1,17 @@
+diff --git a/recompinput/include/recompinput/input_state.h b/recompinput/include/recompinput/input_state.h
+index 1961e29..8193aae 100644
+--- a/recompinput/include/recompinput/input_state.h
++++ b/recompinput/include/recompinput/input_state.h
+@@ -30,6 +30,9 @@ namespace recompinput {
+     void poll_inputs();
+     void set_rumble(int controller_num, bool on);
+     void update_rumble();
++    // A short extra rumble (strength 0-1, scaled by the Rumble Strength setting) on top of the
++    // game's own, for small game feel effects. Returns false if no controller can rumble.
++    bool pulse_rumble(float strength, uint32_t duration_ms);
+     bool should_override_keystate(SDL_Scancode key, SDL_Keymod mod);
+     float get_input_analog(int controller_num, const InputField& field);
+     float get_input_analog(int controller_num, const std::span<const InputField> fields);
 diff --git a/recompinput/include/recompinput/input_types.h b/recompinput/include/recompinput/input_types.h
 index f5ed6c0..1bff207 100644
 --- a/recompinput/include/recompinput/input_types.h
@@ -107,6 +121,58 @@ index c76a1dc..fae66f0 100644
              // constexpr float gyro_threshold = 0.05f;
              // Convert rotational velocity to degrees per second.
              constexpr float rad_to_deg = 180.0f / M_PI;
+diff --git a/recompinput/src/input_state.cpp b/recompinput/src/input_state.cpp
+index 03ed871..11e478f 100644
+--- a/recompinput/src/input_state.cpp
++++ b/recompinput/src/input_state.cpp
+@@ -1,3 +1,4 @@
++#include <chrono>
+ #include <algorithm>
+ #include <mutex>
+ #include <span>
+@@ -68,6 +69,31 @@ void recompinput::poll_inputs() {
+     }
+ }
+ 
++static std::atomic<float> rumble_pulse_strength{0.0f};
++static std::atomic<uint64_t> rumble_pulse_until{0};
++
++static uint64_t rumble_now_ms() {
++    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
++        std::chrono::steady_clock::now().time_since_epoch()).count());
++}
++
++bool recompinput::pulse_rumble(float strength, uint32_t duration_ms) {
++    const uint64_t now = rumble_now_ms();
++    // A stronger pulse replaces a weaker one; otherwise the longer one wins.
++    if (now >= rumble_pulse_until.load() || strength >= rumble_pulse_strength.load()) {
++        rumble_pulse_strength.store(strength);
++        rumble_pulse_until.store(now + duration_ms);
++    }
++    std::lock_guard lock{ InputState.controllers_mutex };
++    for (const auto &controller : InputState.detected_controllers) {
++        SDL_Joystick* joystick = SDL_GameControllerGetJoystick(controller);
++        if (joystick != nullptr && !InputState.controller_states[SDL_JoystickInstanceID(joystick)].rumble_failed) {
++            return true;
++        }
++    }
++    return false;
++}
++
+ void recompinput::set_rumble(int controller_num, bool on) {
+     InputState.rumble_active[controller_num] = on;
+ }
+@@ -115,6 +141,10 @@ void recompinput::update_rumble() {
+         }
+         float smooth_rumble = smoothstep(0, 1, InputState.cur_rumble[i]);
+ 
++        // Plus any short pulse (pulse_rumble) still running.
++        if ((i == 0) && (rumble_now_ms() < rumble_pulse_until.load())) {
++            smooth_rumble = std::max(smooth_rumble, rumble_pulse_strength.load());
++        }
+         uint16_t rumble_strength = smooth_rumble * (recompui::config::general::get_rumble_strength() * 0xFFFF / 100);
+         uint32_t duration = 1000000; // Dummy duration value that lasts long enough to matter as the game will reset rumble on its own.
+         {
 diff --git a/recompinput/src/input_types.cpp b/recompinput/src/input_types.cpp
 index c6786e6..73eda2e 100644
 --- a/recompinput/src/input_types.cpp

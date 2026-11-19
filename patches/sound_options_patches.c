@@ -1048,6 +1048,77 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
     }
 }
 
+// ---- Haptic Feedback -----------------------------------------------------------------------
+// Small rumbles for game feel, like Odyssey (Input > Haptic Feedback; recomp_haptic_pulse checks
+// the setting, scales by Rumble Strength, and uses the phone's vibrator with touch controls):
+//  - landing after a jump or fall: stronger and longer the longer the Kong was in the air;
+//    strongest for the Simian Slam (Z held as it lands);
+//  - skidding round: a sharp turn (90 degrees within a few frames) while running.
+// Checked once per frame from the camera update, with any camera type.
+static s32 hf_air = 0;           // frames in the air (-1: too long to count, e.g. swimming)
+static s16 hf_facing[4];
+static s32 hf_facing_index = 0;
+static u8 hf_facing_valid = FALSE;
+static s32 hf_cooldown = 0;
+
+static void modern_haptics_update(void) {
+    Actor *kong = gCurrentPlayer;
+    s16 previous;
+    s32 turn, ms;
+    f32 strength;
+
+    if ((kong == NULL) || (is_cutscene_active != 0) || gameIsInDKTVMode()) {
+        hf_air = 0;
+        hf_facing_valid = FALSE;
+        return;
+    }
+    if (hf_cooldown > 0) {
+        hf_cooldown--;
+    }
+
+    // Landing.
+    if (((kong->y_position - kong->floor) > 4.0f) && !modern_camera_free_state(kong)) {
+        if (hf_air >= 0) {
+            hf_air++;
+            if (hf_air > 150) {
+                hf_air = -1;   // 5 s: swimming or similar, not a jump
+            }
+        }
+    } else {
+        if (hf_air >= 8) {
+            strength = 0.15f + ((f32)hf_air * 0.012f);
+            if (strength > 0.7f) {
+                strength = 0.7f;
+            }
+            ms = 50 + (hf_air * 2);
+            if (ms > 140) {
+                ms = 140;
+            }
+            if (D_global_asm_807FD610[cc_player_index].unk2A & Z_TRIG) {
+                strength = 0.8f;   // Simian Slam
+                ms = 160;
+            }
+            recomp_haptic_pulse(strength, ms);
+        }
+        hf_air = 0;
+    }
+
+    // Skidding round: the facing 3 frames ago vs now, while running on the ground.
+    previous = hf_facing[hf_facing_index];
+    hf_facing[hf_facing_index] = kong->y_rotation & 0xFFF;
+    hf_facing_index = (hf_facing_index + 1) & 3;
+    if (hf_facing_index == 0) {
+        hf_facing_valid = TRUE;
+    }
+    if (hf_facing_valid && (hf_air == 0) && (hf_cooldown == 0) && (kong->unkB8 > 80.0f)) {
+        turn = MC_ANGLE_WRAP((kong->y_rotation & 0xFFF) - previous);
+        if ((turn > 0x400) || (turn < -0x400)) {
+            recomp_haptic_pulse(0.25f, 70);
+            hf_cooldown = 20;
+        }
+    }
+}
+
 RECOMP_PATCH void func_global_asm_8061D1FC(Actor* arg0) {
     CameraPaad* CaaD;
     f32 temp_f2;
@@ -1056,6 +1127,7 @@ RECOMP_PATCH void func_global_asm_8061D1FC(Actor* arg0) {
     f32 dRStickX, dRStickY, ratio;
 
     CaaD = arg0->CaaD;
+    modern_haptics_update();
     temp_f2 = D_global_asm_807FD610[CaaD->unkFB].unk2F * 0.5;
     if (!(CaaD->unkAC & 0x2000) && !(D_global_asm_807FBB64 & 0x40)) {
         if ((CaaD->unk8) && ((s32) CaaD->unk8 < 0x9B) && (CaaD->unkEF)) {

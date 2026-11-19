@@ -165,6 +165,16 @@ void dk64::android::set_drag_camera(bool enabled) {
     }
 }
 
+static std::atomic<bool> haptic_feedback{true};
+
+void dk64::android::set_haptic_feedback(bool enabled) {
+    haptic_feedback.store(enabled, std::memory_order_relaxed);
+}
+
+bool dk64::android::haptic_feedback_enabled() {
+    return haptic_feedback.load(std::memory_order_relaxed);
+}
+
 bool dk64::android::drag_camera_enabled() {
     return drag_camera.load(std::memory_order_relaxed);
 }

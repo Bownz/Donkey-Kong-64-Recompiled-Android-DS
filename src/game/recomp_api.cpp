@@ -592,11 +592,34 @@ extern "C" void recomp_get_mouse_inverted_axes(uint8_t* rdram, recomp_context* c
 
 #if defined(__ANDROID__)
 #include "../../android/jni/gpu_driver.h"
+#include "recompui/config.h"
 extern "C" bool dk64_android_take_camera_drag(float* dx, float* dy); // android/jni/touch_controller.cpp
 #endif
 
 // patches/sound_options_patches.c: the touch-drag camera turn since the last frame, in the
 // camera's own units: x is added to its angle (4096 per full turn), y to its distance.
+// Haptic Feedback (Input): a short rumble for game feel (patches/sound_options_patches.c,
+// modern_haptics_update), on top of the game's own; the phone's vibrator when no controller can
+// rumble (touch play). Strength 0-1, scaled by Rumble Strength.
+extern "C" void recomp_haptic_pulse(uint8_t* rdram, recomp_context* ctx) {
+    float strength = _arg<0, float>(rdram, ctx);
+    int32_t ms = _arg<1, int32_t>(rdram, ctx);
+#if defined(__ANDROID__)
+    if (!dk64::android::haptic_feedback_enabled() || ms <= 0 || strength <= 0.0f) {
+        return;
+    }
+    if (!recompinput::pulse_rumble(strength, static_cast<uint32_t>(ms))) {
+        const float scale = static_cast<float>(recompui::config::general::get_rumble_strength()) / 100.0f;
+        if (scale > 0.0f) {
+            dk64::android::phone_haptic_pulse(std::min(1.0f, strength * scale), ms);
+        }
+    }
+#else
+    (void)strength;
+    (void)ms;
+#endif
+}
+
 extern "C" void recomp_touch_camera_get(uint8_t* rdram, recomp_context* ctx) {
     float* x_out = _arg<0, float*>(rdram, ctx);
     float* y_out = _arg<1, float*>(rdram, ctx);

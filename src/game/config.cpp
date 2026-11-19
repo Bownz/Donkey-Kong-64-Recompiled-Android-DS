@@ -538,6 +538,30 @@ static void add_dual_screen_options(recomp::config::Config &config) {
             }
         });
 
+    // Small rumbles for game feel, like Odyssey: landings (stronger the longer the fall, and for
+    // the Simian Slam) and skidding round. On the controller, or the phone with touch controls.
+    static const std::string haptic_feedback_option = "android_haptic_feedback";
+    static EnumOptionVector haptic_feedback_options = {
+        {0u, "Off", "Off"},
+        {1u, "On", "On"},
+    };
+    config.add_enum_option(
+        haptic_feedback_option,
+        "Haptic Feedback",
+        "Small rumbles for game feel, like recent 3D platformers: landing (stronger after a long fall "
+        "or a Simian Slam) and skidding round when you turn sharply while running. On your controller, "
+        "or the phone when you play with the touch controls. The strength follows Rumble Strength.",
+        haptic_feedback_options,
+        1u
+    );
+    config.add_option_change_callback(haptic_feedback_option,
+        [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
+            dk64::android::set_haptic_feedback(std::get<uint32_t>(cur) == 1u);
+            if (context == recomp::config::OptionChangeContext::Permanent) {
+                recompui::config::get_config("dual_screen").save_config();
+            }
+        });
+
     // A little vibration when a touch button is pressed, and how strong it is.
     static const std::string touch_feedback_option = "android_touch_feedback";
     static EnumOptionVector touch_feedback_options = {
@@ -831,6 +855,7 @@ void dk64::init_config() {
             configure,
             option(g, gopts::joystick_deadzone),
             option(g, gopts::rumble_strength),
+            option(d, "android_haptic_feedback"),
             option(g, keys::swimming_invert_mode),
             option(d, "android_button_icons"),
             header("Touch"),
@@ -1081,6 +1106,7 @@ extern "C" void dk64_android_apply_experience(int modern) {
     recomp::config::Config &dual = recompui::config::get_config("dual_screen");
     dual.update_option_value("android_touch_kong_swap", static_cast<uint32_t>(modern ? 1u : 0u));
     dual.update_option_value("android_button_icons", static_cast<uint32_t>(modern ? 1u : 0u));
+    dual.update_option_value("android_haptic_feedback", static_cast<uint32_t>(modern ? 1u : 0u));
     dual.save_config();
 
     recomp::config::Config &general = recompui::config::get_general_config();
@@ -1106,7 +1132,8 @@ namespace recompui::config {
             "<recomp-color primary>Classic</recomp-color>: the N64 as it was. Classic controls (the right stick works the C buttons), "
             "Free Cam, no gyro, the original resolution, no anti-aliasing and the N64 button icons.<br />"
             "<recomp-color primary>Modern</recomp-color>: Analog Camera on the right stick, gyro aiming, the device's resolution, "
-            "anti-aliasing, quick Kong swapping (Tag Anywhere and Touch Kong Swap) and button icons that match your controller.<br />"
+            "anti-aliasing, quick Kong swapping (Tag Anywhere and Touch Kong Swap), button icons that match your controller "
+            "and haptic feedback.<br />"
             "<recomp-color primary>Custom</recomp-color>: keeps whatever you've set yourself.<br />"
             "Each option can still be changed afterwards.",
             experience_options,

@@ -33,6 +33,9 @@ namespace dk64::android {
     std::string storage_description();
     // Input > Touch > Drag to Move Camera (android/jni/touch_controller.cpp).
     void set_drag_camera(bool enabled);
+    void set_haptic_feedback(bool enabled);   // Haptic Feedback (Input)
+    bool haptic_feedback_enabled();
+    void phone_haptic_pulse(float strength, int ms);   // the phone's vibrator (touch play)
     bool drag_camera_enabled();
     void set_touch_feedback_strength(int strength);   // 1 light, 2 medium, 3 strong
     // The "Show FPS" setting (the counter is drawn by DK64Activity).
