@@ -35,6 +35,7 @@ namespace {
     std::atomic<bool> g_show_fps{false};
     std::atomic<bool> g_show_area{false};
     std::atomic<int32_t> g_tag_target{-1};
+    std::atomic<int64_t> g_tag_target_set_at{0};
     constexpr const char* kTagAnywhereModId = "dk64_tag_anywhere";
 
     // N64 virtual addresses (KSEG0) for the US 1.0 release.
@@ -699,12 +700,25 @@ void dk64::android::set_show_area(bool enabled) {
 }
 
 // Touch Kong Swap: the Kong the bottom screen is taking the player to (-1: none).
+// The swap takes a few hundred ms at most; a target older than 2 s is stale (e.g. the swap was
+// interrupted without being cleared) and no longer counts, so it can't leave the other Kongs
+// looking un-freed.
 extern "C" int32_t dk64_android_tag_target() {
-    return g_tag_target.load(std::memory_order_relaxed);
+    const int32_t target = g_tag_target.load(std::memory_order_relaxed);
+    if (target >= 0) {
+        const auto set_at = g_tag_target_set_at.load(std::memory_order_relaxed);
+        if (std::chrono::steady_clock::now().time_since_epoch().count() - set_at >
+            std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::seconds(2)).count()) {
+            g_tag_target.store(-1, std::memory_order_relaxed);
+            return -1;
+        }
+    }
+    return target;
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_io_github_bownz_dk64recomp_GameState_nativeSetTagTarget(JNIEnv*, jclass, jint kong) {
+    g_tag_target_set_at.store(std::chrono::steady_clock::now().time_since_epoch().count(), std::memory_order_relaxed);
     g_tag_target.store(kong >= 0 && kong < 5 ? kong : -1, std::memory_order_relaxed);
 }
 
