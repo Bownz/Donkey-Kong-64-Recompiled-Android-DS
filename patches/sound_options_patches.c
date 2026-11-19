@@ -996,10 +996,20 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
         (kongY > mc_ground_y + 30.0f)) {
         frameTarget = mc_ground_y + ((kongY - mc_ground_y - 30.0f) * 0.5f);
     }
+    // Jumping up onto a higher ledge: once the Kong is over it (the floor under it is the
+    // ledge), the view already starts rising towards it, so most of the climb happens in the air
+    // and the landing has little left to do.
+    if ((mc_air_frames > 0) && (mc_air_frames <= 45) && !modern_camera_free_state(target) &&
+        (target->floor > mc_ground_y + 3.0f) && (target->floor < mc_ground_y + 300.0f)) {
+        f32 ledge = mc_ground_y + ((target->floor - mc_ground_y) * 0.7f);
+        if (ledge > frameTarget) {
+            frameTarget = ledge;
+        }
+    }
 
     // Landing on a higher (or lower) ledge, the whole view, camera and focus together, eases to
-    // the new height over about half a second (speeding up, then settling), like Odyssey,
-    // instead of snapping. Trees, vines, long falls and swimming follow more directly.
+    // the new height (speeding up gently, then settling over about two thirds of a second), like
+    // Odyssey, instead of snapping. Trees, vines, long falls and swimming follow more directly.
     if (!mc_focus_valid) {
         mc_frame_y = mc_ground_y;
         mc_frame_speed = 0.0f;
@@ -1008,19 +1018,17 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
         mc_frame_speed = 0.0f;
     } else {
         f32 gap = frameTarget - mc_frame_y;
-        mc_frame_speed += ((gap * 0.25f) - mc_frame_speed) * 0.35f;
+        mc_frame_speed += ((gap * 0.16f) - mc_frame_speed) * 0.25f;
+        mc_frame_speed = mc_clamp(mc_frame_speed, -8.0f, 8.0f);
         mc_frame_y += mc_frame_speed;
         if ((mc_abs(gap) < 0.5f) && (mc_abs(mc_frame_speed) < 0.5f)) {
             mc_frame_y = frameTarget;
             mc_frame_speed = 0.0f;
         }
-        // Landed on a higher ledge: most of the step is taken at once, only the last 15 units
-        // eased, so the view never sits inside the ledge looking at its face.
-        if ((mc_air_frames == 0) && (mc_frame_y < mc_ground_y - 15.0f)) {
-            mc_frame_y = mc_ground_y - 15.0f;
-            if (mc_frame_speed < 0.0f) {
-                mc_frame_speed = 0.0f;
-            }
+        // Landed well above the view (a big step): catch up faster, but still smoothly, so the
+        // view never sits inside the ledge for long (the collision keeps it out of the ledge).
+        if ((mc_air_frames == 0) && (mc_frame_y < mc_ground_y - 40.0f)) {
+            mc_frame_y += ((mc_ground_y - 40.0f) - mc_frame_y) * 0.35f;
         }
     }
 
@@ -1326,6 +1334,8 @@ RECOMP_PATCH u16 func_global_asm_806DFF34(u16 arg0, u16 *arg1) {
 static s32 hf_air = 0;           // frames in the air (-1: too long to count, e.g. swimming)
 static s32 hf_last_state = -1;
 
+void game_feel_update(void);   // game_feel_patches.c
+
 static void modern_haptics_update(void) {
     Actor *kong = gCurrentPlayer;
     s32 state, ms;
@@ -1386,6 +1396,7 @@ RECOMP_PATCH void func_global_asm_8061D1FC(Actor* arg0) {
 
     CaaD = arg0->CaaD;
     modern_haptics_update();
+    game_feel_update();
     temp_f2 = D_global_asm_807FD610[CaaD->unkFB].unk2F * 0.5;
     if (!(CaaD->unkAC & 0x2000) && !(D_global_asm_807FBB64 & 0x40)) {
         if ((CaaD->unk8) && ((s32) CaaD->unk8 < 0x9B) && (CaaD->unkEF)) {

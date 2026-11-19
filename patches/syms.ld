@@ -85,3 +85,4 @@ recomp_fill_button_icon = 0x8F00016C;
 recomp_touch_camera_get = 0x8F000170;
 recomp_haptic_pulse = 0x8F000174;
 recomp_get_gun_button = 0x8F000178;
+recomp_get_game_feel = 0x8F00017C;

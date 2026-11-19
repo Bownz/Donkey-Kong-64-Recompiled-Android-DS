@@ -562,6 +562,47 @@ static void add_dual_screen_options(recomp::config::Config &config) {
             }
         });
 
+    // Jump Assist: a jump pressed just before landing still happens on landing, and one pressed
+    // just after running off a ledge still jumps (patches/game_feel_patches.c).
+    static const std::string jump_assist_option = "android_jump_assist";
+    static EnumOptionVector on_off_options = {
+        {0u, "Off", "Off"},
+        {1u, "On", "On"},
+    };
+    config.add_enum_option(
+        jump_assist_option,
+        "Jump Assist",
+        "Like recent 3D platformers: a jump pressed a moment before landing happens as soon as you "
+        "land, and one pressed a moment after running off a ledge still jumps.",
+        on_off_options,
+        1u
+    );
+    config.add_option_change_callback(jump_assist_option,
+        [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
+            dk64::android::set_jump_assist(std::get<uint32_t>(cur) == 1u);
+            if (context == recomp::config::OptionChangeContext::Permanent) {
+                recompui::config::get_config("dual_screen").save_config();
+            }
+        });
+
+    // Quick Turn: no long skid when reversing direction while running.
+    static const std::string quick_turn_option = "android_quick_turn";
+    config.add_enum_option(
+        quick_turn_option,
+        "Quick Turn",
+        "Reversing direction while running turns the Kong round almost at once (with a short skid), "
+        "instead of the long slide of the N64.",
+        on_off_options,
+        1u
+    );
+    config.add_option_change_callback(quick_turn_option,
+        [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
+            dk64::android::set_quick_turn(std::get<uint32_t>(cur) == 1u);
+            if (context == recomp::config::OptionChangeContext::Permanent) {
+                recompui::config::get_config("dual_screen").save_config();
+            }
+        });
+
     // Small rumbles for game feel, like Odyssey: landings (stronger the longer the fall, and for
     // the Simian Slam) and skidding round. On the controller, or the phone with touch controls.
     static const std::string haptic_feedback_option = "android_haptic_feedback";
@@ -573,8 +614,10 @@ static void add_dual_screen_options(recomp::config::Config &config) {
         haptic_feedback_option,
         "Haptic Feedback",
         "Small rumbles for game feel, like recent 3D platformers: landing (stronger after a long fall "
-        "or a Simian Slam) and skidding round when you turn sharply while running. On your controller, "
-        "or the phone when you play with the touch controls. The strength follows Rumble Strength.",
+        "or a Simian Slam) and skidding round when you turn sharply while running. "
+        "Also: a soft tap for each banana and coin, a strong one for a Golden Banana, a tick for each "
+        "shot and orange, a thump when you're hurt, and a beat while playing an instrument. "
+        "On your controller, or the phone when you play with the touch controls. The strength follows Rumble Strength.",
         haptic_feedback_options,
         1u
     );
@@ -881,6 +924,8 @@ void dk64::init_config() {
             option(g, gopts::rumble_strength),
             option(d, "android_haptic_feedback"),
             option(d, "android_gun_button"),
+            option(d, "android_jump_assist"),
+            option(d, "android_quick_turn"),
             option(g, keys::swimming_invert_mode),
             option(d, "android_button_icons"),
             header("Touch"),
@@ -1132,6 +1177,8 @@ extern "C" void dk64_android_apply_experience(int modern) {
     dual.update_option_value("android_touch_kong_swap", static_cast<uint32_t>(modern ? 1u : 0u));
     dual.update_option_value("android_button_icons", static_cast<uint32_t>(modern ? 1u : 0u));
     dual.update_option_value("android_haptic_feedback", static_cast<uint32_t>(modern ? 1u : 0u));
+    dual.update_option_value("android_jump_assist", static_cast<uint32_t>(modern ? 1u : 0u));
+    dual.update_option_value("android_quick_turn", static_cast<uint32_t>(modern ? 1u : 0u));
     dual.save_config();
 
     recomp::config::Config &general = recompui::config::get_general_config();

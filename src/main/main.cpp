@@ -1158,6 +1158,7 @@ int main(int argc, char** argv) {
     REGISTER_FUNC(recomp_touch_camera_get);
     REGISTER_FUNC(recomp_haptic_pulse);
     REGISTER_FUNC(recomp_get_gun_button);
+    REGISTER_FUNC(recomp_get_game_feel);
     REGISTER_FUNC(recomp_get_mouse_deltas);
     REGISTER_FUNC(recomp_get_inverted_axes);
     REGISTER_FUNC(recomp_get_analog_inverted_axes);

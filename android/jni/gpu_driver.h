@@ -36,6 +36,9 @@ namespace dk64::android {
     void set_haptic_feedback(bool enabled);   // Haptic Feedback (Input)
     void set_gun_button(int mode);            // Shoot Gun With (Input): 0 B, 1 ZR, 2 both
     int gun_button();
+    void set_jump_assist(bool enabled);       // Jump Assist (Input): buffered jumps, coyote time
+    void set_quick_turn(bool enabled);        // Quick Turn (Input): no skid on sharp turns
+    int game_feel_flags();                    // bit 0 Jump Assist, bit 1 Quick Turn
     bool haptic_feedback_enabled();
     void phone_haptic_pulse(float strength, int ms);   // the phone's vibrator (touch play)
     bool drag_camera_enabled();

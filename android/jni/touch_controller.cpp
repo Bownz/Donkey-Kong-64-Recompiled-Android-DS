@@ -175,6 +175,21 @@ int dk64::android::gun_button() {
     return gun_button_mode.load(std::memory_order_relaxed);
 }
 
+static std::atomic<bool> jump_assist{true};
+static std::atomic<bool> quick_turn{true};
+
+void dk64::android::set_jump_assist(bool enabled) {
+    jump_assist.store(enabled, std::memory_order_relaxed);
+}
+
+void dk64::android::set_quick_turn(bool enabled) {
+    quick_turn.store(enabled, std::memory_order_relaxed);
+}
+
+int dk64::android::game_feel_flags() {
+    return (jump_assist.load(std::memory_order_relaxed) ? 1 : 0) | (quick_turn.load(std::memory_order_relaxed) ? 2 : 0);
+}
+
 static std::atomic<bool> haptic_feedback{true};
 
 void dk64::android::set_haptic_feedback(bool enabled) {

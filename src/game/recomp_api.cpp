@@ -620,6 +620,15 @@ extern "C" void recomp_haptic_pulse(uint8_t* rdram, recomp_context* ctx) {
 #endif
 }
 
+// Game feel options (Input): bit 0 Jump Assist, bit 1 Quick Turn (patches/game_feel_patches.c).
+extern "C" void recomp_get_game_feel(uint8_t* rdram, recomp_context* ctx) {
+#if defined(__ANDROID__)
+    _return<int32_t>(ctx, dk64::android::game_feel_flags());
+#else
+    _return<int32_t>(ctx, 3);
+#endif
+}
+
 // Shoot Gun With (Input): 0 B, 1 ZR, 2 B and ZR (patches/sound_options_patches.c).
 extern "C" void recomp_get_gun_button(uint8_t* rdram, recomp_context* ctx) {
 #if defined(__ANDROID__)
