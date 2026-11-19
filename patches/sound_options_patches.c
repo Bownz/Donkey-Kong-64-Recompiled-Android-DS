@@ -441,6 +441,13 @@ static f32 mc_yaw_velocity = 0.0f;
 static f32 mc_tilt_velocity = 0.0f;
 static f32 mc_idle = 0.0f;
 static u8 mc_recentering = FALSE;
+static f32 mc_distance = 0.0f;   // the distance you chose (hold L + up/down); 0 = not set yet
+static u8 mc_l_held = FALSE;
+static u8 mc_l_zoomed = FALSE;
+static f32 mc_l_time = 0.0f;
+
+s32 func_global_asm_8062133C(Actor*, Actor*, f32*, f32*, f32*, f32);
+u8 func_global_asm_80671E00(f32 arg0, f32 arg1, f32 arg2, f32 arg3, s16 *arg4, s16 *arg5, u8 arg6, u16 arg7);
 
 static f32 mc_abs(f32 v) {
     return v < 0.0f ? -v : v;
@@ -455,9 +462,46 @@ static f32 mc_curve(f32 v) {
     return (0.35f * v) + (0.65f * v * mc_abs(v));
 }
 
+// How far out the camera can sit (up to `wanted`) before something is in the way, like
+// Odyssey's camera: the game works out the camera position for each distance from the Kong
+// outwards (func_global_asm_8062133C, as its own reset search does) and checks it against the
+// level's collision (func_global_asm_80671E00); the first blocked one limits the distance.
+static f32 mc_clear_distance(Actor *camera, CameraPaad *CaaD, f32 wanted) {
+    const f32 step = 15.0f;
+    const f32 nearest = 25.0f;
+    f32 savedA0 = CaaD->unkA0;
+    s16 savedB2 = CaaD->unkB2;
+    f32 x, y, z, d, clear = wanted;
+    s16 hitA = 0, hitB = 0xFFF;
+    s32 hidden;
+
+    for (d = nearest; d < wanted + step; d += step) {
+        if (d > wanted) {
+            d = wanted;
+        }
+        CaaD->unkA0 = d;
+        hidden = func_global_asm_8062133C(camera, CaaD->unk0, &x, &y, &z, -1.0f) == 1;
+        CaaD->unkB2 = savedB2;
+        if (hidden || func_global_asm_80671E00(x, y, z, 10.0f, &hitA, &hitB, 1U, 0xBCU)) {
+            clear = d - step;
+            if (clear < nearest) {
+                clear = nearest;
+            }
+            break;
+        }
+        if (d >= wanted) {
+            break;
+        }
+    }
+    CaaD->unkA0 = savedA0;
+    CaaD->unkB2 = savedB2;
+    return clear;
+}
+
 static void modern_camera_update(Actor *camera, CameraPaad *CaaD, s32 touchMoved, f32 touchX, f32 touchY) {
-    f32 stickX, stickY, dt, sensitivity, blend, yawStep, tilt, speed, follow;
+    f32 stickX, stickY, dt, sensitivity, blend, yawStep, tilt, speed, follow, clear, ratio;
     s32 behind, diff;
+    u8 lHeld;
 
     recomp_analog_camera_get(&stickX, &stickY);
     dt = (f32)getFrameDelta();
@@ -474,10 +518,31 @@ static void modern_camera_update(Actor *camera, CameraPaad *CaaD, s32 touchMoved
         yawStep += touchX;   // touch drags stay 1:1
     }
 
-    // L: swing behind the Kong. Turning the camera yourself cancels it.
-    if (D_global_asm_807FD610[cc_player_index].unk2C & L_TRIG) {
+    if (mc_distance <= 0.0f) {
+        mc_distance = mc_clamp(CaaD->unkA4, 60.0f, 300.0f);
+    }
+
+    // L: tap to swing behind the Kong; hold L and push up/down to bring the camera closer or
+    // further (the height scales with it, so the angle stays the same).
+    lHeld = (D_global_asm_807FD610[cc_player_index].unk2A & L_TRIG) != 0;
+    if (lHeld) {
+        if (!mc_l_held) {
+            mc_l_time = 0.0f;
+            mc_l_zoomed = FALSE;
+        }
+        mc_l_time += dt;
+        if (mc_abs(stickY) > 0.2f) {
+            ratio = mc_distance;
+            mc_distance = mc_clamp(mc_distance + (mc_curve(stickY) * sensitivity * 2.0f * dt), 60.0f, 300.0f);
+            ratio = mc_distance / ratio;
+            CaaD->unkB8 = mc_clamp(CaaD->unkB8 * ratio, 5.0f, 240.0f);
+            mc_l_zoomed = TRUE;
+        }
+        stickY = 0.0f;   // up/down zooms instead of tilting while L is held
+    } else if (mc_l_held && !mc_l_zoomed && (mc_l_time < 20.0f)) {
         mc_recentering = TRUE;
     }
+    mc_l_held = lHeld;
     if ((stickX != 0.0f) || (touchMoved && (touchX != 0.0f))) {
         mc_recentering = FALSE;
         mc_idle = 0.0f;
@@ -524,6 +589,17 @@ static void modern_camera_update(Actor *camera, CameraPaad *CaaD, s32 touchMoved
         CaaD->unkB8 = mc_clamp(CaaD->unkB8 + tilt, 5.0f, 240.0f);
         CaaD->unkF1 = 1;
     }
+
+    // Distance: always heading back to the one you chose (after vines, tight spots...), but
+    // never through a wall: blocked, it moves in front of it at once, and eases back out once
+    // the way is clear. The game's own easing (unkA0 towards unkA4) is left with nothing to do.
+    clear = mc_clear_distance(camera, CaaD, mc_distance);
+    if (clear < CaaD->unkA0) {
+        CaaD->unkA0 = clear;
+    } else {
+        CaaD->unkA0 += (clear - CaaD->unkA0) * mc_clamp(0.08f * dt, 0.0f, 1.0f);
+    }
+    CaaD->unkA4 = CaaD->unkA0;
 }
 
 RECOMP_PATCH void func_global_asm_8061D1FC(Actor* arg0) {
