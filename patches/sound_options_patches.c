@@ -1030,6 +1030,31 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
                 camY = kongY + 18.0f;
             }
         }
+        // Under cover (a bridge, an overhang, a roof, the hill a tunnel runs through): the
+        // lowest solid surface found above the Kong, the camera and halfway between (looked
+        // for from well above), keeps the camera under it.
+        {
+            f32 cover = 100000.0f;
+            f32 probe;
+            f32 px[3], pz[3];
+            s32 k;
+            px[0] = target->x_position;               pz[0] = target->z_position;
+            px[1] = (target->x_position + camX) * 0.5f; pz[1] = (target->z_position + camZ) * 0.5f;
+            px[2] = camX;                              pz[2] = camZ;
+            for (k = 0; k < 3; k++) {
+                probe = kongY + 400.0f;
+                if (func_global_asm_80667110(px[k], pz[k], &probe) && (probe <= kongY + 400.0f) &&
+                    (probe > kongY + 30.0f) && (probe < cover)) {
+                    cover = probe;
+                }
+            }
+            if ((cover < 100000.0f) && (camY > cover - 20.0f)) {
+                camY = cover - 20.0f;
+                if (camY < kongY + 18.0f) {
+                    camY = kongY + 18.0f;
+                }
+            }
+        }
     }
     mc_fade(distance * mc_reach);
 
