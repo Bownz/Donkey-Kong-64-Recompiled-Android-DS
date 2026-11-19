@@ -801,6 +801,48 @@ static void mc_fade(f32 distance) {
     }
 }
 
+// Tunnels and corridors: a tunnel's ceiling is usually only scenery (no collision for the floor
+// lookup or the wall test to find), so it's recognised by its walls instead: walls close on
+// both sides of the Kong (within 80 units each way), along any of four directions (checked one
+// direction per frame, at about head-and-a-half height so low fences and railings don't count).
+// In a tight space the camera stays low and a little closer, under any ceiling, like the
+// game's own camera there; it eases in and out (mc_tight).
+static f32 mc_tight = 0.0f;
+static u8 mc_tight_pairs = 0;     // bit per direction: walls both ways
+static u8 mc_tight_dir = 0;
+static u8 mc_tight_logged = FALSE;
+
+static f32 mc_wall_within(f32 x, f32 y, f32 z, f32 dx, f32 dz, f32 range) {
+    s16 hitA = 0, hitB = 0xFFF;
+    f32 d;
+    for (d = 8.0f; d <= range; d += 8.0f) {
+        if (func_global_asm_80671E00(x + (dx * d), y, z + (dz * d), 5.0f, &hitA, &hitB, 1U, 0xBCU) != 0) {
+            return d;
+        }
+    }
+    return -1.0f;
+}
+
+static void mc_update_tight(Actor *target) {
+    f32 dx, dz, a, b;
+    s32 angle = (mc_tight_dir * 0x200) & 0xFFF;   // 0, 45, 90, 135 degrees
+    f32 y = target->y_position + 40.0f;
+    mc_direction_with(mc_convention, angle, &dx, &dz);
+    a = mc_wall_within(target->x_position, y, target->z_position, dx, dz, 80.0f);
+    b = (a >= 0.0f) ? mc_wall_within(target->x_position, y, target->z_position, -dx, -dz, 80.0f) : -1.0f;
+    if ((a >= 0.0f) && (b >= 0.0f)) {
+        mc_tight_pairs |= (1 << mc_tight_dir);
+    } else {
+        mc_tight_pairs &= ~(1 << mc_tight_dir);
+    }
+    mc_tight_dir = (mc_tight_dir + 1) & 3;
+    mc_tight += (((mc_tight_pairs != 0) ? 1.0f : 0.0f) - mc_tight) * 0.08f;
+    if ((mc_tight_pairs != 0) != mc_tight_logged) {
+        mc_tight_logged = (mc_tight_pairs != 0);
+        recomp_printf("Modern Camera: tight space %s (map 0x%02X)\n", mc_tight_logged ? "on" : "off", current_map);
+    }
+}
+
 // Places the camera: called from the camera update with its eye and look-at outputs.
 void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f32 *eyeZ, f32 *atX, f32 *atY, f32 *atZ) {
     Actor *target = AAD->unk0;
@@ -968,9 +1010,27 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
     if (mc_on_vine) {
         distance *= 1.2f;
     }
-    mc_direction_with(mc_convention, ((s32)mc_yaw) & 0xFFF, &dx, &dz);
-    wantX = mc_focus_x + (dx * distance);
-    wantYEye = mc_frame_y + mc_height;
+    // Tunnels and corridors (mc_update_tight): low (at most 30 above the ground, so ~level with
+    // the Kong's head) and at most 110 out. Tilting down still works.
+    if (mc_on_vine || modern_camera_free_state(target)) {
+        mc_tight += (0.0f - mc_tight) * 0.08f;
+    } else {
+        mc_update_tight(target);
+    }
+    {
+        f32 height = mc_height;
+        if (mc_tight > 0.01f) {
+            if (height > 30.0f) {
+                height += (30.0f - height) * mc_tight;
+            }
+            if (distance > 110.0f) {
+                distance += (110.0f - distance) * mc_tight;
+            }
+        }
+        mc_direction_with(mc_convention, ((s32)mc_yaw) & 0xFFF, &dx, &dz);
+        wantX = mc_focus_x + (dx * distance);
+        wantYEye = mc_frame_y + height;
+    }
     wantZ = mc_focus_z + (dz * distance);
 
     // Vines: the game's own vine view (which it has just placed: the eye and look-at passed in),
@@ -1154,8 +1214,7 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
 
 // ---- Shoot Gun With (Input) ---------------------------------------------------------------
 // The game turns the controller's buttons into what the Kong reads (both held and newly
-// pressed) with this function, once per frame. While the gun is out (Kong states 0x60 pulling
-// it out, 0x61 walking with it, 0x62 aiming, 0x63 firing), ZR (the N64's R) can fire too, or
+// pressed) with this function, once per frame. While the gun is out (in hand, or aiming), ZR (the N64's R) can fire too, or
 // instead of B: 0 B (as the N64), 1 ZR only, 2 both.
 RECOMP_PATCH u16 func_global_asm_806DFF34(u16 arg0, u16 *arg1) {
     u16 i;
@@ -1174,7 +1233,20 @@ RECOMP_PATCH u16 func_global_asm_806DFF34(u16 arg0, u16 *arg1) {
     }
     result = (i | (arg0 & ~j));
 
-    if ((gCurrentPlayer != NULL) && (gCurrentPlayer->control_state >= 0x60) && (gCurrentPlayer->control_state <= 0x63)) {
+    {
+        static s32 gunWas = -1;
+        s32 gunNow = (gCurrentPlayer != NULL) && (gCurrentPlayer->PaaD != NULL) && (gCurrentPlayer->PaaD->unk8C != 0);
+        if (gunNow != gunWas) {
+            if (gunWas != -1) {
+                recomp_printf("Gun: %s\n", gunNow ? "out" : "away");
+            }
+            gunWas = gunNow;
+        }
+    }
+    // The gun is out: the Kong's "holding the gun" flag (PlayerAdditionalActorData 0x8C, what
+    // the game checks to pull the gun out or put it away), or one of the gun states (aiming...).
+    if ((gCurrentPlayer != NULL) && (((gCurrentPlayer->PaaD != NULL) && (gCurrentPlayer->PaaD->unk8C != 0)) ||
+        ((gCurrentPlayer->control_state >= 0x60) && (gCurrentPlayer->control_state <= 0x63)))) {
         mode = recomp_get_gun_button();
         if (mode != 0) {
             u8 r = (result & R_TRIG) != 0;
