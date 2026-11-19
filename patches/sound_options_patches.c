@@ -482,6 +482,7 @@ static f32 mc_distance = 0.0f;      // the usual distance (0: not set yet)
 static f32 mc_reach = 1.0f;         // how far out along the line the camera is (1 = all the way)
 static f32 mc_idle = 0.0f;
 static u8 mc_recentering = FALSE;
+static u8 mc_follow_strong = FALSE;   // after L: keep behind the Kong until you turn the camera
 static s32 mc_recenter_frame = 0;     // L: frames into the swing
 static f32 mc_recenter_yaw = 0.0f;    // L: where the swing started
 static f32 mc_recenter_turn = 0.0f;   // L: how far it turns
@@ -647,6 +648,7 @@ static void modern_camera_input(Actor *camera, CameraPaad *CaaD, s32 touchMoved,
         mc_vine_offset = 0.0f;           // L also forgets your vine view
         mc_vine_hoff = 0.0f;
         mc_recentering = TRUE;
+        mc_follow_strong = TRUE;
         mc_recenter_frame = 0;
         mc_recenter_yaw = mc_yaw;
         mc_recenter_turn = (f32)MC_ANGLE_WRAP((gCurrentPlayer->y_rotation & 0xFFF) - (s32)mc_yaw);
@@ -654,6 +656,7 @@ static void modern_camera_input(Actor *camera, CameraPaad *CaaD, s32 touchMoved,
     }
     if ((stickX != 0.0f) || (touchMoved && (touchX != 0.0f))) {
         mc_recentering = FALSE;
+        mc_follow_strong = FALSE;
         mc_idle = 0.0f;
     } else {
         mc_idle += dt;
@@ -680,6 +683,15 @@ static void modern_camera_input(Actor *camera, CameraPaad *CaaD, s32 touchMoved,
         mc_tilt_velocity = 0.0f;
         if (t >= 1.0f) {
             mc_recentering = FALSE;
+        }
+    } else if (mc_follow_strong && !mc_on_vine) {
+        // After L: stays behind the Kong as it runs and turns (about 4x the normal follow, no
+        // waiting), until you turn the camera yourself. Running back towards the camera (more
+        // than ~135 degrees off) doesn't spin it round.
+        speed = gCurrentPlayer->unkB8;
+        follow = mc_clamp(speed / 100.0f, 0.0f, 1.0f);
+        if ((follow > 0.02f) && (diff > -0x600) && (diff < 0x600)) {
+            yawStep += diff * 0.05f * follow * dt;
         }
     } else if ((mc_idle > 50.0f) && !mc_on_vine) {
         // Gentle follow while running; never while running towards the camera (more than
@@ -865,6 +877,23 @@ static void mc_update_tight(Actor *target) {
     }
 }
 
+// The game's own locked-camera spots (where it takes the camera and frames the scene itself):
+// a camera zone in the level (CameraPaad 0xAC bit 8, set from the zone, func_global_asm_8061D1FC;
+// bit 4), or a map whose camera always stays behind the Kong (map flags 0x08000000) or can't be
+// turned (0x40). The Modern Camera hands over to the game there. Changes are logged.
+static u8 mc_game_locked(CameraPaad *AAD) {
+    static s32 lastLocked = -1;
+    u8 locked = ((AAD->unkAC & 0xC) != 0) || ((D_global_asm_807FBB64 & 0x08000040) != 0);
+    if (locked != lastLocked) {
+        if ((lastLocked != -1) || locked) {
+            recomp_printf("Modern Camera: game camera %s (map 0x%02X, zone %d, camera flags 0x%08X, map flags 0x%08X)\n",
+                locked ? "locked" : "free", current_map, AAD->unk8, AAD->unkAC, D_global_asm_807FBB64);
+        }
+        lastLocked = locked;
+    }
+    return locked;
+}
+
 // Places the camera: called from the camera update with its eye and look-at outputs.
 void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f32 *eyeZ, f32 *atX, f32 *atY, f32 *atZ) {
     Actor *target = AAD->unk0;
@@ -874,7 +903,7 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
     u8 active;
 
     active = (is_cutscene_active == 0) && mc_allowed() && (target != NULL) &&
-        (target == gCurrentPlayer) && !(AAD->unkAC & 0x2000) &&
+        (target == gCurrentPlayer) && !(AAD->unkAC & 0x2000) && !mc_game_locked(AAD) &&
         ((AAD->unkF3 == 1) || (AAD->unkF3 == 5) || (AAD->unkF3 == 12)) && mc_ready();
     // (Camera mode 2 is the game's fixed camera for tight spots such as tunnel entrances: left
     // to the game, blended in and out.)
