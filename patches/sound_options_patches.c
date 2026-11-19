@@ -452,6 +452,12 @@ static u8 mc_recentering = FALSE;
 static f32 mc_distance = 0.0f;   // the camera's usual distance (set on first use); 0 = not set yet
 static s16 mc_yaw = 0;            // the yaw the Modern Camera left last frame
 static u8 mc_yaw_valid = FALSE;
+static u8 mc_on_vine = FALSE;
+static s16 mc_vine_heading = 0;   // the Kong's facing when it grabbed the vine
+
+static u8 mc_vine_state(Actor *kong) {
+    return (kong != NULL) && ((kong->control_state == 0x57) || (kong->control_state == 0x58));
+}
 
 // Kong states where the game normally locks the camera, but the Modern Camera stays free:
 // swinging on a vine (0x57, 0x58) and climbing a tree or pole (0x59, 0x5A).
@@ -576,8 +582,20 @@ static void modern_camera_update(Actor *camera, CameraPaad *CaaD, s32 touchMoved
         mc_idle += dt;
     }
 
+    // Swinging on a vine (like Odyssey/Bananza): the camera doesn't swing with the Kong; it
+    // settles behind the direction the Kong was heading when it grabbed the vine, so the
+    // landing spot is in view (see also the steadier focus in modern_camera_frame).
+    if (mc_vine_state(gCurrentPlayer)) {
+        if (!mc_on_vine) {
+            mc_on_vine = TRUE;
+            mc_vine_heading = gCurrentPlayer->y_rotation & 0xFFF;
+        }
+    } else {
+        mc_on_vine = FALSE;
+    }
+
     // The camera's yaw equals the Kong's facing when it's right behind (func_global_asm_8061DB64).
-    behind = gCurrentPlayer->y_rotation & 0xFFF;
+    behind = mc_on_vine ? mc_vine_heading : (gCurrentPlayer->y_rotation & 0xFFF);
     diff = MC_ANGLE_WRAP(behind - CaaD->unkB2);
     if (mc_recentering) {
         if ((diff > -8) && (diff < 8)) {
@@ -590,7 +608,7 @@ static void modern_camera_update(Actor *camera, CameraPaad *CaaD, s32 touchMoved
         // Gentle follow while running; never while running towards the camera (more than
         // ~120 degrees off), so turning round to face it doesn't spin the view.
         speed = gCurrentPlayer->unkB8;
-        follow = mc_clamp(speed / 150.0f, 0.0f, 1.0f);
+        follow = mc_on_vine ? 0.6f : mc_clamp(speed / 150.0f, 0.0f, 1.0f);
         if ((follow > 0.05f) && (diff > -0x555) && (diff < 0x555)) {
             yawStep += diff * 0.012f * follow * dt;
         }
@@ -623,6 +641,9 @@ static void modern_camera_update(Actor *camera, CameraPaad *CaaD, s32 touchMoved
     // left to do.
     height = mc_clamp((CaaD->unkB8 - 5.0f) / 235.0f, 0.0f, 1.0f);
     wanted = mc_distance * (0.85f + (0.3f * height));
+    if (mc_on_vine) {
+        wanted *= 1.2f;   // a little further out, so the whole swing and the landing fit
+    }
     clear = mc_clear_distance(camera, CaaD, wanted);
     if (clear < CaaD->unkA0) {
         CaaD->unkA0 = clear;
@@ -666,12 +687,18 @@ void modern_camera_frame(CameraPaad *AAD, f32 *atX, f32 *atY, f32 *atZ) {
     // The focus trails the Kong slightly (like Odyssey), so quick lunges and attacks don't jolt
     // the view; it catches up within a few frames. Big jumps (warps) are followed at once.
     wantY = target->y_position + 18.0f;
-    if (!mc_focus_valid || (mc_abs(wantY - mc_focus_y) > 150.0f) ||
-        (mc_abs(target->x_position - mc_focus_x) > 150.0f) || (mc_abs(target->z_position - mc_focus_z) > 150.0f)) {
+    if (!mc_focus_valid || (!mc_vine_state(target) && ((mc_abs(wantY - mc_focus_y) > 150.0f) ||
+        (mc_abs(target->x_position - mc_focus_x) > 150.0f) || (mc_abs(target->z_position - mc_focus_z) > 150.0f)))) {
         mc_focus_x = target->x_position;
         mc_focus_y = wantY;
         mc_focus_z = target->z_position;
         mc_focus_valid = TRUE;
+    } else if (mc_vine_state(target)) {
+        // On a vine the focus barely follows the swing, so it settles on the middle of the arc
+        // and the view stays steady while the Kong swings through it.
+        mc_focus_x += (target->x_position - mc_focus_x) * 0.04f;
+        mc_focus_y += (wantY - mc_focus_y) * 0.05f;
+        mc_focus_z += (target->z_position - mc_focus_z) * 0.04f;
     } else {
         mc_focus_x += (target->x_position - mc_focus_x) * 0.35f;
         mc_focus_y += (wantY - mc_focus_y) * 0.3f;
