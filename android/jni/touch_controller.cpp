@@ -165,6 +165,16 @@ void dk64::android::set_drag_camera(bool enabled) {
     }
 }
 
+static std::atomic<int> gun_button_mode{0};
+
+void dk64::android::set_gun_button(int mode) {
+    gun_button_mode.store(mode, std::memory_order_relaxed);
+}
+
+int dk64::android::gun_button() {
+    return gun_button_mode.load(std::memory_order_relaxed);
+}
+
 static std::atomic<bool> haptic_feedback{true};
 
 void dk64::android::set_haptic_feedback(bool enabled) {

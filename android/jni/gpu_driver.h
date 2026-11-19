@@ -34,6 +34,8 @@ namespace dk64::android {
     // Input > Touch > Drag to Move Camera (android/jni/touch_controller.cpp).
     void set_drag_camera(bool enabled);
     void set_haptic_feedback(bool enabled);   // Haptic Feedback (Input)
+    void set_gun_button(int mode);            // Shoot Gun With (Input): 0 B, 1 ZR, 2 both
+    int gun_button();
     bool haptic_feedback_enabled();
     void phone_haptic_pulse(float strength, int ms);   // the phone's vibrator (touch play)
     bool drag_camera_enabled();

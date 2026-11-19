@@ -620,6 +620,15 @@ extern "C" void recomp_haptic_pulse(uint8_t* rdram, recomp_context* ctx) {
 #endif
 }
 
+// Shoot Gun With (Input): 0 B, 1 ZR, 2 B and ZR (patches/sound_options_patches.c).
+extern "C" void recomp_get_gun_button(uint8_t* rdram, recomp_context* ctx) {
+#if defined(__ANDROID__)
+    _return<int32_t>(ctx, dk64::android::gun_button());
+#else
+    _return<int32_t>(ctx, 0);
+#endif
+}
+
 extern "C" void recomp_touch_camera_get(uint8_t* rdram, recomp_context* ctx) {
     float* x_out = _arg<0, float*>(rdram, ctx);
     float* y_out = _arg<1, float*>(rdram, ctx);

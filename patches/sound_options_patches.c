@@ -1067,6 +1067,43 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
     }
 }
 
+// ---- Shoot Gun With (Input) ---------------------------------------------------------------
+// The game turns the controller's buttons into what the Kong reads (both held and newly
+// pressed) with this function, once per frame. While the gun is out (Kong states 0x60 pulling
+// it out, 0x61 walking with it, 0x62 aiming, 0x63 firing), ZR (the N64's R) can fire too, or
+// instead of B: 0 B (as the N64), 1 ZR only, 2 both.
+RECOMP_PATCH u16 func_global_asm_806DFF34(u16 arg0, u16 *arg1) {
+    u16 i;
+    u16 j;
+    u16 result;
+    s32 mode;
+
+    j = 0;
+    i = 0;
+    while (*arg1) {
+        j |= *arg1;
+        if (*arg1++ & arg0) {
+            i |= *arg1;
+        }
+        arg1++;
+    }
+    result = (i | (arg0 & ~j));
+
+    if ((gCurrentPlayer != NULL) && (gCurrentPlayer->control_state >= 0x60) && (gCurrentPlayer->control_state <= 0x63)) {
+        mode = recomp_get_gun_button();
+        if (mode != 0) {
+            u8 r = (result & R_TRIG) != 0;
+            if (mode == 1) {
+                result &= ~B_BUTTON;
+            }
+            if (r) {
+                result |= B_BUTTON;
+            }
+        }
+    }
+    return result;
+}
+
 // ---- Haptic Feedback -----------------------------------------------------------------------
 // Small rumbles for game feel, like Odyssey (Input > Haptic Feedback; recomp_haptic_pulse checks
 // the setting, scales by Rumble Strength, and uses the phone's vibrator with touch controls):

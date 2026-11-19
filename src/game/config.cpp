@@ -538,6 +538,30 @@ static void add_dual_screen_options(recomp::config::Config &config) {
             }
         });
 
+    // Which button fires the gun (while it's out): B as on the N64, ZR, or either.
+    static const std::string gun_button_option = "android_gun_button";
+    static EnumOptionVector gun_button_options = {
+        {0u, "B", "B"},
+        {1u, "ZR", "ZR"},
+        {2u, "Both", "B and ZR"},
+    };
+    config.add_enum_option(
+        gun_button_option,
+        "Shoot Gun With",
+        "Which button fires the gun while it's out. <recomp-color primary>B</recomp-color>: as on the N64. "
+        "<recomp-color primary>ZR</recomp-color>: the right trigger (the N64's R) instead. "
+        "<recomp-color primary>B and ZR</recomp-color>: either.",
+        gun_button_options,
+        0u
+    );
+    config.add_option_change_callback(gun_button_option,
+        [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
+            dk64::android::set_gun_button(static_cast<int>(std::get<uint32_t>(cur)));
+            if (context == recomp::config::OptionChangeContext::Permanent) {
+                recompui::config::get_config("dual_screen").save_config();
+            }
+        });
+
     // Small rumbles for game feel, like Odyssey: landings (stronger the longer the fall, and for
     // the Simian Slam) and skidding round. On the controller, or the phone with touch controls.
     static const std::string haptic_feedback_option = "android_haptic_feedback";
@@ -856,6 +880,7 @@ void dk64::init_config() {
             option(g, gopts::joystick_deadzone),
             option(g, gopts::rumble_strength),
             option(d, "android_haptic_feedback"),
+            option(d, "android_gun_button"),
             option(g, keys::swimming_invert_mode),
             option(d, "android_button_icons"),
             header("Touch"),
