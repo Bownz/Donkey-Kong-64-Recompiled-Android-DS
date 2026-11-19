@@ -148,12 +148,13 @@ static void add_general_options(recomp::config::Config &config) {
         {dk64::CameraTypeMode::Free, "Free", "Free Cam"},
         {dk64::CameraTypeMode::Follow, "Follow", "Follow Cam"},
         {dk64::CameraTypeMode::BetterFree, "BetterFree", "Better Free Cam"},
-        {dk64::CameraTypeMode::Analog, "Analog", "Analog Camera"}
+        {dk64::CameraTypeMode::Analog, "Analog", "Analog Camera"},
+        {dk64::CameraTypeMode::Modern, "Modern", "Modern Camera"}
     };
     config.add_enum_option(
         dk64::configkeys::general::camera_type,
         "Camera Type",
-        "Changes the camera behavior.<br /><recomp-color primary>Free Cam</recomp-color>: Camera can be controlled via pressing C-Left and C-Right. The camera does not try to push itself behind the player.<br /><recomp-color primary>Follow Cam</recomp-color>: Similar to <recomp-color secondary>Free Cam</recomp-color>, but the camera tries to push itself behind the player.<br /><recomp-color primary>Better Free Cam</recomp-color>: Similar to <recomp-color secondary>Free Cam</recomp-color>, but instead of a button press turning the camera 45 degrees, holding the button moves the camera at 5 degrees per frame.<br /><recomp-color primary>Analog Camera</recomp-color>: Control of the camera is controlled by your right analogue stick. It is advised that C-Up is remapped to something outside your right analogue stick in order to have a good time with this.",
+        "Changes the camera behavior.<br /><recomp-color primary>Free Cam</recomp-color>: Camera can be controlled via pressing C-Left and C-Right. The camera does not try to push itself behind the player.<br /><recomp-color primary>Follow Cam</recomp-color>: Similar to <recomp-color secondary>Free Cam</recomp-color>, but the camera tries to push itself behind the player.<br /><recomp-color primary>Better Free Cam</recomp-color>: Similar to <recomp-color secondary>Free Cam</recomp-color>, but instead of a button press turning the camera 45 degrees, holding the button moves the camera at 5 degrees per frame.<br /><recomp-color primary>Analog Camera</recomp-color>: Control of the camera is controlled by your right analogue stick. It is advised that C-Up is remapped to something outside your right analogue stick in order to have a good time with this.<br /><recomp-color primary>Modern Camera</recomp-color>: Right stick camera that feels like recent 3D platformers: smooth turning, up/down tilts the camera, L swings it behind your Kong, and it drifts gently back behind you while you run.",
         camera_type_options,
         dk64::CameraTypeMode::Free
     );
@@ -161,7 +162,8 @@ static void add_general_options(recomp::config::Config &config) {
     // The touch controls show a second (camera) stick while the Analog Camera is selected.
     config.add_option_change_callback(dk64::configkeys::general::camera_type,
         [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext) {
-            dk64_android_analog_camera.store(std::get<uint32_t>(cur) == static_cast<uint32_t>(dk64::CameraTypeMode::Analog));
+            dk64_android_analog_camera.store(std::get<uint32_t>(cur) == static_cast<uint32_t>(dk64::CameraTypeMode::Analog) ||
+                std::get<uint32_t>(cur) == static_cast<uint32_t>(dk64::CameraTypeMode::Modern));
         });
 #endif
     config.add_number_option(

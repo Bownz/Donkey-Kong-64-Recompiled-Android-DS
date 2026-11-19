@@ -78,7 +78,8 @@ namespace dk64 {
         Free,
         Follow,
         BetterFree,
-        Analog
+        Analog,
+        Modern
     };
 
     CameraTypeMode get_camera_type();

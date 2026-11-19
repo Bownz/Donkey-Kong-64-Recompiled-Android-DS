@@ -223,7 +223,14 @@ u8 analog_cam_enabled(void) {
             return FALSE;
         }
     }
-    return recomp_get_camera_type() == 3;
+    // Analog Camera (3) and Modern Camera (4) both put the camera on the right stick.
+    return (recomp_get_camera_type() == 3) || (recomp_get_camera_type() == 4);
+}
+
+// @recomp: Modern Camera: the Analog Camera's controls with smoothing, tilt instead of zoom,
+// L to recenter and a gentle follow (modern_camera_update below).
+u8 modern_cam_enabled(void) {
+    return analog_cam_enabled() && (recomp_get_camera_type() == 4);
 }
 
 const u8 banned_analog_states[] = {
@@ -417,6 +424,108 @@ RECOMP_PATCH void func_global_asm_806EA0A4(void) {
 
 void func_global_asm_8062217C(Actor*, s16);
 int getFrameDelta(void);
+
+// ---- Modern Camera ------------------------------------------------------------------------
+// Feel aimed at Super Mario Odyssey / Donkey Kong Bananza:
+//  - the right stick turns the camera with a little acceleration and an easing response curve
+//    (fine aim near the centre, full speed at the edge), instead of moving it 1:1;
+//  - up/down tilts the camera (lower to look up, higher to look down) instead of zooming;
+//  - L swings the camera smoothly behind the Kong;
+//  - after about a second without touching the camera, it drifts gently back behind the Kong
+//    while you run, faster the faster you go, but not when you're running towards it.
+// The game still places the camera, handles walls, cutscenes and special rooms; this only
+// steers the yaw (CaaD->unkB2) and height (CaaD->unkB8) it follows.
+#define MC_ANGLE_WRAP(a) (((((s32)(a)) + 0x800) & 0xFFF) - 0x800)
+
+static f32 mc_yaw_velocity = 0.0f;
+static f32 mc_tilt_velocity = 0.0f;
+static f32 mc_idle = 0.0f;
+static u8 mc_recentering = FALSE;
+
+static f32 mc_abs(f32 v) {
+    return v < 0.0f ? -v : v;
+}
+
+static f32 mc_clamp(f32 v, f32 lo, f32 hi) {
+    return v < lo ? lo : (v > hi ? hi : v);
+}
+
+// Fine control near the centre of the stick, full speed at the edge.
+static f32 mc_curve(f32 v) {
+    return (0.35f * v) + (0.65f * v * mc_abs(v));
+}
+
+static void modern_camera_update(Actor *camera, CameraPaad *CaaD, s32 touchMoved, f32 touchX, f32 touchY) {
+    f32 stickX, stickY, dt, sensitivity, blend, yawStep, tilt, speed, follow;
+    s32 behind, diff;
+
+    recomp_analog_camera_get(&stickX, &stickY);
+    dt = (f32)getFrameDelta();
+    sensitivity = (f32)recomp_get_analog_cam_sensitivity();
+    blend = mc_clamp(0.3f * dt, 0.0f, 1.0f);
+
+    // Turning: ease the speed towards the stick's target speed (a short acceleration).
+    mc_yaw_velocity += ((mc_curve(stickX) * sensitivity * -5.7f) - mc_yaw_velocity) * blend;
+    if ((stickX == 0.0f) && (mc_abs(mc_yaw_velocity) < 0.05f)) {
+        mc_yaw_velocity = 0.0f;
+    }
+    yawStep = mc_yaw_velocity * dt;
+    if (touchMoved) {
+        yawStep += touchX;   // touch drags stay 1:1
+    }
+
+    // L: swing behind the Kong. Turning the camera yourself cancels it.
+    if (D_global_asm_807FD610[cc_player_index].unk2C & L_TRIG) {
+        mc_recentering = TRUE;
+    }
+    if ((stickX != 0.0f) || (touchMoved && (touchX != 0.0f))) {
+        mc_recentering = FALSE;
+        mc_idle = 0.0f;
+    } else {
+        mc_idle += dt;
+    }
+
+    // The camera's yaw equals the Kong's facing when it's right behind (func_global_asm_8061DB64).
+    behind = gCurrentPlayer->y_rotation & 0xFFF;
+    diff = MC_ANGLE_WRAP(behind - CaaD->unkB2);
+    if (mc_recentering) {
+        if ((diff > -8) && (diff < 8)) {
+            yawStep += diff;
+            mc_recentering = FALSE;
+        } else {
+            yawStep += diff * mc_clamp(0.2f * dt, 0.0f, 1.0f);
+        }
+    } else if (mc_idle > 50.0f) {
+        // Gentle follow while running; never while running towards the camera (more than
+        // ~120 degrees off), so turning round to face it doesn't spin the view.
+        speed = gCurrentPlayer->unkB8;
+        follow = mc_clamp(speed / 150.0f, 0.0f, 1.0f);
+        if ((follow > 0.05f) && (diff > -0x555) && (diff < 0x555)) {
+            yawStep += diff * 0.012f * follow * dt;
+        }
+    }
+
+    if (yawStep != 0.0f) {
+        CaaD->unkB2 = ((s32)(CaaD->unkB2 + yawStep)) & 0xFFF;
+        CaaD->unkF1 = 1; // Makes things snappy
+    }
+    CaaD->unkB0 = 0;
+
+    // Tilting: up/down moves the camera lower/higher around the Kong (the game eases it there).
+    mc_tilt_velocity += ((mc_curve(stickY) * sensitivity * 1.6f) - mc_tilt_velocity) * blend;
+    if ((stickY == 0.0f) && (mc_abs(mc_tilt_velocity) < 0.05f)) {
+        mc_tilt_velocity = 0.0f;
+    }
+    tilt = mc_tilt_velocity * dt;
+    if (touchMoved) {
+        tilt += touchY;
+    }
+    if (tilt != 0.0f) {
+        CaaD->unkB8 = mc_clamp(CaaD->unkB8 + tilt, 5.0f, 240.0f);
+        CaaD->unkF1 = 1;
+    }
+}
+
 RECOMP_PATCH void func_global_asm_8061D1FC(Actor* arg0) {
     CameraPaad* CaaD;
     f32 temp_f2;
@@ -466,6 +575,10 @@ RECOMP_PATCH void func_global_asm_8061D1FC(Actor* arg0) {
     // in the camera's units (recomp_touch_camera_get, src/game/recomp_api.cpp).
     f32 touchCamX = 0.0f, touchCamY = 0.0f;
     s32 touchCamMoved = recomp_touch_camera_get(&touchCamX, &touchCamY) && camera_turn_allowed();
+    if (modern_cam_enabled() && get_analog_allowed() && (CaaD->unkF3 != 2)) {
+        modern_camera_update(arg0, CaaD, touchCamMoved, touchCamX, touchCamY);
+        return;
+    }
     if ((analog_cam_enabled() && get_analog_allowed()) || touchCamMoved) {
         if (analog_cam_enabled() && get_analog_allowed()) {
             recomp_analog_camera_get(&dRStickX, &dRStickY);
