@@ -590,6 +590,57 @@ static void modern_camera_update(Actor *camera, CameraPaad *CaaD, s32 touchMoved
     CaaD->unkA4 = CaaD->unkA0;
 }
 
+// Modern Camera framing: like Odyssey, the camera looks at the Kong (a point just above it, so
+// it sits a little below the middle of the screen), not at the spot in front of it that the
+// game aims at. The focus height is smoothed so small hops don't bob the view. Blended in and
+// out over a few frames, so handing over to cutscenes and special cameras doesn't jump.
+static f32 mc_focus_weight = 0.0f;
+static f32 mc_focus_y = 0.0f;
+static u8 mc_focus_valid = FALSE;
+
+// @recomp: copies the camera's eye and look-at point into the view (Modern Camera adjusts the
+// look-at point).
+RECOMP_PATCH void func_global_asm_8061C39C(Actor *camera) {
+    CameraPaad *aaD;
+    Actor *target;
+    f32 atX, atY, atZ, wantY, w;
+    u8 active;
+
+    aaD = camera->CaaD;
+    atX = aaD->unk2C;
+    atY = aaD->unk30;
+    atZ = aaD->unk34;
+    target = aaD->unk0;
+
+    active = modern_cam_enabled() && get_analog_allowed() && (target != NULL) && (target == gCurrentPlayer) &&
+        ((aaD->unkF3 == 1) || (aaD->unkF3 == 5)) && !(aaD->unkAC & 0x2000);
+    mc_focus_weight += ((active ? 1.0f : 0.0f) - mc_focus_weight) * 0.2f;
+    if (mc_focus_weight < 0.01f) {
+        mc_focus_weight = 0.0f;
+        mc_focus_valid = FALSE;
+    }
+    if ((mc_focus_weight > 0.0f) && (target != NULL)) {
+        wantY = target->y_position + 18.0f;
+        if (!mc_focus_valid || (mc_abs(wantY - mc_focus_y) > 150.0f)) {
+            mc_focus_y = wantY;
+            mc_focus_valid = TRUE;
+        } else {
+            mc_focus_y += (wantY - mc_focus_y) * 0.3f;
+        }
+        w = mc_focus_weight;
+        atX += (target->x_position - atX) * w;
+        atY += (mc_focus_y - atY) * w;
+        atZ += (target->z_position - atZ) * w;
+    }
+
+    character_change_array[aaD->unkFB].look_at_eye_x = aaD->unk20;
+    character_change_array[aaD->unkFB].look_at_eye_y = aaD->unk24;
+    character_change_array[aaD->unkFB].look_at_eye_z = aaD->unk28;
+    character_change_array[aaD->unkFB].look_at_at_x = atX;
+    character_change_array[aaD->unkFB].look_at_at_y = atY;
+    character_change_array[aaD->unkFB].look_at_at_z = atZ;
+}
+
 RECOMP_PATCH void func_global_asm_8061D1FC(Actor* arg0) {
     CameraPaad* CaaD;
     f32 temp_f2;
