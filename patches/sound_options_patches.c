@@ -1070,29 +1070,38 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
 // ---- Haptic Feedback -----------------------------------------------------------------------
 // Small rumbles for game feel, like Odyssey (Input > Haptic Feedback; recomp_haptic_pulse checks
 // the setting, scales by Rumble Strength, and uses the phone's vibrator with touch controls):
-//  - landing after a jump or fall: stronger and longer the longer the Kong was in the air;
-//    strongest for the Simian Slam (Z held as it lands);
-//  - skidding round: a sharp turn (135 degrees within a few frames) while running fast.
-// Checked once per frame from the camera update, with any camera type.
+//  - landing after a jump or fall: a light tap, a little more after a long fall;
+//  - the Simian Slam (Kong state 0x1C) hitting the ground: clearly stronger;
+//  - skidding round (Kong state 0x0E, when the dust kicks up).
+// States from the session log (Camera: ... Kong state lines). Checked once per frame from the
+// camera update, with any camera type, in actual play only.
+#define HF_STATE_SKID 0x0E
+#define HF_STATE_SLAM 0x1C
+
 static s32 hf_air = 0;           // frames in the air (-1: too long to count, e.g. swimming)
-static s16 hf_facing[4];
-static s32 hf_facing_index = 0;
-static u8 hf_facing_valid = FALSE;
-static s32 hf_cooldown = 0;
+static s32 hf_last_state = -1;
 
 static void modern_haptics_update(void) {
     Actor *kong = gCurrentPlayer;
-    s16 previous;
-    s32 turn, ms;
+    s32 state, ms;
     f32 strength;
 
     if ((kong == NULL) || (is_cutscene_active != 0) || gameIsInDKTVMode() || !gameIsInAdventureMode()) {
         hf_air = 0;
-        hf_facing_valid = FALSE;
+        hf_last_state = -1;
         return;
     }
-    if (hf_cooldown > 0) {
-        hf_cooldown--;
+    state = kong->control_state;
+
+    // Skid: as the game starts it (the dust).
+    if ((state == HF_STATE_SKID) && (hf_last_state != HF_STATE_SKID) && (hf_last_state >= 0)) {
+        recomp_haptic_pulse(0.25f, 70);
+    }
+
+    // Simian Slam: when it hits the ground (the slam state ends).
+    if ((hf_last_state == HF_STATE_SLAM) && (state != HF_STATE_SLAM)) {
+        recomp_haptic_pulse(0.55f, 120);
+        hf_air = 0;
     }
 
     // Landing.
@@ -1104,9 +1113,7 @@ static void modern_haptics_update(void) {
             }
         }
     } else {
-        if (hf_air >= 8) {
-            // A normal jump lands with a light tap; long falls a bit more; the Simian Slam
-            // clearly stronger, but not hard.
+        if ((hf_air >= 8) && (state != HF_STATE_SLAM)) {
             strength = 0.10f + ((f32)hf_air * 0.005f);
             if (strength > 0.35f) {
                 strength = 0.35f;
@@ -1115,29 +1122,14 @@ static void modern_haptics_update(void) {
             if (ms > 100) {
                 ms = 100;
             }
-            if (D_global_asm_807FD610[cc_player_index].unk2A & Z_TRIG) {
-                strength = 0.55f;   // Simian Slam
-                ms = 120;
-            }
             recomp_haptic_pulse(strength, ms);
         }
         hf_air = 0;
     }
-
-    // Skidding round: the facing 3 frames ago vs now, while running on the ground.
-    previous = hf_facing[hf_facing_index];
-    hf_facing[hf_facing_index] = kong->y_rotation & 0xFFF;
-    hf_facing_index = (hf_facing_index + 1) & 3;
-    if (hf_facing_index == 0) {
-        hf_facing_valid = TRUE;
+    if (state == HF_STATE_SLAM) {
+        hf_air = 0;   // the slam's own pulse covers its landing
     }
-    if (hf_facing_valid && (hf_air == 0) && (hf_cooldown == 0) && (kong->unkB8 > 100.0f)) {
-        turn = MC_ANGLE_WRAP((kong->y_rotation & 0xFFF) - previous);
-        if ((turn > 0x600) || (turn < -0x600)) {
-            recomp_haptic_pulse(0.25f, 70);
-            hf_cooldown = 20;
-        }
-    }
+    hf_last_state = state;
 }
 
 RECOMP_PATCH void func_global_asm_8061D1FC(Actor* arg0) {
