@@ -855,7 +855,17 @@ static void mc_update_tight(Actor *target) {
         mc_tight_pairs &= ~(1 << mc_tight_dir);
     }
     mc_tight_dir = (mc_tight_dir + 1) & 3;
-    mc_tight += (((mc_tight_pairs != 0) ? 1.0f : 0.0f) - mc_tight) * 0.08f;
+    // Held for a second and a half after the walls were last seen both sides, so a tunnel whose
+    // width varies doesn't flick the camera up and down.
+    {
+        static s32 hold = 0;
+        if (mc_tight_pairs != 0) {
+            hold = 45;
+        } else if (hold > 0) {
+            hold--;
+        }
+        mc_tight += (((hold > 0) ? 1.0f : 0.0f) - mc_tight) * 0.08f;
+    }
     if ((mc_tight_pairs != 0) != mc_tight_logged) {
         mc_tight_logged = (mc_tight_pairs != 0);
         recomp_printf("Modern Camera: tight space %s (map 0x%02X)\n", mc_tight_logged ? "on" : "off", current_map);
@@ -1209,12 +1219,15 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
                 camY = kongY + 18.0f;
             }
         }
-        // Under cover (a bridge, an overhang, a roof, the hill a tunnel runs through): the
-        // lowest solid surface found above the Kong, the camera and halfway between (looked
-        // for from well above), keeps the camera under it.
+        // Under cover (a bridge, an overhang, a roof): the lowest solid surface found above the
+        // Kong, the camera and halfway between (looked for from well above) keeps the camera
+        // under it. Away from the Kong, a surface only counts as cover if there's ground below
+        // it too (a bridge or an overhang); with nothing below, it's the ground itself (a hill or
+        // slope rising behind the Kong), so the camera is kept above it instead, not under.
         {
             f32 cover = 100000.0f;
-            f32 probe;
+            f32 ground = -100000.0f;
+            f32 probe, below;
             f32 px[3], pz[3];
             s32 k;
             px[0] = target->x_position;               pz[0] = target->z_position;
@@ -1222,9 +1235,23 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
             px[2] = camX;                              pz[2] = camZ;
             for (k = 0; k < 3; k++) {
                 probe = kongY + 400.0f;
-                if (func_global_asm_80667110(px[k], pz[k], &probe) && (probe <= kongY + 400.0f) &&
-                    (probe > kongY + 30.0f) && (probe < cover)) {
-                    cover = probe;
+                if (!func_global_asm_80667110(px[k], pz[k], &probe) || (probe > kongY + 400.0f)) {
+                    continue;
+                }
+                if (k == 0) {
+                    if ((probe > kongY + 30.0f) && (probe < cover)) {
+                        cover = probe;   // above the Kong's head: a roof
+                    }
+                    continue;
+                }
+                below = probe - 5.0f;
+                if (func_global_asm_80667110(px[k], pz[k], &below) && (below < probe - 20.0f)) {
+                    // Ground under it: a bridge or an overhang (if it's above the Kong's head).
+                    if ((probe > kongY + 30.0f) && (probe < cover)) {
+                        cover = probe;
+                    }
+                } else if (k == 2) {
+                    ground = probe;   // the ground under the camera
                 }
             }
             if ((cover < 100000.0f) && (camY > cover - 20.0f)) {
@@ -1232,6 +1259,9 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
                 if (camY < kongY + 18.0f) {
                     camY = kongY + 18.0f;
                 }
+            }
+            if (camY < ground + 8.0f) {
+                camY = ground + 8.0f;   // a slope behind the Kong: stay above it
             }
         }
     }
