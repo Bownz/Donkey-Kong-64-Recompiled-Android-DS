@@ -441,10 +441,7 @@ static f32 mc_yaw_velocity = 0.0f;
 static f32 mc_tilt_velocity = 0.0f;
 static f32 mc_idle = 0.0f;
 static u8 mc_recentering = FALSE;
-static f32 mc_distance = 0.0f;   // the distance you chose (hold L + up/down); 0 = not set yet
-static u8 mc_l_held = FALSE;
-static u8 mc_l_zoomed = FALSE;
-static f32 mc_l_time = 0.0f;
+static f32 mc_distance = 0.0f;   // the camera's usual distance (set on first use); 0 = not set yet
 
 s32 func_global_asm_8062133C(Actor*, Actor*, f32*, f32*, f32*, f32);
 u8 func_global_asm_80671E00(f32 arg0, f32 arg1, f32 arg2, f32 arg3, s16 *arg4, s16 *arg5, u8 arg6, u16 arg7);
@@ -499,9 +496,8 @@ static f32 mc_clear_distance(Actor *camera, CameraPaad *CaaD, f32 wanted) {
 }
 
 static void modern_camera_update(Actor *camera, CameraPaad *CaaD, s32 touchMoved, f32 touchX, f32 touchY) {
-    f32 stickX, stickY, dt, sensitivity, blend, yawStep, tilt, speed, follow, clear, ratio;
+    f32 stickX, stickY, dt, sensitivity, blend, yawStep, tilt, speed, follow, clear, wanted, height;
     s32 behind, diff;
-    u8 lHeld;
 
     recomp_analog_camera_get(&stickX, &stickY);
     dt = (f32)getFrameDelta();
@@ -518,31 +514,19 @@ static void modern_camera_update(Actor *camera, CameraPaad *CaaD, s32 touchMoved
         yawStep += touchX;   // touch drags stay 1:1
     }
 
+    // The usual distance, like Odyssey's: no zoom, the camera keeps this far from the Kong
+    // (taken from the game's normal camera the first time, within a comfortable range).
     if (mc_distance <= 0.0f) {
-        mc_distance = mc_clamp(CaaD->unkA4, 60.0f, 300.0f);
+        mc_distance = CaaD->unkA4;
+        if ((mc_distance < 110.0f) || (mc_distance > 200.0f)) {
+            mc_distance = 150.0f;
+        }
     }
 
-    // L: tap to swing behind the Kong; hold L and push up/down to bring the camera closer or
-    // further (the height scales with it, so the angle stays the same).
-    lHeld = (D_global_asm_807FD610[cc_player_index].unk2A & L_TRIG) != 0;
-    if (lHeld) {
-        if (!mc_l_held) {
-            mc_l_time = 0.0f;
-            mc_l_zoomed = FALSE;
-        }
-        mc_l_time += dt;
-        if (mc_abs(stickY) > 0.2f) {
-            ratio = mc_distance;
-            mc_distance = mc_clamp(mc_distance + (mc_curve(stickY) * sensitivity * 2.0f * dt), 60.0f, 300.0f);
-            ratio = mc_distance / ratio;
-            CaaD->unkB8 = mc_clamp(CaaD->unkB8 * ratio, 5.0f, 240.0f);
-            mc_l_zoomed = TRUE;
-        }
-        stickY = 0.0f;   // up/down zooms instead of tilting while L is held
-    } else if (mc_l_held && !mc_l_zoomed && (mc_l_time < 20.0f)) {
+    // L: swing behind the Kong. Turning the camera yourself cancels it.
+    if (D_global_asm_807FD610[cc_player_index].unk2C & L_TRIG) {
         mc_recentering = TRUE;
     }
-    mc_l_held = lHeld;
     if ((stickX != 0.0f) || (touchMoved && (touchX != 0.0f))) {
         mc_recentering = FALSE;
         mc_idle = 0.0f;
@@ -590,10 +574,14 @@ static void modern_camera_update(Actor *camera, CameraPaad *CaaD, s32 touchMoved
         CaaD->unkF1 = 1;
     }
 
-    // Distance: always heading back to the one you chose (after vines, tight spots...), but
-    // never through a wall: blocked, it moves in front of it at once, and eases back out once
-    // the way is clear. The game's own easing (unkA0 towards unkA4) is left with nothing to do.
-    clear = mc_clear_distance(camera, CaaD, mc_distance);
+    // Distance: as in Odyssey, a little closer when the camera is low (looking up) and a little
+    // further when it's high (looking down); always heading back there (after vines, tight
+    // spots...), but never through a wall: blocked, it moves in front of it at once, and eases
+    // back out once the way is clear. The game's own easing (unkA0 towards unkA4) has nothing
+    // left to do.
+    height = mc_clamp((CaaD->unkB8 - 5.0f) / 235.0f, 0.0f, 1.0f);
+    wanted = mc_distance * (0.85f + (0.3f * height));
+    clear = mc_clear_distance(camera, CaaD, wanted);
     if (clear < CaaD->unkA0) {
         CaaD->unkA0 = clear;
     } else {
