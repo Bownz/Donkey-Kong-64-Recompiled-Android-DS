@@ -52,6 +52,7 @@ namespace {
     std::vector<std::string> startup;
     std::string partial;   // an unfinished line from the pipe
     std::string reports_dir;
+    FILE* shared_log = nullptr;   // <data folder>/logs/session.txt, where players can get at it
 
     int slow_streak = 0;
     float slowest = 0.0f;
@@ -146,6 +147,10 @@ namespace {
 // Every line of the game's own output (android_main.cpp's pipe), possibly several at once.
 extern "C" void dk64_android_record_output(const char* data, size_t size) {
     std::lock_guard lock{mutex};
+    if (shared_log != nullptr) {
+        fwrite(data, 1, size, shared_log);
+        fflush(shared_log);
+    }
     partial.append(data, size);
     size_t start = 0, end;
     while ((end = partial.find('\n', start)) != std::string::npos) {
@@ -169,6 +174,23 @@ extern "C" void dk64_android_record_line(const char* line) {
 extern "C" void dk64_android_set_slowdown_folder(const char* data_dir) {
     std::lock_guard lock{mutex};
     reports_dir = std::string{data_dir} + "/logs/slowdowns";
+
+    // This session's log, also in the game files folder (logs/session.txt; the previous one is
+    // kept as session-previous.txt), so it can be shared without a PC. It starts with the
+    // lines written before the folder was known.
+    if (shared_log == nullptr) {
+        const std::string logs = std::string{data_dir} + "/logs";
+        std::error_code ec;
+        std::filesystem::create_directories(logs, ec);
+        std::filesystem::rename(logs + "/session.txt", logs + "/session-previous.txt", ec);
+        shared_log = std::fopen((logs + "/session.txt").c_str(), "w");
+        if (shared_log != nullptr) {
+            for (const auto& l : history) {
+                std::fprintf(shared_log, "%s\n", l.text.c_str());
+            }
+            std::fflush(shared_log);
+        }
+    }
 }
 
 // The game's frame rate over the last second, and where the player is (game_state.cpp).
