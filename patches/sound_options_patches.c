@@ -819,6 +819,23 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
             active ? "on" : "off", current_map, AAD->unkF3, (target != NULL) ? target->control_state : 0xFF,
             is_cutscene_active);
     }
+    // Taking over (entering an area, after a cutscene or after the game's own camera was in
+    // charge): start from where the game put the camera, so walking forward goes where the game
+    // intended (not straight back out through the door you came in by).
+    {
+        static s32 lastMap = -1;
+        if (active && (!mc_active_now || (current_map != lastMap)) && (target != NULL) && mc_ready()) {
+            mc_yaw = (f32)(func_global_asm_80665DE0(target->x_position, target->z_position, *eyeX, *eyeZ) & 0xFFF);
+            mc_yaw_valid = TRUE;
+            mc_yaw_velocity = 0.0f;
+            mc_recentering = FALSE;
+            mc_idle = 0.0f;
+            mc_focus_valid = FALSE;
+            mc_eye_valid = FALSE;
+            mc_reach = 1.0f;
+        }
+        lastMap = current_map;
+    }
     mc_active_now = active;
     if (active) {
         if (!mc_yaw_valid) {
