@@ -180,6 +180,7 @@ RECOMP_PATCH void func_global_asm_807144B8(s8 arg0) {
 
 extern s32 D_global_asm_807FBB64;
 extern int gameIsInDKTVMode(void);
+extern int gameIsInAdventureMode(void);
 
 u8 modern_cam_enabled(void);
 u8 modern_camera_free_state(Actor *kong);
@@ -233,8 +234,14 @@ u8 analog_cam_enabled(void) {
             return FALSE;
         }
     }
-    // Analog Camera (3) and Modern Camera (4) both put the camera on the right stick.
-    return (recomp_get_camera_type() == 3) || (recomp_get_camera_type() == 4);
+    // Analog Camera (3) and Modern Camera (4) both put the camera on the right stick. Modern
+    // Camera only in actual play (adventure mode): elsewhere (the intro and its "press start"
+    // scenes, title, menus, demos) the game's own camera handling is left alone, since the
+    // right-stick handling skips the scripted camera turns those scenes rely on.
+    if (recomp_get_camera_type() == 4) {
+        return gameIsInAdventureMode() != 0;
+    }
+    return recomp_get_camera_type() == 3;
 }
 
 // @recomp: Modern Camera: the Analog Camera's controls with smoothing, tilt instead of zoom,
@@ -484,11 +491,10 @@ static u8 mc_active_now = FALSE;      // the Modern Camera placed the camera las
 static u8 mc_floating = FALSE;        // not standing on the ground (swimming, climbing, vines, long falls)
 static f32 mc_eye_x = 0.0f, mc_eye_y = 0.0f, mc_eye_z = 0.0f;
 static u8 mc_eye_valid = FALSE;
-static f32 mc_vine_offset = 0.0f;     // vines: your angle relative to the swing's direction
-static f32 mc_vine_height = -1000.0f; // vines: your height on vines (-1000: the usual)
-static u8 mc_vine_turned = FALSE;
+static f32 mc_vine_offset = 0.0f;     // vines: your turn from the game's vine view
+static f32 mc_vine_hoff = 0.0f;       // vines: your height change from the game's vine view
 static u8 mc_on_vine = FALSE;
-static s16 mc_vine_heading = 0;
+static f32 mc_vine_blend = 0.0f;      // 0 = our usual view, 1 = the game's vine view
 
 static f32 mc_weight = 0.0f;        // 0 = the game's camera, 1 = the Modern Camera
 static f32 mc_focus_x = 0.0f, mc_focus_y = 0.0f, mc_focus_z = 0.0f;
@@ -638,12 +644,12 @@ static void modern_camera_input(Actor *camera, CameraPaad *CaaD, s32 touchMoved,
     // recenter: a fixed, short ease-in-out (~0.4 s), gentle at both ends. Turning the camera
     // yourself cancels it.
     if (D_global_asm_807FD610[cc_player_index].unk2C & L_TRIG) {
-        mc_vine_offset = 0.0f;           // L also forgets your vine angle
-        mc_vine_height = -1000.0f;
+        mc_vine_offset = 0.0f;           // L also forgets your vine view
+        mc_vine_hoff = 0.0f;
         mc_recentering = TRUE;
         mc_recenter_frame = 0;
         mc_recenter_yaw = mc_yaw;
-        mc_recenter_turn = (f32)MC_ANGLE_WRAP((mc_on_vine ? mc_vine_heading : (gCurrentPlayer->y_rotation & 0xFFF)) - (s32)mc_yaw);
+        mc_recenter_turn = (f32)MC_ANGLE_WRAP((gCurrentPlayer->y_rotation & 0xFFF) - (s32)mc_yaw);
         mc_recenter_height = mc_height;
     }
     if ((stickX != 0.0f) || (touchMoved && (touchX != 0.0f))) {
@@ -653,31 +659,15 @@ static void modern_camera_input(Actor *camera, CameraPaad *CaaD, s32 touchMoved,
         mc_idle += dt;
     }
 
-    // Vines: each swing gets the same view, the way the swing goes plus your own angle and
-    // height if you've changed them on a vine (remembered for every vine until you press L).
-    if (mc_vine_state(gCurrentPlayer)) {
-        if (!mc_on_vine) {
-            mc_on_vine = TRUE;
-            mc_vine_turned = FALSE;
-            mc_vine_heading = gCurrentPlayer->y_rotation & 0xFFF;
-        }
-        if ((stickX != 0.0f) || (touchMoved && (touchX != 0.0f))) {
-            mc_vine_turned = TRUE;
-        } else if (mc_vine_turned) {
-            mc_vine_offset = (f32)MC_ANGLE_WRAP((s32)mc_yaw - mc_vine_heading);
-            mc_vine_turned = FALSE;
-        }
-        if ((stickY != 0.0f) || (touchMoved && (touchY != 0.0f))) {
-            mc_vine_height = mc_height;
-        } else if (mc_vine_height > -1000.0f) {
-            mc_height += (mc_vine_height - mc_height) * 0.1f;
-        }
-    } else {
-        mc_on_vine = FALSE;
+    // Vines: the game's own vine view (modern_camera_frame), turned and raised by however much
+    // you've changed it on a vine, remembered for every vine until you press L.
+    mc_on_vine = mc_vine_state(gCurrentPlayer);
+    if (mc_on_vine) {
+        mc_recentering = FALSE;
     }
 
     // The camera's angle equals the Kong's facing when it's right behind (func_global_asm_8061DB64).
-    behind = mc_on_vine ? ((mc_vine_heading + (s32)mc_vine_offset) & 0xFFF) : (gCurrentPlayer->y_rotation & 0xFFF);
+    behind = gCurrentPlayer->y_rotation & 0xFFF;
     diff = MC_ANGLE_WRAP(behind - (s32)mc_yaw);
     if (mc_recentering) {
         f32 t, e;
@@ -691,11 +681,11 @@ static void modern_camera_input(Actor *camera, CameraPaad *CaaD, s32 touchMoved,
         if (t >= 1.0f) {
             mc_recentering = FALSE;
         }
-    } else if ((mc_idle > 50.0f) || (mc_on_vine && !mc_vine_turned && (stickX == 0.0f))) {
+    } else if ((mc_idle > 50.0f) && !mc_on_vine) {
         // Gentle follow while running; never while running towards the camera (more than
         // ~120 degrees off), so turning round to face it doesn't spin the view.
         speed = gCurrentPlayer->unkB8;
-        follow = mc_on_vine ? 0.6f : mc_clamp(speed / 150.0f, 0.0f, 1.0f);
+        follow = mc_clamp(speed / 150.0f, 0.0f, 1.0f);
         if ((follow > 0.05f) && (diff > -0x555) && (diff < 0x555)) {
             yawStep += diff * 0.012f * follow * dt;
         }
@@ -704,6 +694,10 @@ static void modern_camera_input(Actor *camera, CameraPaad *CaaD, s32 touchMoved,
         if ((mc_idle > 90.0f) && !mc_floating && !mc_on_vine && (follow > 0.2f)) {
             mc_height += (55.0f - mc_height) * 0.008f * follow * dt;
         }
+    }
+    if (mc_on_vine) {
+        mc_vine_offset = (f32)MC_ANGLE_WRAP((s32)(mc_vine_offset + yawStep));
+        yawStep = 0.0f;
     }
     mc_yaw += yawStep;
     while (mc_yaw < 0.0f) {
@@ -731,7 +725,9 @@ static void modern_camera_input(Actor *camera, CameraPaad *CaaD, s32 touchMoved,
         f32 r = mc_clamp((200.0f - mc_height) / 50.0f, 0.0f, 1.0f);
         tilt *= 0.12f + (0.88f * r * r * (3.0f - (2.0f * r)));
     }
-    if (!mc_recentering) {
+    if (mc_on_vine) {
+        mc_vine_hoff = mc_clamp(mc_vine_hoff + tilt, -120.0f, 150.0f);
+    } else if (!mc_recentering) {
         // Standing, the camera stops just above the ground; swimming, climbing or hanging, it can
         // go well below the Kong to look up at it.
         if (tilt < 0.0f) {
@@ -936,6 +932,29 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
     wantYEye = mc_frame_y + mc_height;
     wantZ = mc_focus_z + (dz * distance);
 
+    // Vines: the game's own vine view (which it has just placed: the eye and look-at passed in),
+    // turned and raised by your remembered vine changes; blended in over ~half a second.
+    if (mc_vine_state(target)) {
+        f32 gx = *eyeX - *atX;
+        f32 gz = *eyeZ - *atZ;
+        f32 gDist = _sqrtf((gx * gx) + (gz * gz));
+        s32 vineYaw = (func_global_asm_80665DE0(*atX, *atZ, *eyeX, *eyeZ) + (s32)mc_vine_offset) & 0xFFF;
+        f32 vx, vz, b;
+        mc_direction_with(mc_convention, vineYaw, &vx, &vz);
+        mc_vine_blend += (1.0f - mc_vine_blend) * 0.12f;
+        b = mc_vine_blend;
+        wantX += ((*atX + (vx * gDist)) - wantX) * b;
+        wantYEye += ((*eyeY + mc_vine_hoff) - wantYEye) * b;
+        wantZ += ((*atZ + (vz * gDist)) - wantZ) * b;
+        mc_focus_x += (*atX - mc_focus_x) * b;
+        mc_focus_y += (*atY - mc_focus_y) * b;
+        mc_focus_z += (*atZ - mc_focus_z) * b;
+        distance += (gDist - distance) * b;
+        mc_yaw = (f32)vineYaw;   // letting go carries on from the vine view
+    } else {
+        mc_vine_blend = 0.0f;
+    }
+
     // Traced from the Kong's head out (not from the focus, which can trail inside a ledge just
     // climbed): the first blocked point (narrowed to ~1 unit) limits how far out the camera goes.
     startX = target->x_position;
@@ -1053,7 +1072,7 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
 // the setting, scales by Rumble Strength, and uses the phone's vibrator with touch controls):
 //  - landing after a jump or fall: stronger and longer the longer the Kong was in the air;
 //    strongest for the Simian Slam (Z held as it lands);
-//  - skidding round: a sharp turn (90 degrees within a few frames) while running.
+//  - skidding round: a sharp turn (135 degrees within a few frames) while running fast.
 // Checked once per frame from the camera update, with any camera type.
 static s32 hf_air = 0;           // frames in the air (-1: too long to count, e.g. swimming)
 static s16 hf_facing[4];
@@ -1067,7 +1086,7 @@ static void modern_haptics_update(void) {
     s32 turn, ms;
     f32 strength;
 
-    if ((kong == NULL) || (is_cutscene_active != 0) || gameIsInDKTVMode()) {
+    if ((kong == NULL) || (is_cutscene_active != 0) || gameIsInDKTVMode() || !gameIsInAdventureMode()) {
         hf_air = 0;
         hf_facing_valid = FALSE;
         return;
@@ -1086,17 +1105,19 @@ static void modern_haptics_update(void) {
         }
     } else {
         if (hf_air >= 8) {
-            strength = 0.15f + ((f32)hf_air * 0.012f);
-            if (strength > 0.7f) {
-                strength = 0.7f;
+            // A normal jump lands with a light tap; long falls a bit more; the Simian Slam
+            // clearly stronger, but not hard.
+            strength = 0.10f + ((f32)hf_air * 0.005f);
+            if (strength > 0.35f) {
+                strength = 0.35f;
             }
-            ms = 50 + (hf_air * 2);
-            if (ms > 140) {
-                ms = 140;
+            ms = 40 + hf_air;
+            if (ms > 100) {
+                ms = 100;
             }
             if (D_global_asm_807FD610[cc_player_index].unk2A & Z_TRIG) {
-                strength = 0.8f;   // Simian Slam
-                ms = 160;
+                strength = 0.55f;   // Simian Slam
+                ms = 120;
             }
             recomp_haptic_pulse(strength, ms);
         }
@@ -1110,9 +1131,9 @@ static void modern_haptics_update(void) {
     if (hf_facing_index == 0) {
         hf_facing_valid = TRUE;
     }
-    if (hf_facing_valid && (hf_air == 0) && (hf_cooldown == 0) && (kong->unkB8 > 80.0f)) {
+    if (hf_facing_valid && (hf_air == 0) && (hf_cooldown == 0) && (kong->unkB8 > 100.0f)) {
         turn = MC_ANGLE_WRAP((kong->y_rotation & 0xFFF) - previous);
-        if ((turn > 0x400) || (turn < -0x400)) {
+        if ((turn > 0x600) || (turn < -0x600)) {
             recomp_haptic_pulse(0.25f, 70);
             hf_cooldown = 20;
         }
