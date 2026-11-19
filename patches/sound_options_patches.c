@@ -761,6 +761,28 @@ static u8 mc_blocked(f32 x, f32 y, f32 z) {
     return FALSE;
 }
 
+// The game's own camera visibility test, for a camera at this angle, distance and height: true
+// if the Kong can't be seen from there. It works from the camera's own state, so that's set to
+// the values to test and put back afterwards.
+s32 func_global_asm_8062133C(Actor*, Actor*, f32*, f32*, f32*, f32);
+
+static u8 mc_hidden_at(Actor *camera, CameraPaad *AAD, s16 yaw, f32 distance, f32 height) {
+    f32 savedA0 = AAD->unkA0;
+    s16 savedB2 = AAD->unkB2;
+    f32 savedHeight = camera->distance_from_floor;
+    f32 x, y, z;
+    s32 hidden;
+
+    AAD->unkA0 = distance;
+    AAD->unkB2 = yaw;
+    camera->distance_from_floor = height;
+    hidden = func_global_asm_8062133C(camera, AAD->unk0, &x, &y, &z, -1.0f) == 1;
+    AAD->unkA0 = savedA0;
+    AAD->unkB2 = savedB2;
+    camera->distance_from_floor = savedHeight;
+    return hidden;
+}
+
 // The Kong fades when the camera is right up against it (Odyssey does the same with Mario):
 // solid from 45 units out, a quarter at the closest. Actor opacity (0x128) is only touched while
 // fading, and put back to full afterwards.
@@ -789,7 +811,9 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
 
     active = (is_cutscene_active == 0) && mc_allowed() && (target != NULL) &&
         (target == gCurrentPlayer) && !(AAD->unkAC & 0x2000) &&
-        ((AAD->unkF3 == 1) || (AAD->unkF3 == 2) || (AAD->unkF3 == 5) || (AAD->unkF3 == 12)) && mc_ready();
+        ((AAD->unkF3 == 1) || (AAD->unkF3 == 5) || (AAD->unkF3 == 12)) && mc_ready();
+    // (Camera mode 2 is the game's fixed camera for tight spots such as tunnel entrances: left
+    // to the game, blended in and out.)
     if (active != mc_active_now) {
         recomp_printf("Modern Camera: %s (map 0x%02X, camera mode %d, Kong state 0x%02X, cutscene %d)\n",
             active ? "on" : "off", current_map, AAD->unkF3, (target != NULL) ? target->control_state : 0xFF,
@@ -991,6 +1015,25 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
             break;
         }
     }
+    // Then the game's own visibility test (func_global_asm_8062133C, which its camera uses to
+    // keep the Kong in view; it knows about ceilings, which the floor lookup doesn't): if the
+    // Kong can't be seen from there, the camera comes in, 12 units at a time.
+    {
+        s16 yawNow = ((s32)mc_yaw) & 0xFFF;
+        f32 height = wantYEye - mc_frame_y;
+        f32 d = distance * reach;
+        s32 tries = 0;
+        while ((d > 12.0f) && (tries < 10) && mc_hidden_at(camera, AAD, yawNow, d, height)) {
+            d -= 12.0f;
+            tries++;
+        }
+        // Hidden all the way in means the test doesn't apply here: ignore it rather than glue
+        // the camera to the Kong.
+        if ((tries > 0) && (d > 12.0f)) {
+            reach = mc_clamp(d / length, 8.0f / length, reach);
+        }
+    }
+
     // Blocked, the camera slides in over a couple of frames (never more than a few units past
     // the obstacle); once it's been clear for a moment, it eases back out. No flicker along walls.
     reach = mc_clamp(reach, 8.0f / length, 1.0f);
