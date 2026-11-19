@@ -803,7 +803,7 @@ static void mc_fade(f32 distance) {
 
 // Tunnels and corridors: a tunnel's ceiling is usually only scenery (no collision for the floor
 // lookup or the wall test to find), so it's recognised by its walls instead: walls close on
-// both sides of the Kong (within 80 units each way), along any of four directions (checked one
+// both sides of the Kong (within 100 units each way), along any of four directions (checked one
 // direction per frame, at about head-and-a-half height so low fences and railings don't count).
 // In a tight space the camera stays low and a little closer, under any ceiling, like the
 // game's own camera there; it eases in and out (mc_tight).
@@ -815,7 +815,7 @@ static u8 mc_tight_logged = FALSE;
 static f32 mc_wall_within(f32 x, f32 y, f32 z, f32 dx, f32 dz, f32 range) {
     s16 hitA = 0, hitB = 0xFFF;
     f32 d;
-    for (d = 8.0f; d <= range; d += 8.0f) {
+    for (d = 10.0f; d <= range; d += 10.0f) {
         if (func_global_asm_80671E00(x + (dx * d), y, z + (dz * d), 5.0f, &hitA, &hitB, 1U, 0xBCU) != 0) {
             return d;
         }
@@ -823,14 +823,21 @@ static f32 mc_wall_within(f32 x, f32 y, f32 z, f32 dx, f32 dz, f32 range) {
     return -1.0f;
 }
 
+static f32 mc_tight_a[4], mc_tight_b[4];   // wall distances each way, per direction (-1: none)
+static s32 mc_tight_log_frames = 0;
+
 static void mc_update_tight(Actor *target) {
     f32 dx, dz, a, b;
     s32 angle = (mc_tight_dir * 0x200) & 0xFFF;   // 0, 45, 90, 135 degrees
     f32 y = target->y_position + 40.0f;
+    s32 k, best;
     mc_direction_with(mc_convention, angle, &dx, &dz);
-    a = mc_wall_within(target->x_position, y, target->z_position, dx, dz, 80.0f);
-    b = (a >= 0.0f) ? mc_wall_within(target->x_position, y, target->z_position, -dx, -dz, 80.0f) : -1.0f;
-    if ((a >= 0.0f) && (b >= 0.0f)) {
+    // Measured out to 200 each way (for the log); tight is walls within 100 on both sides.
+    a = mc_wall_within(target->x_position, y, target->z_position, dx, dz, 200.0f);
+    b = mc_wall_within(target->x_position, y, target->z_position, -dx, -dz, 200.0f);
+    mc_tight_a[mc_tight_dir] = a;
+    mc_tight_b[mc_tight_dir] = b;
+    if ((a >= 0.0f) && (b >= 0.0f) && (a <= 100.0f) && (b <= 100.0f)) {
         mc_tight_pairs |= (1 << mc_tight_dir);
     } else {
         mc_tight_pairs &= ~(1 << mc_tight_dir);
@@ -840,6 +847,21 @@ static void mc_update_tight(Actor *target) {
     if ((mc_tight_pairs != 0) != mc_tight_logged) {
         mc_tight_logged = (mc_tight_pairs != 0);
         recomp_printf("Modern Camera: tight space %s (map 0x%02X)\n", mc_tight_logged ? "on" : "off", current_map);
+    }
+    // Every 2 seconds: the narrowest walls-on-both-sides gap around the Kong, for tuning.
+    if (++mc_tight_log_frames >= 60) {
+        mc_tight_log_frames = 0;
+        best = -1;
+        for (k = 0; k < 4; k++) {
+            if ((mc_tight_a[k] >= 0.0f) && (mc_tight_b[k] >= 0.0f) &&
+                ((best < 0) || ((mc_tight_a[k] + mc_tight_b[k]) < (mc_tight_a[best] + mc_tight_b[best])))) {
+                best = k;
+            }
+        }
+        if (best >= 0) {
+            recomp_printf("Modern Camera: walls %d / %d (dir %d, map 0x%02X, Kong state 0x%02X)\n",
+                (s32)mc_tight_a[best], (s32)mc_tight_b[best], best, current_map, target->control_state);
+        }
     }
 }
 
@@ -1012,7 +1034,7 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
     }
     // Tunnels and corridors (mc_update_tight): low (at most 30 above the ground, so ~level with
     // the Kong's head) and at most 110 out. Tilting down still works.
-    if (mc_on_vine || modern_camera_free_state(target)) {
+    if (mc_on_vine) {
         mc_tight += (0.0f - mc_tight) * 0.08f;
     } else {
         mc_update_tight(target);
