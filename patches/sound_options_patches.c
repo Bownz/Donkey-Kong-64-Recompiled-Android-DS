@@ -705,7 +705,7 @@ static void mc_fade(f32 distance) {
 void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f32 *eyeZ, f32 *atX, f32 *atY, f32 *atZ) {
     Actor *target = AAD->unk0;
     f32 kongY, wantY, dx, dz, distance, wantX, wantYEye, wantZ, lineX, lineY, lineZ, length, t, lo, hi, mid, reach;
-    f32 camX, camY, camZ, w;
+    f32 camX, camY, camZ, w, frameTarget;
     s32 i;
     u8 active;
 
@@ -744,8 +744,15 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
         }
     } else if (kongY < mc_ground_y) {
         mc_ground_y = kongY;
-    } else if (kongY > mc_ground_y + 60.0f) {
-        mc_ground_y = kongY - 60.0f;
+    }
+
+    // In the air, like Odyssey: a normal jump (up to ~30 units) doesn't move the camera; higher
+    // ones (Z jumps, backflips...) lift it by half the extra height, so the Kong stays nicely in
+    // frame, and it settles back down after landing (the same easing as for ledges).
+    frameTarget = mc_ground_y;
+    if ((mc_air_frames > 0) && (mc_air_frames <= 45) && !modern_camera_free_state(target) &&
+        (kongY > mc_ground_y + 30.0f)) {
+        frameTarget = mc_ground_y + ((kongY - mc_ground_y - 30.0f) * 0.5f);
     }
 
     // Landing on a higher (or lower) ledge, the whole view, camera and focus together, eases to
@@ -758,11 +765,11 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
         mc_frame_y += (mc_ground_y - mc_frame_y) * 0.3f;
         mc_frame_speed = 0.0f;
     } else {
-        f32 gap = mc_ground_y - mc_frame_y;
+        f32 gap = frameTarget - mc_frame_y;
         mc_frame_speed += ((gap * 0.25f) - mc_frame_speed) * 0.35f;
         mc_frame_y += mc_frame_speed;
         if ((mc_abs(gap) < 0.5f) && (mc_abs(mc_frame_speed) < 0.5f)) {
-            mc_frame_y = mc_ground_y;
+            mc_frame_y = frameTarget;
             mc_frame_speed = 0.0f;
         }
     }
