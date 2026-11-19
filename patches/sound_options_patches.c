@@ -473,6 +473,11 @@ static f32 mc_distance = 0.0f;      // the usual distance (0: not set yet)
 static f32 mc_reach = 1.0f;         // how far out along the line the camera is (1 = all the way)
 static f32 mc_idle = 0.0f;
 static u8 mc_recentering = FALSE;
+static s32 mc_recenter_frame = 0;     // L: frames into the swing
+static f32 mc_recenter_yaw = 0.0f;    // L: where the swing started
+static f32 mc_recenter_turn = 0.0f;   // L: how far it turns
+static f32 mc_recenter_height = 0.0f;
+static s32 mc_blocked_frames = 0;     // frames since the camera was last pushed in by a wall
 static u8 mc_on_vine = FALSE;
 static s16 mc_vine_heading = 0;
 
@@ -553,6 +558,24 @@ static u8 mc_allowed(void) {
     if (!modern_cam_enabled() || gameIsInDKTVMode()) {
         return FALSE;
     }
+    // Not in the intro, menus, story scenes and endings, nor while the game has taken the
+    // controls away (scripted scenes in normal levels, e.g. during the intro).
+    switch (current_map) {
+        case 0x1C: // Helm level intros / game over
+        case 0x28: // Nintendo logo
+        case 0x4C: // DK Rap
+        case 0x50: // main menu
+        case 0x98: // Helm intro story
+        case 0x99: // DK Theatre
+        case 0xAC: // K. Rool's rock intro story
+        case 0xC6: // Training Grounds end sequence
+        case 0xD0: // bloopers ending
+        case 0xD5: // K. Lumsy ending
+            return FALSE;
+    }
+    if ((extra_player_info_pointer != NULL) && (extra_player_info_pointer->unk1F4 & 0x20)) {
+        return FALSE;
+    }
     for (i = 0; i < sizeof(banned_analog_states); i++) {
         if ((banned_analog_states[i] == gCurrentPlayer->control_state) &&
             (banned_analog_states[i] != 0x3C) && (banned_analog_states[i] != 0x2C)) {
@@ -612,9 +635,15 @@ static void modern_camera_input(Actor *camera, CameraPaad *CaaD, s32 touchMoved,
         yawStep += touchX;   // touch drags stay 1:1
     }
 
-    // L: swing behind the Kong. Turning the camera yourself cancels it.
+    // L: swing back to the normal view behind the Kong (and the normal height), like Odyssey's
+    // recenter: a fixed, short ease-in-out (~0.4 s), gentle at both ends. Turning the camera
+    // yourself cancels it.
     if (D_global_asm_807FD610[cc_player_index].unk2C & L_TRIG) {
         mc_recentering = TRUE;
+        mc_recenter_frame = 0;
+        mc_recenter_yaw = mc_yaw;
+        mc_recenter_turn = (f32)MC_ANGLE_WRAP((gCurrentPlayer->y_rotation & 0xFFF) - (s32)mc_yaw);
+        mc_recenter_height = mc_height;
     }
     if ((stickX != 0.0f) || (touchMoved && (touchX != 0.0f))) {
         mc_recentering = FALSE;
@@ -636,11 +665,16 @@ static void modern_camera_input(Actor *camera, CameraPaad *CaaD, s32 touchMoved,
     behind = mc_on_vine ? mc_vine_heading : (gCurrentPlayer->y_rotation & 0xFFF);
     diff = MC_ANGLE_WRAP(behind - (s32)mc_yaw);
     if (mc_recentering) {
-        if ((diff > -8) && (diff < 8)) {
-            yawStep += diff;
+        f32 t, e;
+        mc_recenter_frame++;
+        t = mc_clamp((f32)mc_recenter_frame / 12.0f, 0.0f, 1.0f);
+        e = t * t * (3.0f - (2.0f * t));
+        mc_yaw = mc_recenter_yaw + (mc_recenter_turn * e);
+        mc_height = mc_recenter_height + ((55.0f - mc_recenter_height) * e);
+        mc_yaw_velocity = 0.0f;
+        mc_tilt_velocity = 0.0f;
+        if (t >= 1.0f) {
             mc_recentering = FALSE;
-        } else {
-            yawStep += diff * mc_clamp(0.2f * dt, 0.0f, 1.0f);
         }
     } else if (mc_idle > 50.0f) {
         // Gentle follow while running; never while running towards the camera (more than
@@ -660,7 +694,7 @@ static void modern_camera_input(Actor *camera, CameraPaad *CaaD, s32 touchMoved,
     }
 
     // Tilting: up/down moves the camera lower/higher around the Kong.
-    mc_tilt_velocity += ((mc_curve(stickY) * sensitivity * 1.6f) - mc_tilt_velocity) * blend;
+    mc_tilt_velocity += ((mc_curve(stickY) * sensitivity * 1.0f) - mc_tilt_velocity) * blend;
     if ((stickY == 0.0f) && (mc_abs(mc_tilt_velocity) < 0.05f)) {
         mc_tilt_velocity = 0.0f;
     }
@@ -668,7 +702,13 @@ static void modern_camera_input(Actor *camera, CameraPaad *CaaD, s32 touchMoved,
     if (touchMoved) {
         tilt += touchY;
     }
-    mc_height = mc_clamp(mc_height + tilt, MC_LOWEST, 200.0f);
+    // Slower still as it gets close to the ground.
+    if ((tilt < 0.0f) && (mc_height < 40.0f)) {
+        tilt *= 0.35f + (0.65f * mc_clamp((mc_height - MC_LOWEST) / (40.0f - MC_LOWEST), 0.0f, 1.0f));
+    }
+    if (!mc_recentering) {
+        mc_height = mc_clamp(mc_height + tilt, MC_LOWEST, 200.0f);
+    }
 
     // The game's own camera state follows ours (the Kong's movement is relative to it, and the
     // game starts from it again when it takes over).
@@ -846,11 +886,20 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
             break;
         }
     }
+    // Blocked, the camera slides in over a couple of frames (never more than a few units past
+    // the obstacle); once it's been clear for a moment, it eases back out. No flicker along walls.
     reach = mc_clamp(reach, 8.0f / length, 1.0f);
-    if (reach < mc_reach) {
-        mc_reach = reach;
+    if (reach < mc_reach - 0.001f) {
+        mc_blocked_frames = 0;
+        mc_reach += (reach - mc_reach) * 0.5f;
+        if (mc_reach > reach + (6.0f / length)) {
+            mc_reach = reach + (6.0f / length);
+        }
     } else {
-        mc_reach += (reach - mc_reach) * 0.08f;
+        mc_blocked_frames++;
+        if (mc_blocked_frames > 8) {
+            mc_reach += (reach - mc_reach) * 0.06f;
+        }
     }
 
     camX = mc_focus_x + lineX * mc_reach;
