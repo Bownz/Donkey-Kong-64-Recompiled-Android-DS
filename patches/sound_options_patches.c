@@ -460,6 +460,7 @@ f32 func_global_asm_80612790(s16 arg0);
 f32 func_global_asm_80612794(s16 arg0);
 s16 func_global_asm_80665DE0(f32 arg0, f32 arg1, f32 arg2, f32 arg3);
 u8 func_global_asm_80671E00(f32 arg0, f32 arg1, f32 arg2, f32 arg3, s16 *arg4, s16 *arg5, u8 arg6, u16 arg7);
+s32 func_global_asm_80667110(f32 arg0, f32 arg1, f32 *arg2);
 extern u8 is_cutscene_active;
 
 #define MC_LOWEST 6.0f              // the lowest the camera goes: just above the ground
@@ -483,6 +484,9 @@ static u8 mc_active_now = FALSE;      // the Modern Camera placed the camera las
 static u8 mc_floating = FALSE;        // not standing on the ground (swimming, climbing, vines, long falls)
 static f32 mc_eye_x = 0.0f, mc_eye_y = 0.0f, mc_eye_z = 0.0f;
 static u8 mc_eye_valid = FALSE;
+static f32 mc_vine_offset = 0.0f;     // vines: your angle relative to the swing's direction
+static f32 mc_vine_height = -1000.0f; // vines: your height on vines (-1000: the usual)
+static u8 mc_vine_turned = FALSE;
 static u8 mc_on_vine = FALSE;
 static s16 mc_vine_heading = 0;
 
@@ -634,10 +638,12 @@ static void modern_camera_input(Actor *camera, CameraPaad *CaaD, s32 touchMoved,
     // recenter: a fixed, short ease-in-out (~0.4 s), gentle at both ends. Turning the camera
     // yourself cancels it.
     if (D_global_asm_807FD610[cc_player_index].unk2C & L_TRIG) {
+        mc_vine_offset = 0.0f;           // L also forgets your vine angle
+        mc_vine_height = -1000.0f;
         mc_recentering = TRUE;
         mc_recenter_frame = 0;
         mc_recenter_yaw = mc_yaw;
-        mc_recenter_turn = (f32)MC_ANGLE_WRAP((gCurrentPlayer->y_rotation & 0xFFF) - (s32)mc_yaw);
+        mc_recenter_turn = (f32)MC_ANGLE_WRAP((mc_on_vine ? mc_vine_heading : (gCurrentPlayer->y_rotation & 0xFFF)) - (s32)mc_yaw);
         mc_recenter_height = mc_height;
     }
     if ((stickX != 0.0f) || (touchMoved && (touchX != 0.0f))) {
@@ -647,17 +653,31 @@ static void modern_camera_input(Actor *camera, CameraPaad *CaaD, s32 touchMoved,
         mc_idle += dt;
     }
 
+    // Vines: each swing gets the same view, the way the swing goes plus your own angle and
+    // height if you've changed them on a vine (remembered for every vine until you press L).
     if (mc_vine_state(gCurrentPlayer)) {
         if (!mc_on_vine) {
             mc_on_vine = TRUE;
+            mc_vine_turned = FALSE;
             mc_vine_heading = gCurrentPlayer->y_rotation & 0xFFF;
+        }
+        if ((stickX != 0.0f) || (touchMoved && (touchX != 0.0f))) {
+            mc_vine_turned = TRUE;
+        } else if (mc_vine_turned) {
+            mc_vine_offset = (f32)MC_ANGLE_WRAP((s32)mc_yaw - mc_vine_heading);
+            mc_vine_turned = FALSE;
+        }
+        if ((stickY != 0.0f) || (touchMoved && (touchY != 0.0f))) {
+            mc_vine_height = mc_height;
+        } else if (mc_vine_height > -1000.0f) {
+            mc_height += (mc_vine_height - mc_height) * 0.1f;
         }
     } else {
         mc_on_vine = FALSE;
     }
 
     // The camera's angle equals the Kong's facing when it's right behind (func_global_asm_8061DB64).
-    behind = mc_on_vine ? mc_vine_heading : (gCurrentPlayer->y_rotation & 0xFFF);
+    behind = mc_on_vine ? ((mc_vine_heading + (s32)mc_vine_offset) & 0xFFF) : (gCurrentPlayer->y_rotation & 0xFFF);
     diff = MC_ANGLE_WRAP(behind - (s32)mc_yaw);
     if (mc_recentering) {
         f32 t, e;
@@ -671,13 +691,18 @@ static void modern_camera_input(Actor *camera, CameraPaad *CaaD, s32 touchMoved,
         if (t >= 1.0f) {
             mc_recentering = FALSE;
         }
-    } else if (mc_idle > 50.0f) {
+    } else if ((mc_idle > 50.0f) || (mc_on_vine && !mc_vine_turned && (stickX == 0.0f))) {
         // Gentle follow while running; never while running towards the camera (more than
         // ~120 degrees off), so turning round to face it doesn't spin the view.
         speed = gCurrentPlayer->unkB8;
         follow = mc_on_vine ? 0.6f : mc_clamp(speed / 150.0f, 0.0f, 1.0f);
         if ((follow > 0.05f) && (diff > -0x555) && (diff < 0x555)) {
             yawStep += diff * 0.012f * follow * dt;
+        }
+        // Like Odyssey, while you run without touching the camera it also drifts back to the
+        // usual height, slowly (standing on the ground only; vines keep your vine height).
+        if ((mc_idle > 90.0f) && !mc_floating && !mc_on_vine && (follow > 0.2f)) {
+            mc_height += (55.0f - mc_height) * 0.008f * follow * dt;
         }
     }
     mc_yaw += yawStep;
@@ -689,7 +714,7 @@ static void modern_camera_input(Actor *camera, CameraPaad *CaaD, s32 touchMoved,
     }
 
     // Tilting: up/down moves the camera lower/higher around the Kong.
-    mc_tilt_velocity += ((mc_curve(stickY) * sensitivity * 1.0f) - mc_tilt_velocity) * blend;
+    mc_tilt_velocity += ((mc_curve(stickY) * sensitivity * 1.0f) - mc_tilt_velocity) * (blend * 0.7f);
     if ((stickY == 0.0f) && (mc_abs(mc_tilt_velocity) < 0.05f)) {
         mc_tilt_velocity = 0.0f;
     }
@@ -697,9 +722,14 @@ static void modern_camera_input(Actor *camera, CameraPaad *CaaD, s32 touchMoved,
     if (touchMoved) {
         tilt += touchY;
     }
-    // Slower still as it gets close to the ground.
-    if ((tilt < 0.0f) && (mc_height < 40.0f) && !mc_floating) {
-        tilt *= 0.35f + (0.65f * mc_clamp((mc_height - MC_LOWEST) / (40.0f - MC_LOWEST), 0.0f, 1.0f));
+    // Resistance near the ends, like Odyssey: going down it slows more and more as it nears the
+    // ground (and the Kong); going up it slows near the top.
+    if ((tilt < 0.0f) && (mc_height < 70.0f) && !mc_floating) {
+        f32 r = mc_clamp((mc_height - MC_LOWEST) / (70.0f - MC_LOWEST), 0.0f, 1.0f);
+        tilt *= 0.12f + (0.88f * r * r * (3.0f - (2.0f * r)));
+    } else if ((tilt > 0.0f) && (mc_height > 150.0f)) {
+        f32 r = mc_clamp((200.0f - mc_height) / 50.0f, 0.0f, 1.0f);
+        tilt *= 0.12f + (0.88f * r * r * (3.0f - (2.0f * r)));
     }
     if (!mc_recentering) {
         // Standing, the camera stops just above the ground; swimming, climbing or hanging, it can
@@ -884,7 +914,8 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
     } else if (mc_floating) {
         distance = mc_distance * 0.85f;   // swimming/climbing: orbiting below the Kong too
     } else {
-        distance = mc_distance * (0.45f + (0.40f * mc_clamp((mc_height - MC_LOWEST) / (40.0f - MC_LOWEST), 0.0f, 1.0f)));
+        f32 r = mc_clamp((mc_height - MC_LOWEST) / (40.0f - MC_LOWEST), 0.0f, 1.0f);
+        distance = mc_distance * (0.45f + (0.40f * r * r * (3.0f - (2.0f * r))));
     }
     if (mc_on_vine) {
         distance *= 1.2f;
@@ -949,6 +980,29 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
     camX = startX + lineX * mc_reach;
     camY = startY + lineY * mc_reach;
     camZ = startZ + lineZ * mc_reach;
+
+    // Floors and ceilings (the wall test above doesn't see them), with the game's own floor
+    // lookup (the first floor below a point):
+    //  - a floor under the camera keeps it at least 6 units above (climbing, swimming, low
+    //    angles), unless that floor is above the Kong's head (e.g. the top of a cliff the Kong
+    //    stands under: the camera may legitimately be up there);
+    //  - a surface directly above the Kong, below the camera, is a ceiling (or an upper floor):
+    //    the camera comes down under it.
+    {
+        f32 floorY = camY + 1.0f;
+        f32 aboveY = camY + 1.0f;
+        if (func_global_asm_80667110(camX, camZ, &floorY) && (floorY <= camY + 1.0f) && (floorY <= kongY + 30.0f) &&
+            (camY < floorY + 6.0f)) {
+            camY = floorY + 6.0f;
+        }
+        if (func_global_asm_80667110(target->x_position, target->z_position, &aboveY) && (aboveY <= camY + 1.0f) &&
+            (aboveY > kongY + 30.0f)) {
+            camY = aboveY - 15.0f;
+            if (camY < kongY + 18.0f) {
+                camY = kongY + 18.0f;
+            }
+        }
+    }
     mc_fade(distance * mc_reach);
 
     // A final light smoothing, so small corrections blend instead of stepping; off the moment
