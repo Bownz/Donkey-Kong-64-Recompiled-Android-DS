@@ -452,6 +452,7 @@ static f32 mc_tilt_velocity = 0.0f;
 static f32 mc_idle = 0.0f;
 static u8 mc_recentering = FALSE;
 static f32 mc_distance = 0.0f;   // the camera's usual distance (set on first use); 0 = not set yet
+static f32 mc_height = -1.0f;     // the camera height you chose by tilting (-1: not set yet)
 static s16 mc_yaw = 0;            // the yaw the Modern Camera left last frame
 static u8 mc_yaw_valid = FALSE;
 static u8 mc_on_vine = FALSE;
@@ -505,29 +506,54 @@ static f32 mc_curve(f32 v) {
 }
 
 // How far out the camera can sit (up to `wanted`) before something is in the way, like
-// Odyssey's camera: the game works out the camera position for each distance from the Kong
-// outwards (func_global_asm_8062133C, as its own reset search does) and checks it against the
-// level's collision (func_global_asm_80671E00); the first blocked one limits the distance.
-static f32 mc_clear_distance(Actor *camera, CameraPaad *CaaD, f32 wanted) {
-    const f32 step = 15.0f;
-    const f32 nearest = 25.0f;
-    f32 savedA0 = CaaD->unkA0;
-    s16 savedB2 = CaaD->unkB2;
-    f32 x, y, z, d, clear = wanted;
+// Odyssey's camera: the game works out the camera position for a given distance from the Kong
+// (func_global_asm_8062133C, as its own reset search does) and checks it against the level's
+// collision (func_global_asm_80671E00). Stepping out from right behind the Kong, the first
+// blocked step is narrowed down to within ~1 unit, so the camera sits right against the
+// obstacle. There's no minimum beyond that: squeezed in, it comes right up behind the Kong,
+// who then fades (modern_camera_fade). The probe is small, so it slips through fences and
+// railings you can see through instead of treating them as walls.
+#define MC_NEAREST 8.0f
+#define MC_PROBE_RADIUS 5.0f
+
+static u8 mc_blocked_at(Actor *camera, CameraPaad *CaaD, s16 yaw, f32 d) {
+    f32 x, y, z;
     s16 hitA = 0, hitB = 0xFFF;
     s32 hidden;
 
-    for (d = nearest; d < wanted + step; d += step) {
+    CaaD->unkA0 = d;
+    hidden = func_global_asm_8062133C(camera, CaaD->unk0, &x, &y, &z, -1.0f) == 1;
+    CaaD->unkB2 = yaw;
+    return hidden || func_global_asm_80671E00(x, y, z, MC_PROBE_RADIUS, &hitA, &hitB, 1U, 0xBCU);
+}
+
+static f32 mc_clear_distance(Actor *camera, CameraPaad *CaaD, f32 wanted) {
+    const f32 step = 12.0f;
+    f32 savedA0 = CaaD->unkA0;
+    s16 savedB2 = CaaD->unkB2;
+    f32 d, lo, hi, mid, clear = wanted;
+    s32 i;
+
+    for (d = MC_NEAREST; ; d += step) {
         if (d > wanted) {
             d = wanted;
         }
-        CaaD->unkA0 = d;
-        hidden = func_global_asm_8062133C(camera, CaaD->unk0, &x, &y, &z, -1.0f) == 1;
-        CaaD->unkB2 = savedB2;
-        if (hidden || func_global_asm_80671E00(x, y, z, 10.0f, &hitA, &hitB, 1U, 0xBCU)) {
-            clear = d - step;
-            if (clear < nearest) {
-                clear = nearest;
+        if (mc_blocked_at(camera, CaaD, savedB2, d)) {
+            // Clear at d - step (or nothing clear at all), blocked at d: narrow it down.
+            lo = (d - step > MC_NEAREST) ? (d - step) : MC_NEAREST;
+            hi = d;
+            if ((d <= MC_NEAREST) || mc_blocked_at(camera, CaaD, savedB2, lo)) {
+                clear = MC_NEAREST;
+            } else {
+                for (i = 0; i < 4; i++) {
+                    mid = (lo + hi) * 0.5f;
+                    if (mc_blocked_at(camera, CaaD, savedB2, mid)) {
+                        hi = mid;
+                    } else {
+                        lo = mid;
+                    }
+                }
+                clear = lo;
             }
             break;
         }
@@ -538,6 +564,30 @@ static f32 mc_clear_distance(Actor *camera, CameraPaad *CaaD, f32 wanted) {
     CaaD->unkA0 = savedA0;
     CaaD->unkB2 = savedB2;
     return clear;
+}
+
+// Odyssey makes Mario see-through when the camera is right up against him. The Kong fades the
+// same way: fully solid from 45 units out, down to a quarter at the closest. The game's actor
+// opacity (Actor 0x128, also how it fades things out) is only touched while fading, and put
+// back to full afterwards.
+static u8 mc_faded = FALSE;
+
+static void modern_camera_fade(f32 distance) {
+    f32 t;
+    s16 opacity;
+
+    if (gCurrentPlayer == NULL) {
+        return;
+    }
+    if (distance < 45.0f) {
+        t = mc_clamp((distance - MC_NEAREST) / (45.0f - MC_NEAREST), 0.0f, 1.0f);
+        opacity = (s16)(64.0f + (191.0f * t));
+        gCurrentPlayer->shadow_opacity = opacity;
+        mc_faded = TRUE;
+    } else if (mc_faded) {
+        gCurrentPlayer->shadow_opacity = 0xFF;
+        mc_faded = FALSE;
+    }
 }
 
 static void modern_camera_update(Actor *camera, CameraPaad *CaaD, s32 touchMoved, f32 touchX, f32 touchY) {
@@ -631,8 +681,11 @@ static void modern_camera_update(Actor *camera, CameraPaad *CaaD, s32 touchMoved
     if (touchMoved) {
         tilt += touchY;
     }
+    if (mc_height < 0.0f) {
+        mc_height = mc_clamp(CaaD->unkB8, 5.0f, 240.0f);
+    }
     if (tilt != 0.0f) {
-        CaaD->unkB8 = mc_clamp(CaaD->unkB8 + tilt, 5.0f, 240.0f);
+        mc_height = mc_clamp(mc_height + tilt, 5.0f, 240.0f);
         CaaD->unkF1 = 1;
     }
 
@@ -641,7 +694,7 @@ static void modern_camera_update(Actor *camera, CameraPaad *CaaD, s32 touchMoved
     // spots...), but never through a wall: blocked, it moves in front of it at once, and eases
     // back out once the way is clear. The game's own easing (unkA0 towards unkA4) has nothing
     // left to do.
-    height = mc_clamp((CaaD->unkB8 - 5.0f) / 235.0f, 0.0f, 1.0f);
+    height = mc_clamp((mc_height - 5.0f) / 235.0f, 0.0f, 1.0f);
     wanted = mc_distance * (0.85f + (0.3f * height));
     if (mc_on_vine) {
         wanted *= 1.2f;   // a little further out, so the whole swing and the landing fit
@@ -653,6 +706,12 @@ static void modern_camera_update(Actor *camera, CameraPaad *CaaD, s32 touchMoved
         CaaD->unkA0 += (clear - CaaD->unkA0) * mc_clamp(0.08f * dt, 0.0f, 1.0f);
     }
     CaaD->unkA4 = CaaD->unkA0;
+
+    // Squeezed in close, the camera rises a little, so it looks over the Kong's shoulder rather
+    // than into its back; and the Kong fades when the camera is right up against it.
+    CaaD->unkB8 = mc_clamp(mc_height + ((1.0f - mc_clamp(CaaD->unkA0 / wanted, 0.0f, 1.0f)) * 30.0f), 5.0f, 270.0f);
+    modern_camera_fade(CaaD->unkA0);
+
     mc_yaw = CaaD->unkB2;
     mc_yaw_valid = TRUE;
 }
@@ -669,15 +728,20 @@ static f32 mc_focus_x = 0.0f;
 static f32 mc_focus_y = 0.0f;
 static f32 mc_focus_z = 0.0f;
 static u8 mc_focus_valid = FALSE;
+static f32 mc_ground_y = 0.0f;    // the height the camera frames: where the Kong last stood
+static s32 mc_air_frames = 0;
 
-void modern_camera_frame(CameraPaad *AAD, f32 *atX, f32 *atY, f32 *atZ) {
+void modern_camera_frame(CameraPaad *AAD, f32 *eyeY, f32 *atX, f32 *atY, f32 *atZ) {
     Actor *target = AAD->unk0;
-    f32 wantY, w;
+    f32 wantY, w, kongY, hold;
     u8 active;
 
     active = (is_cutscene_active == 0) && modern_cam_enabled() && get_analog_allowed() && (target != NULL) &&
         (target == gCurrentPlayer) && !(AAD->unkAC & 0x2000);
     mc_focus_weight += ((active ? 1.0f : 0.0f) - mc_focus_weight) * 0.2f;
+    if (!active) {
+        modern_camera_fade(1000.0f);   // the Kong back to solid outside the Modern Camera
+    }
     if (mc_focus_weight < 0.01f) {
         mc_focus_weight = 0.0f;
         mc_focus_valid = FALSE;
@@ -686,9 +750,26 @@ void modern_camera_frame(CameraPaad *AAD, f32 *atX, f32 *atY, f32 *atZ) {
     if (target == NULL) {
         return;
     }
+    // Height, like Odyssey: jumping (in place, Z jumps, backflips...) doesn't move the camera.
+    // It frames the height the Kong last stood at, and only follows while in the air if the
+    // Kong rises well above that (60 units) or drops below it (off a ledge), or after a long
+    // time off the ground (swimming, falling, flying).
+    kongY = target->y_position;
+    if ((kongY - target->floor) < 4.0f) {
+        mc_air_frames = 0;
+    } else {
+        mc_air_frames++;
+    }
+    if (!mc_focus_valid || (mc_air_frames == 0) || (mc_air_frames > 45) || (kongY < mc_ground_y) ||
+        mc_vine_state(target) || modern_camera_free_state(target)) {
+        mc_ground_y = kongY;
+    } else if (kongY > mc_ground_y + 60.0f) {
+        mc_ground_y = kongY - 60.0f;
+    }
+
     // The focus trails the Kong slightly (like Odyssey), so quick lunges and attacks don't jolt
     // the view; it catches up within a few frames. Big jumps (warps) are followed at once.
-    wantY = target->y_position + 18.0f;
+    wantY = mc_ground_y + 18.0f;
     if (!mc_focus_valid || (!mc_vine_state(target) && ((mc_abs(wantY - mc_focus_y) > 150.0f) ||
         (mc_abs(target->x_position - mc_focus_x) > 150.0f) || (mc_abs(target->z_position - mc_focus_z) > 150.0f)))) {
         mc_focus_x = target->x_position;
@@ -710,6 +791,14 @@ void modern_camera_frame(CameraPaad *AAD, f32 *atX, f32 *atY, f32 *atZ) {
     *atX += (mc_focus_x - *atX) * w;
     *atY += (mc_focus_y - *atY) * w;
     *atZ += (mc_focus_z - *atZ) * w;
+    // The camera itself holds its height during the jump too (the game raises it with the
+    // Kong): moved by however far the framed height is below the Kong.
+    if (!mc_vine_state(target)) {
+        hold = mc_focus_y - (kongY + 18.0f);
+        if (hold < 0.0f) {
+            *eyeY += hold * w;
+        }
+    }
 }
 
 RECOMP_PATCH void func_global_asm_8061D1FC(Actor* arg0) {
