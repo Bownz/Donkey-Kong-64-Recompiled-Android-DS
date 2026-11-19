@@ -238,7 +238,7 @@ u8 analog_cam_enabled(void) {
 }
 
 // @recomp: Modern Camera: the Analog Camera's controls with smoothing, tilt instead of zoom,
-// L to recenter and a gentle follow (modern_camera_update below).
+// L to recenter and a gentle follow (modern_camera_input and modern_camera_frame below).
 u8 modern_cam_enabled(void) {
     return analog_cam_enabled() && (recomp_get_camera_type() == 4);
 }
@@ -436,27 +436,106 @@ void func_global_asm_8062217C(Actor*, s16);
 int getFrameDelta(void);
 
 // ---- Modern Camera ------------------------------------------------------------------------
-// Feel aimed at Super Mario Odyssey / Donkey Kong Bananza:
-//  - the right stick turns the camera with a little acceleration and an easing response curve
-//    (fine aim near the centre, full speed at the edge), instead of moving it 1:1;
-//  - up/down tilts the camera (lower to look up, higher to look down) instead of zooming;
-//  - L swings the camera smoothly behind the Kong;
-//  - after about a second without touching the camera, it drifts gently back behind the Kong
-//    while you run, faster the faster you go, but not when you're running towards it.
-// The game still places the camera, handles walls, cutscenes and special rooms; this only
-// steers the yaw (CaaD->unkB2) and height (CaaD->unkB8) it follows.
+// Feel aimed at Super Mario Odyssey / Donkey Kong Bananza. In normal play (and on trees and
+// vines) the Modern Camera places the camera itself every frame, instead of steering the game's
+// camera code (most of which is still assembly and kept re-adding its own behaviour):
+//  - it orbits a focus point just above the Kong, which trails the Kong slightly and holds its
+//    height while the Kong jumps (only following once it lands higher, drops below, rises well
+//    above or stays in the air);
+//  - the right stick turns it with a short acceleration and an easing response curve; up/down
+//    tilts it lower/higher; L swings it behind the Kong; after ~1 s without input it drifts
+//    gently back behind the Kong while running (not when running towards the camera);
+//  - it keeps a set distance (a little closer when low, further when high), traced against the
+//    level's collision from the focus out: blocked, it moves right up to the obstacle at once
+//    (no minimum: the Kong fades when the camera is right up against it), and eases back out;
+//  - on vines it stays steady on the middle of the swing, further out, facing the way the Kong
+//    was heading.
+// Input is read in func_global_asm_8061D1FC (modern_camera_input); the camera is placed from
+// the camera update's outputs (modern_camera_frame, called from func_global_asm_8061DBD4 in
+// patches_interpolation.c). Cutscenes, bosses and the game's other special cameras are left to
+// the game, blended in and out.
 #define MC_ANGLE_WRAP(a) (((((s32)(a)) + 0x800) & 0xFFF) - 0x800)
 
+f32 func_global_asm_80612790(s16 arg0);
+f32 func_global_asm_80612794(s16 arg0);
+s16 func_global_asm_80665DE0(f32 arg0, f32 arg1, f32 arg2, f32 arg3);
+u8 func_global_asm_80671E00(f32 arg0, f32 arg1, f32 arg2, f32 arg3, s16 *arg4, s16 *arg5, u8 arg6, u16 arg7);
+extern u8 is_cutscene_active;
+
+static f32 mc_yaw = 0.0f;           // the camera's direction from the Kong (game angle units)
+static u8 mc_yaw_valid = FALSE;
 static f32 mc_yaw_velocity = 0.0f;
 static f32 mc_tilt_velocity = 0.0f;
+static f32 mc_height = -1.0f;       // camera height above the framed ground (-1: not set yet)
+static f32 mc_distance = 0.0f;      // the usual distance (0: not set yet)
+static f32 mc_reach = 1.0f;         // how far out along the line the camera is (1 = all the way)
 static f32 mc_idle = 0.0f;
 static u8 mc_recentering = FALSE;
-static f32 mc_distance = 0.0f;   // the camera's usual distance (set on first use); 0 = not set yet
-static f32 mc_height = -1.0f;     // the camera height you chose by tilting (-1: not set yet)
-static s16 mc_yaw = 0;            // the yaw the Modern Camera left last frame
-static u8 mc_yaw_valid = FALSE;
 static u8 mc_on_vine = FALSE;
-static s16 mc_vine_heading = 0;   // the Kong's facing when it grabbed the vine
+static s16 mc_vine_heading = 0;
+
+static f32 mc_weight = 0.0f;        // 0 = the game's camera, 1 = the Modern Camera
+static f32 mc_focus_x = 0.0f, mc_focus_y = 0.0f, mc_focus_z = 0.0f;
+static u8 mc_focus_valid = FALSE;
+static f32 mc_ground_y = 0.0f;
+static s32 mc_air_frames = 0;
+static u8 mc_faded = FALSE;
+
+// How the game's angles map to directions (checked once against func_global_asm_80665DE0,
+// which the game itself uses to turn a camera position into its angle): 1-8, or -1 if no match.
+static s32 mc_convention = 0;
+
+static f32 mc_abs(f32 v) {
+    return v < 0.0f ? -v : v;
+}
+
+static f32 mc_clamp(f32 v, f32 lo, f32 hi) {
+    return v < lo ? lo : (v > hi ? hi : v);
+}
+
+// Fine control near the centre of the stick, full speed at the edge.
+static f32 mc_curve(f32 v) {
+    return (0.35f * v) + (0.65f * v * mc_abs(v));
+}
+
+static void mc_direction_with(s32 convention, s16 angle, f32 *dx, f32 *dz) {
+    f32 a = func_global_asm_80612794(angle);
+    f32 b = func_global_asm_80612790(angle);
+    switch (convention) {
+        case 1: *dx = a; *dz = b; break;
+        case 2: *dx = b; *dz = a; break;
+        case 3: *dx = -a; *dz = b; break;
+        case 4: *dx = a; *dz = -b; break;
+        case 5: *dx = -b; *dz = a; break;
+        case 6: *dx = b; *dz = -a; break;
+        case 7: *dx = -a; *dz = -b; break;
+        default: *dx = -b; *dz = -a; break;
+    }
+}
+
+static u8 mc_convention_matches(s32 convention, s16 angle) {
+    f32 dx, dz;
+    s32 diff;
+    mc_direction_with(convention, angle, &dx, &dz);
+    diff = MC_ANGLE_WRAP(func_global_asm_80665DE0(0.0f, 0.0f, dx * 100.0f, dz * 100.0f) - angle);
+    return (diff > -12) && (diff < 12);
+}
+
+static u8 mc_ready(void) {
+    s32 c;
+    if (mc_convention == 0) {
+        mc_convention = -1;
+        for (c = 1; c <= 8; c++) {
+            if (mc_convention_matches(c, 0x155) && mc_convention_matches(c, 0x9AB) && mc_convention_matches(c, 0xE38)) {
+                mc_convention = c;
+                break;
+            }
+        }
+        recomp_printf("Modern Camera: angle convention %d%s\n", mc_convention,
+            mc_convention < 0 ? " (none matched: Modern Camera off)" : "");
+    }
+    return mc_convention > 0;
+}
 
 static u8 mc_vine_state(Actor *kong) {
     return (kong != NULL) && ((kong->control_state == 0x57) || (kong->control_state == 0x58));
@@ -478,125 +557,23 @@ u8 modern_camera_free_state(Actor *kong) {
     return FALSE;
 }
 
-// On a vine the game switches to its own camera mode (12); with the Modern Camera, the camera
-// update places it as the normal follow camera instead (patches_interpolation.c). Returns the
-// mode to put back afterwards, or 0.
-u8 modern_camera_free_on_vine(CameraPaad *AAD) {
-    if ((AAD->unkF3 == 12) && modern_cam_enabled() && get_analog_allowed() && (AAD->unk0 == gCurrentPlayer) &&
-        modern_camera_free_state(gCurrentPlayer)) {
-        return 12;
-    }
-    return 0;
-}
-
-s32 func_global_asm_8062133C(Actor*, Actor*, f32*, f32*, f32*, f32);
-u8 func_global_asm_80671E00(f32 arg0, f32 arg1, f32 arg2, f32 arg3, s16 *arg4, s16 *arg5, u8 arg6, u16 arg7);
-
-static f32 mc_abs(f32 v) {
-    return v < 0.0f ? -v : v;
-}
-
-static f32 mc_clamp(f32 v, f32 lo, f32 hi) {
-    return v < lo ? lo : (v > hi ? hi : v);
-}
-
-// Fine control near the centre of the stick, full speed at the edge.
-static f32 mc_curve(f32 v) {
-    return (0.35f * v) + (0.65f * v * mc_abs(v));
-}
-
-// How far out the camera can sit (up to `wanted`) before something is in the way, like
-// Odyssey's camera: the game works out the camera position for a given distance from the Kong
-// (func_global_asm_8062133C, as its own reset search does) and checks it against the level's
-// collision (func_global_asm_80671E00). Stepping out from right behind the Kong, the first
-// blocked step is narrowed down to within ~1 unit, so the camera sits right against the
-// obstacle. There's no minimum beyond that: squeezed in, it comes right up behind the Kong,
-// who then fades (modern_camera_fade). The probe is small, so it slips through fences and
-// railings you can see through instead of treating them as walls.
-#define MC_NEAREST 8.0f
-#define MC_PROBE_RADIUS 5.0f
-
-static u8 mc_blocked_at(Actor *camera, CameraPaad *CaaD, s16 yaw, f32 d) {
-    f32 x, y, z;
-    s16 hitA = 0, hitB = 0xFFF;
-    s32 hidden;
-
-    CaaD->unkA0 = d;
-    hidden = func_global_asm_8062133C(camera, CaaD->unk0, &x, &y, &z, -1.0f) == 1;
-    CaaD->unkB2 = yaw;
-    return hidden || func_global_asm_80671E00(x, y, z, MC_PROBE_RADIUS, &hitA, &hitB, 1U, 0xBCU);
-}
-
-static f32 mc_clear_distance(Actor *camera, CameraPaad *CaaD, f32 wanted) {
-    const f32 step = 12.0f;
-    f32 savedA0 = CaaD->unkA0;
-    s16 savedB2 = CaaD->unkB2;
-    f32 d, lo, hi, mid, clear = wanted;
-    s32 i;
-
-    for (d = MC_NEAREST; ; d += step) {
-        if (d > wanted) {
-            d = wanted;
-        }
-        if (mc_blocked_at(camera, CaaD, savedB2, d)) {
-            // Clear at d - step (or nothing clear at all), blocked at d: narrow it down.
-            lo = (d - step > MC_NEAREST) ? (d - step) : MC_NEAREST;
-            hi = d;
-            if ((d <= MC_NEAREST) || mc_blocked_at(camera, CaaD, savedB2, lo)) {
-                clear = MC_NEAREST;
-            } else {
-                for (i = 0; i < 4; i++) {
-                    mid = (lo + hi) * 0.5f;
-                    if (mc_blocked_at(camera, CaaD, savedB2, mid)) {
-                        hi = mid;
-                    } else {
-                        lo = mid;
-                    }
-                }
-                clear = lo;
-            }
-            break;
-        }
-        if (d >= wanted) {
-            break;
-        }
-    }
-    CaaD->unkA0 = savedA0;
-    CaaD->unkB2 = savedB2;
-    return clear;
-}
-
-// Odyssey makes Mario see-through when the camera is right up against him. The Kong fades the
-// same way: fully solid from 45 units out, down to a quarter at the closest. The game's actor
-// opacity (Actor 0x128, also how it fades things out) is only touched while fading, and put
-// back to full afterwards.
-static u8 mc_faded = FALSE;
-
-static void modern_camera_fade(f32 distance) {
-    f32 t;
-    s16 opacity;
-
-    if (gCurrentPlayer == NULL) {
-        return;
-    }
-    if (distance < 45.0f) {
-        t = mc_clamp((distance - MC_NEAREST) / (45.0f - MC_NEAREST), 0.0f, 1.0f);
-        opacity = (s16)(64.0f + (191.0f * t));
-        gCurrentPlayer->shadow_opacity = opacity;
-        mc_faded = TRUE;
-    } else if (mc_faded) {
-        gCurrentPlayer->shadow_opacity = 0xFF;
-        mc_faded = FALSE;
-    }
-}
-
-static void modern_camera_update(Actor *camera, CameraPaad *CaaD, s32 touchMoved, f32 touchX, f32 touchY) {
-    f32 stickX, stickY, dt, sensitivity, blend, yawStep, tilt, speed, follow, clear, wanted, height;
+// The camera's input, once per frame (from func_global_asm_8061D1FC).
+static void modern_camera_input(Actor *camera, CameraPaad *CaaD, s32 touchMoved, f32 touchX, f32 touchY) {
+    f32 stickX, stickY, dt, sensitivity, blend, yawStep, tilt, speed, follow;
     s32 behind, diff;
 
-    // On trees and vines the game keeps turning the camera to its own angle; keep ours.
-    if (mc_yaw_valid && modern_camera_free_state(gCurrentPlayer)) {
-        CaaD->unkB2 = mc_yaw;
+    if (!mc_yaw_valid) {
+        mc_yaw = (f32)(CaaD->unkB2 & 0xFFF);
+        mc_yaw_valid = TRUE;
+    }
+    if (mc_height < 0.0f) {
+        mc_height = 55.0f;
+    }
+    if (mc_distance <= 0.0f) {
+        mc_distance = CaaD->unkA4;
+        if ((mc_distance < 110.0f) || (mc_distance > 200.0f)) {
+            mc_distance = 150.0f;
+        }
     }
 
     recomp_analog_camera_get(&stickX, &stickY);
@@ -614,15 +591,6 @@ static void modern_camera_update(Actor *camera, CameraPaad *CaaD, s32 touchMoved
         yawStep += touchX;   // touch drags stay 1:1
     }
 
-    // The usual distance, like Odyssey's: no zoom, the camera keeps this far from the Kong
-    // (taken from the game's normal camera the first time, within a comfortable range).
-    if (mc_distance <= 0.0f) {
-        mc_distance = CaaD->unkA4;
-        if ((mc_distance < 110.0f) || (mc_distance > 200.0f)) {
-            mc_distance = 150.0f;
-        }
-    }
-
     // L: swing behind the Kong. Turning the camera yourself cancels it.
     if (D_global_asm_807FD610[cc_player_index].unk2C & L_TRIG) {
         mc_recentering = TRUE;
@@ -634,9 +602,6 @@ static void modern_camera_update(Actor *camera, CameraPaad *CaaD, s32 touchMoved
         mc_idle += dt;
     }
 
-    // Swinging on a vine (like Odyssey/Bananza): the camera doesn't swing with the Kong; it
-    // settles behind the direction the Kong was heading when it grabbed the vine, so the
-    // landing spot is in view (see also the steadier focus in modern_camera_frame).
     if (mc_vine_state(gCurrentPlayer)) {
         if (!mc_on_vine) {
             mc_on_vine = TRUE;
@@ -646,9 +611,9 @@ static void modern_camera_update(Actor *camera, CameraPaad *CaaD, s32 touchMoved
         mc_on_vine = FALSE;
     }
 
-    // The camera's yaw equals the Kong's facing when it's right behind (func_global_asm_8061DB64).
+    // The camera's angle equals the Kong's facing when it's right behind (func_global_asm_8061DB64).
     behind = mc_on_vine ? mc_vine_heading : (gCurrentPlayer->y_rotation & 0xFFF);
-    diff = MC_ANGLE_WRAP(behind - CaaD->unkB2);
+    diff = MC_ANGLE_WRAP(behind - (s32)mc_yaw);
     if (mc_recentering) {
         if ((diff > -8) && (diff < 8)) {
             yawStep += diff;
@@ -665,14 +630,15 @@ static void modern_camera_update(Actor *camera, CameraPaad *CaaD, s32 touchMoved
             yawStep += diff * 0.012f * follow * dt;
         }
     }
-
-    if (yawStep != 0.0f) {
-        CaaD->unkB2 = ((s32)(CaaD->unkB2 + yawStep)) & 0xFFF;
-        CaaD->unkF1 = 1; // Makes things snappy
+    mc_yaw += yawStep;
+    while (mc_yaw < 0.0f) {
+        mc_yaw += 4096.0f;
     }
-    CaaD->unkB0 = 0;
+    while (mc_yaw >= 4096.0f) {
+        mc_yaw -= 4096.0f;
+    }
 
-    // Tilting: up/down moves the camera lower/higher around the Kong (the game eases it there).
+    // Tilting: up/down moves the camera lower/higher around the Kong.
     mc_tilt_velocity += ((mc_curve(stickY) * sensitivity * 1.6f) - mc_tilt_velocity) * blend;
     if ((stickY == 0.0f) && (mc_abs(mc_tilt_velocity) < 0.05f)) {
         mc_tilt_velocity = 0.0f;
@@ -681,79 +647,66 @@ static void modern_camera_update(Actor *camera, CameraPaad *CaaD, s32 touchMoved
     if (touchMoved) {
         tilt += touchY;
     }
-    if (mc_height < 0.0f) {
-        mc_height = mc_clamp(CaaD->unkB8, 5.0f, 240.0f);
-    }
-    if (tilt != 0.0f) {
-        mc_height = mc_clamp(mc_height + tilt, 5.0f, 240.0f);
-        CaaD->unkF1 = 1;
-    }
+    mc_height = mc_clamp(mc_height + tilt, -20.0f, 200.0f);
 
-    // Distance: as in Odyssey, a little closer when the camera is low (looking up) and a little
-    // further when it's high (looking down); always heading back there (after vines, tight
-    // spots...), but never through a wall: blocked, it moves in front of it at once, and eases
-    // back out once the way is clear. The game's own easing (unkA0 towards unkA4) has nothing
-    // left to do.
-    height = mc_clamp((mc_height - 5.0f) / 235.0f, 0.0f, 1.0f);
-    wanted = mc_distance * (0.85f + (0.3f * height));
-    if (mc_on_vine) {
-        wanted *= 1.2f;   // a little further out, so the whole swing and the landing fit
-    }
-    clear = mc_clear_distance(camera, CaaD, wanted);
-    if (clear < CaaD->unkA0) {
-        CaaD->unkA0 = clear;
-    } else {
-        CaaD->unkA0 += (clear - CaaD->unkA0) * mc_clamp(0.08f * dt, 0.0f, 1.0f);
-    }
-    CaaD->unkA4 = CaaD->unkA0;
-
-    // Squeezed in close, the camera rises a little, so it looks over the Kong's shoulder rather
-    // than into its back; and the Kong fades when the camera is right up against it.
-    CaaD->unkB8 = mc_clamp(mc_height + ((1.0f - mc_clamp(CaaD->unkA0 / wanted, 0.0f, 1.0f)) * 30.0f), 5.0f, 270.0f);
-    modern_camera_fade(CaaD->unkA0);
-
-    mc_yaw = CaaD->unkB2;
-    mc_yaw_valid = TRUE;
+    // The game's own camera state follows ours (the Kong's movement is relative to it, and the
+    // game starts from it again when it takes over).
+    CaaD->unkB2 = ((s32)mc_yaw) & 0xFFF;
+    CaaD->unkB0 = 0;
 }
 
-// Modern Camera framing: like Odyssey, the camera looks at the Kong (a point just above it, so
-// it sits a little below the middle of the screen), not at the spot in front of it that the
-// game aims at. The focus height is smoothed so small hops don't bob the view. Blended in and
-// out over a few frames, so handing over to cutscenes and special cameras doesn't jump.
-// Called from the camera update (func_global_asm_8061DBD4, patches_interpolation.c) with its
-// look-at output, every frame.
-extern u8 is_cutscene_active;
-static f32 mc_focus_weight = 0.0f;
-static f32 mc_focus_x = 0.0f;
-static f32 mc_focus_y = 0.0f;
-static f32 mc_focus_z = 0.0f;
-static u8 mc_focus_valid = FALSE;
-static f32 mc_ground_y = 0.0f;    // the height the camera frames: where the Kong last stood
-static s32 mc_air_frames = 0;
+// Whether something solid is at this point (the level's collision, as the game's own camera
+// search tests it). Small, so the camera slips through fences and railings.
+static u8 mc_blocked(f32 x, f32 y, f32 z) {
+    s16 hitA = 0, hitB = 0xFFF;
+    return func_global_asm_80671E00(x, y, z, 5.0f, &hitA, &hitB, 1U, 0xBCU) != 0;
+}
 
-void modern_camera_frame(CameraPaad *AAD, f32 *eyeY, f32 *atX, f32 *atY, f32 *atZ) {
+// The Kong fades when the camera is right up against it (Odyssey does the same with Mario):
+// solid from 45 units out, a quarter at the closest. Actor opacity (0x128) is only touched while
+// fading, and put back to full afterwards.
+static void mc_fade(f32 distance) {
+    f32 t;
+    if (gCurrentPlayer == NULL) {
+        return;
+    }
+    if (distance < 45.0f) {
+        t = mc_clamp((distance - 8.0f) / 37.0f, 0.0f, 1.0f);
+        gCurrentPlayer->shadow_opacity = (s16)(64.0f + (191.0f * t));
+        mc_faded = TRUE;
+    } else if (mc_faded) {
+        gCurrentPlayer->shadow_opacity = 0xFF;
+        mc_faded = FALSE;
+    }
+}
+
+// Places the camera: called from the camera update with its eye and look-at outputs.
+void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f32 *eyeZ, f32 *atX, f32 *atY, f32 *atZ) {
     Actor *target = AAD->unk0;
-    f32 wantY, w, kongY, hold;
+    f32 kongY, wantY, dx, dz, distance, wantX, wantYEye, wantZ, lineX, lineY, lineZ, length, t, lo, hi, mid, reach;
+    f32 camX, camY, camZ, w;
+    s32 i;
     u8 active;
 
     active = (is_cutscene_active == 0) && modern_cam_enabled() && get_analog_allowed() && (target != NULL) &&
-        (target == gCurrentPlayer) && !(AAD->unkAC & 0x2000);
-    mc_focus_weight += ((active ? 1.0f : 0.0f) - mc_focus_weight) * 0.2f;
+        (target == gCurrentPlayer) && mc_yaw_valid && !(AAD->unkAC & 0x2000) &&
+        ((AAD->unkF3 == 1) || (AAD->unkF3 == 2) || (AAD->unkF3 == 5) || (AAD->unkF3 == 12)) && mc_ready();
+    mc_weight += ((active ? 1.0f : 0.0f) - mc_weight) * 0.2f;
     if (!active) {
-        modern_camera_fade(1000.0f);   // the Kong back to solid outside the Modern Camera
+        mc_fade(1000.0f);
     }
-    if (mc_focus_weight < 0.01f) {
-        mc_focus_weight = 0.0f;
+    if (mc_weight < 0.01f) {
+        mc_weight = 0.0f;
         mc_focus_valid = FALSE;
         return;
     }
-    if (target == NULL) {
+    if ((target == NULL) || (mc_convention <= 0)) {
         return;
     }
-    // Height, like Odyssey: jumping (in place, Z jumps, backflips...) doesn't move the camera.
-    // It frames the height the Kong last stood at, and only follows while in the air if the
-    // Kong rises well above that (60 units) or drops below it (off a ledge), or after a long
-    // time off the ground (swimming, falling, flying).
+
+    // The framed height: where the Kong last stood. Jumping doesn't move the camera; it only
+    // follows in the air if the Kong rises well above (60), drops below, or stays off the
+    // ground (~1.5 s: swimming, falling, flying). Trees and vines follow the Kong.
     kongY = target->y_position;
     if ((kongY - target->floor) < 4.0f) {
         mc_air_frames = 0;
@@ -761,14 +714,14 @@ void modern_camera_frame(CameraPaad *AAD, f32 *eyeY, f32 *atX, f32 *atY, f32 *at
         mc_air_frames++;
     }
     if (!mc_focus_valid || (mc_air_frames == 0) || (mc_air_frames > 45) || (kongY < mc_ground_y) ||
-        mc_vine_state(target) || modern_camera_free_state(target)) {
+        modern_camera_free_state(target)) {
         mc_ground_y = kongY;
     } else if (kongY > mc_ground_y + 60.0f) {
         mc_ground_y = kongY - 60.0f;
     }
 
-    // The focus trails the Kong slightly (like Odyssey), so quick lunges and attacks don't jolt
-    // the view; it catches up within a few frames. Big jumps (warps) are followed at once.
+    // The focus trails the Kong slightly (lunges and attacks don't jolt the view); on a vine it
+    // barely follows the swing, so it settles on the middle of the arc. Warps snap.
     wantY = mc_ground_y + 18.0f;
     if (!mc_focus_valid || (!mc_vine_state(target) && ((mc_abs(wantY - mc_focus_y) > 150.0f) ||
         (mc_abs(target->x_position - mc_focus_x) > 150.0f) || (mc_abs(target->z_position - mc_focus_z) > 150.0f)))) {
@@ -776,9 +729,8 @@ void modern_camera_frame(CameraPaad *AAD, f32 *eyeY, f32 *atX, f32 *atY, f32 *at
         mc_focus_y = wantY;
         mc_focus_z = target->z_position;
         mc_focus_valid = TRUE;
+        mc_reach = 1.0f;
     } else if (mc_vine_state(target)) {
-        // On a vine the focus barely follows the swing, so it settles on the middle of the arc
-        // and the view stays steady while the Kong swings through it.
         mc_focus_x += (target->x_position - mc_focus_x) * 0.04f;
         mc_focus_y += (wantY - mc_focus_y) * 0.05f;
         mc_focus_z += (target->z_position - mc_focus_z) * 0.04f;
@@ -787,17 +739,77 @@ void modern_camera_frame(CameraPaad *AAD, f32 *eyeY, f32 *atX, f32 *atY, f32 *at
         mc_focus_y += (wantY - mc_focus_y) * 0.3f;
         mc_focus_z += (target->z_position - mc_focus_z) * 0.35f;
     }
-    w = mc_focus_weight;
+
+    // Where the camera wants to be: out along its angle at the usual distance (a little closer
+    // when low, further when high, further on vines), at its height above the framed ground.
+    distance = mc_distance * (0.85f + (0.3f * mc_clamp((mc_height + 20.0f) / 220.0f, 0.0f, 1.0f)));
+    if (mc_on_vine) {
+        distance *= 1.2f;
+    }
+    mc_direction_with(mc_convention, ((s32)mc_yaw) & 0xFFF, &dx, &dz);
+    wantX = mc_focus_x + (dx * distance);
+    wantYEye = mc_ground_y + mc_height;
+    wantZ = mc_focus_z + (dz * distance);
+
+    // Traced from the focus out: the first blocked point (narrowed to ~1 unit) limits how far
+    // out the camera goes. Blocked, it moves in at once; clear, it eases back out.
+    lineX = wantX - mc_focus_x;
+    lineY = wantYEye - mc_focus_y;
+    lineZ = wantZ - mc_focus_z;
+    length = distance + 1.0f;
+    reach = 1.0f;
+    for (t = 10.0f / length; ; t += 10.0f / length) {
+        if (t > 1.0f) {
+            t = 1.0f;
+        }
+        if (mc_blocked(mc_focus_x + lineX * t, mc_focus_y + lineY * t, mc_focus_z + lineZ * t)) {
+            lo = t - (10.0f / length);
+            hi = t;
+            if (lo <= 0.0f) {
+                reach = 0.0f;
+            } else {
+                for (i = 0; i < 4; i++) {
+                    mid = (lo + hi) * 0.5f;
+                    if (mc_blocked(mc_focus_x + lineX * mid, mc_focus_y + lineY * mid, mc_focus_z + lineZ * mid)) {
+                        hi = mid;
+                    } else {
+                        lo = mid;
+                    }
+                }
+                reach = lo;
+            }
+            break;
+        }
+        if (t >= 1.0f) {
+            break;
+        }
+    }
+    reach = mc_clamp(reach, 8.0f / length, 1.0f);
+    if (reach < mc_reach) {
+        mc_reach = reach;
+    } else {
+        mc_reach += (reach - mc_reach) * 0.08f;
+    }
+
+    camX = mc_focus_x + lineX * mc_reach;
+    camY = mc_focus_y + lineY * mc_reach;
+    camZ = mc_focus_z + lineZ * mc_reach;
+    mc_fade(distance * mc_reach);
+
+    // Blended with the game's camera while handing over.
+    w = mc_weight;
+    *eyeX += (camX - *eyeX) * w;
+    *eyeY += (camY - *eyeY) * w;
+    *eyeZ += (camZ - *eyeZ) * w;
     *atX += (mc_focus_x - *atX) * w;
     *atY += (mc_focus_y - *atY) * w;
     *atZ += (mc_focus_z - *atZ) * w;
-    // The camera itself holds its height during the jump too (the game raises it with the
-    // Kong): moved by however far the framed height is below the Kong.
-    if (!mc_vine_state(target)) {
-        hold = mc_focus_y - (kongY + 18.0f);
-        if (hold < 0.0f) {
-            *eyeY += hold * w;
-        }
+    if (w >= 0.99f) {
+        camera->position.f[0] = *eyeX;
+        camera->position.f[1] = *eyeY;
+        camera->position.f[2] = *eyeZ;
+        AAD->unkA0 = distance * mc_reach;
+        AAD->unkA4 = AAD->unkA0;
     }
 }
 
@@ -861,7 +873,7 @@ RECOMP_PATCH void func_global_asm_8061D1FC(Actor* arg0) {
         }
     }
     if (modern_cam_enabled() && get_analog_allowed()) {
-        modern_camera_update(arg0, CaaD, touchCamMoved, touchCamX, touchCamY);
+        modern_camera_input(arg0, CaaD, touchCamMoved, touchCamX, touchCamY);
         return;
     }
     if ((analog_cam_enabled() && get_analog_allowed()) || touchCamMoved) {
