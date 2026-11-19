@@ -462,6 +462,8 @@ s16 func_global_asm_80665DE0(f32 arg0, f32 arg1, f32 arg2, f32 arg3);
 u8 func_global_asm_80671E00(f32 arg0, f32 arg1, f32 arg2, f32 arg3, s16 *arg4, s16 *arg5, u8 arg6, u16 arg7);
 extern u8 is_cutscene_active;
 
+#define MC_LOWEST 6.0f              // the lowest the camera goes: just above the ground
+
 static f32 mc_yaw = 0.0f;           // the camera's direction from the Kong (game angle units)
 static u8 mc_yaw_valid = FALSE;
 static f32 mc_yaw_velocity = 0.0f;
@@ -539,6 +541,23 @@ static u8 mc_ready(void) {
 
 static u8 mc_vine_state(Actor *kong) {
     return (kong != NULL) && ((kong->control_state == 0x57) || (kong->control_state == 0x58));
+}
+
+// Like get_analog_allowed, but crouching (and throwing an orange) doesn't hand the camera back
+// to the game: it kept the right-stick camera off there, which turned the view.
+static u8 mc_allowed(void) {
+    u32 i;
+
+    if (!modern_cam_enabled() || gameIsInDKTVMode()) {
+        return FALSE;
+    }
+    for (i = 0; i < sizeof(banned_analog_states); i++) {
+        if ((banned_analog_states[i] == gCurrentPlayer->control_state) &&
+            (banned_analog_states[i] != 0x3C) && (banned_analog_states[i] != 0x2C)) {
+            return FALSE;
+        }
+    }
+    return TRUE;
 }
 
 // Kong states where the game normally locks the camera, but the Modern Camera stays free:
@@ -647,7 +666,7 @@ static void modern_camera_input(Actor *camera, CameraPaad *CaaD, s32 touchMoved,
     if (touchMoved) {
         tilt += touchY;
     }
-    mc_height = mc_clamp(mc_height + tilt, -20.0f, 200.0f);
+    mc_height = mc_clamp(mc_height + tilt, MC_LOWEST, 200.0f);
 
     // The game's own camera state follows ours (the Kong's movement is relative to it, and the
     // game starts from it again when it takes over).
@@ -688,7 +707,7 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
     s32 i;
     u8 active;
 
-    active = (is_cutscene_active == 0) && modern_cam_enabled() && get_analog_allowed() && (target != NULL) &&
+    active = (is_cutscene_active == 0) && mc_allowed() && (target != NULL) &&
         (target == gCurrentPlayer) && mc_yaw_valid && !(AAD->unkAC & 0x2000) &&
         ((AAD->unkF3 == 1) || (AAD->unkF3 == 2) || (AAD->unkF3 == 5) || (AAD->unkF3 == 12)) && mc_ready();
     mc_weight += ((active ? 1.0f : 0.0f) - mc_weight) * 0.2f;
@@ -707,14 +726,21 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
     // The framed height: where the Kong last stood. Jumping doesn't move the camera; it only
     // follows in the air if the Kong rises well above (60), drops below, or stays off the
     // ground (~1.5 s: swimming, falling, flying). Trees and vines follow the Kong.
+    // Standing, it's the floor under the Kong (which doesn't change when it jumps, so neither
+    // taking off nor landing moves the camera; tiny bumps under 3 units are ignored).
     kongY = target->y_position;
     if ((kongY - target->floor) < 4.0f) {
         mc_air_frames = 0;
     } else {
         mc_air_frames++;
     }
-    if (!mc_focus_valid || (mc_air_frames == 0) || (mc_air_frames > 45) || (kongY < mc_ground_y) ||
-        modern_camera_free_state(target)) {
+    if (!mc_focus_valid || modern_camera_free_state(target) || (mc_air_frames > 45)) {
+        mc_ground_y = kongY;
+    } else if (mc_air_frames == 0) {
+        if (mc_abs(target->floor - mc_ground_y) >= 3.0f) {
+            mc_ground_y = target->floor;
+        }
+    } else if (kongY < mc_ground_y) {
         mc_ground_y = kongY;
     } else if (kongY > mc_ground_y + 60.0f) {
         mc_ground_y = kongY - 60.0f;
@@ -742,7 +768,13 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
 
     // Where the camera wants to be: out along its angle at the usual distance (a little closer
     // when low, further when high, further on vines), at its height above the framed ground.
-    distance = mc_distance * (0.85f + (0.3f * mc_clamp((mc_height + 20.0f) / 220.0f, 0.0f, 1.0f)));
+    // Like Odyssey: high, it's a little further out; tilted down towards the ground it comes in
+    // closer and closer, down to just above the ground near the Kong, looking up.
+    if (mc_height >= 40.0f) {
+        distance = mc_distance * (0.85f + (0.3f * mc_clamp((mc_height - 40.0f) / 160.0f, 0.0f, 1.0f)));
+    } else {
+        distance = mc_distance * (0.45f + (0.40f * mc_clamp((mc_height - MC_LOWEST) / (40.0f - MC_LOWEST), 0.0f, 1.0f)));
+    }
     if (mc_on_vine) {
         distance *= 1.2f;
     }
@@ -872,7 +904,7 @@ RECOMP_PATCH void func_global_asm_8061D1FC(Actor* arg0) {
             recomp_printf("Camera: mode %d, Kong state 0x%02X, map 0x%02X\n", lastMode, lastState, current_map);
         }
     }
-    if (modern_cam_enabled() && get_analog_allowed()) {
+    if (mc_allowed()) {
         modern_camera_input(arg0, CaaD, touchCamMoved, touchCamX, touchCamY);
         return;
     }
