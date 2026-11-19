@@ -479,7 +479,9 @@ static s16 mc_vine_heading = 0;
 static f32 mc_weight = 0.0f;        // 0 = the game's camera, 1 = the Modern Camera
 static f32 mc_focus_x = 0.0f, mc_focus_y = 0.0f, mc_focus_z = 0.0f;
 static u8 mc_focus_valid = FALSE;
-static f32 mc_ground_y = 0.0f;
+static f32 mc_ground_y = 0.0f;     // the height the camera should frame (the floor the Kong stands on)
+static f32 mc_frame_y = 0.0f;      // the height it frames now: eases to mc_ground_y
+static f32 mc_frame_speed = 0.0f;
 static s32 mc_air_frames = 0;
 static u8 mc_faded = FALSE;
 
@@ -746,13 +748,34 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
         mc_ground_y = kongY - 60.0f;
     }
 
+    // Landing on a higher (or lower) ledge, the whole view, camera and focus together, eases to
+    // the new height over about half a second (speeding up, then settling), like Odyssey,
+    // instead of snapping. Trees, vines, long falls and swimming follow more directly.
+    if (!mc_focus_valid) {
+        mc_frame_y = mc_ground_y;
+        mc_frame_speed = 0.0f;
+    } else if (modern_camera_free_state(target) || (mc_air_frames > 45)) {
+        mc_frame_y += (mc_ground_y - mc_frame_y) * 0.3f;
+        mc_frame_speed = 0.0f;
+    } else {
+        f32 gap = mc_ground_y - mc_frame_y;
+        mc_frame_speed += ((gap * 0.25f) - mc_frame_speed) * 0.35f;
+        mc_frame_y += mc_frame_speed;
+        if ((mc_abs(gap) < 0.5f) && (mc_abs(mc_frame_speed) < 0.5f)) {
+            mc_frame_y = mc_ground_y;
+            mc_frame_speed = 0.0f;
+        }
+    }
+
     // The focus trails the Kong slightly (lunges and attacks don't jolt the view); on a vine it
     // barely follows the swing, so it settles on the middle of the arc. Warps snap.
-    wantY = mc_ground_y + 18.0f;
-    if (!mc_focus_valid || (!mc_vine_state(target) && ((mc_abs(wantY - mc_focus_y) > 150.0f) ||
+    wantY = mc_frame_y + 18.0f;
+    if (!mc_focus_valid || (!mc_vine_state(target) && ((mc_abs(mc_ground_y - mc_frame_y) > 300.0f) ||
         (mc_abs(target->x_position - mc_focus_x) > 150.0f) || (mc_abs(target->z_position - mc_focus_z) > 150.0f)))) {
+        mc_frame_y = mc_ground_y;
+        mc_frame_speed = 0.0f;
         mc_focus_x = target->x_position;
-        mc_focus_y = wantY;
+        mc_focus_y = mc_frame_y + 18.0f;
         mc_focus_z = target->z_position;
         mc_focus_valid = TRUE;
         mc_reach = 1.0f;
@@ -762,7 +785,7 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
         mc_focus_z += (target->z_position - mc_focus_z) * 0.04f;
     } else {
         mc_focus_x += (target->x_position - mc_focus_x) * 0.35f;
-        mc_focus_y += (wantY - mc_focus_y) * 0.3f;
+        mc_focus_y = wantY;   // already eased (mc_frame_y)
         mc_focus_z += (target->z_position - mc_focus_z) * 0.35f;
     }
 
@@ -780,7 +803,7 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
     }
     mc_direction_with(mc_convention, ((s32)mc_yaw) & 0xFFF, &dx, &dz);
     wantX = mc_focus_x + (dx * distance);
-    wantYEye = mc_ground_y + mc_height;
+    wantYEye = mc_frame_y + mc_height;
     wantZ = mc_focus_z + (dz * distance);
 
     // Traced from the focus out: the first blocked point (narrowed to ~1 unit) limits how far
