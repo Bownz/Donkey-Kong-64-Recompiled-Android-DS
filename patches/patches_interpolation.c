@@ -84,6 +84,7 @@ Gfx *handle_interpolation(Gfx * dl, interpolationIDs id, u8 decrement) {
 }
 
 void modern_camera_frame(CameraPaad *AAD, f32 *atX, f32 *atY, f32 *atZ);
+u8 modern_camera_free_on_vine(CameraPaad *AAD);
 
 RECOMP_PATCH void func_global_asm_8061DBD4(Actor* arg0, f32* arg1, f32* arg2, f32* arg3, f32* arg4, f32* arg5, f32* arg6, f32* arg7, f32* arg8, f32* arg9) {
     CameraPaad* AAD;
@@ -97,6 +98,7 @@ RECOMP_PATCH void func_global_asm_8061DBD4(Actor* arg0, f32* arg1, f32* arg2, f3
     s32 var_s1;
     u16 temp_t0;
     f32 temp_f20;
+    u8 mcVineMode = 0;
 
     AAD = arg0->AAD_as_array[0];
     temp_v0 = AAD->unk0;
@@ -157,6 +159,12 @@ RECOMP_PATCH void func_global_asm_8061DBD4(Actor* arg0, f32* arg1, f32* arg2, f3
                         return;
                     }
                 }
+            }
+            // @recomp: Modern Camera: on a vine the game uses its own fixed camera mode (12);
+            // place the camera as the normal follow camera instead, then put the mode back.
+            mcVineMode = modern_camera_free_on_vine(AAD);
+            if (mcVineMode) {
+                AAD->unkF3 = 1;
             }
             func_global_asm_8061D6A8(AAD);
             if (AAD->unkAC & 0x80000000) {
@@ -380,6 +388,9 @@ RECOMP_PATCH void func_global_asm_8061DBD4(Actor* arg0, f32* arg1, f32* arg2, f3
                 }
             }
             break;
+    }
+    if (mcVineMode && (AAD->unkF3 == 1)) {
+        AAD->unkF3 = mcVineMode;
     }
     AAD->unkAC &= 0x7FFDAF0F;
     if (D_global_asm_807FBB64 & 0x8000) {

@@ -179,8 +179,16 @@ RECOMP_PATCH void func_global_asm_807144B8(s8 arg0) {
 extern s32 D_global_asm_807FBB64;
 extern int gameIsInDKTVMode(void);
 
+u8 modern_cam_enabled(void);
+u8 modern_camera_free_state(Actor *kong);
+
 // @recomp: Camera Type
 RECOMP_PATCH u8 func_global_asm_80621174(s32 arg0, PlayerAdditionalActorData *arg1, Actor *arg2) {
+    // @recomp: Modern Camera: the game never pushes the camera behind the Kong (during attacks,
+    // on trees and vines...); the Modern Camera's own gentle follow does that job.
+    if (modern_cam_enabled()) {
+        return FALSE;
+    }
     // Formatting is off here for better manual formatting. Whitespace doesn't affect the match here.
     // clang-format off
     return (arg2->control_state == 0x5B) ||
@@ -442,6 +450,35 @@ static f32 mc_tilt_velocity = 0.0f;
 static f32 mc_idle = 0.0f;
 static u8 mc_recentering = FALSE;
 static f32 mc_distance = 0.0f;   // the camera's usual distance (set on first use); 0 = not set yet
+static s16 mc_yaw = 0;            // the yaw the Modern Camera left last frame
+static u8 mc_yaw_valid = FALSE;
+
+// Kong states where the game normally locks the camera, but the Modern Camera stays free:
+// swinging on a vine (0x57, 0x58) and climbing a tree or pole (0x59, 0x5A).
+u8 modern_camera_free_state(Actor *kong) {
+    if (kong == NULL) {
+        return FALSE;
+    }
+    switch (kong->control_state) {
+        case 0x57:
+        case 0x58:
+        case 0x59:
+        case 0x5A:
+            return TRUE;
+    }
+    return FALSE;
+}
+
+// On a vine the game switches to its own camera mode (12); with the Modern Camera, the camera
+// update places it as the normal follow camera instead (patches_interpolation.c). Returns the
+// mode to put back afterwards, or 0.
+u8 modern_camera_free_on_vine(CameraPaad *AAD) {
+    if ((AAD->unkF3 == 12) && modern_cam_enabled() && get_analog_allowed() && (AAD->unk0 == gCurrentPlayer) &&
+        modern_camera_free_state(gCurrentPlayer)) {
+        return 12;
+    }
+    return 0;
+}
 
 s32 func_global_asm_8062133C(Actor*, Actor*, f32*, f32*, f32*, f32);
 u8 func_global_asm_80671E00(f32 arg0, f32 arg1, f32 arg2, f32 arg3, s16 *arg4, s16 *arg5, u8 arg6, u16 arg7);
@@ -498,6 +535,11 @@ static f32 mc_clear_distance(Actor *camera, CameraPaad *CaaD, f32 wanted) {
 static void modern_camera_update(Actor *camera, CameraPaad *CaaD, s32 touchMoved, f32 touchX, f32 touchY) {
     f32 stickX, stickY, dt, sensitivity, blend, yawStep, tilt, speed, follow, clear, wanted, height;
     s32 behind, diff;
+
+    // On trees and vines the game keeps turning the camera to its own angle; keep ours.
+    if (mc_yaw_valid && modern_camera_free_state(gCurrentPlayer)) {
+        CaaD->unkB2 = mc_yaw;
+    }
 
     recomp_analog_camera_get(&stickX, &stickY);
     dt = (f32)getFrameDelta();
@@ -588,6 +630,8 @@ static void modern_camera_update(Actor *camera, CameraPaad *CaaD, s32 touchMoved
         CaaD->unkA0 += (clear - CaaD->unkA0) * mc_clamp(0.08f * dt, 0.0f, 1.0f);
     }
     CaaD->unkA4 = CaaD->unkA0;
+    mc_yaw = CaaD->unkB2;
+    mc_yaw_valid = TRUE;
 }
 
 // Modern Camera framing: like Odyssey, the camera looks at the Kong (a point just above it, so
@@ -598,7 +642,9 @@ static void modern_camera_update(Actor *camera, CameraPaad *CaaD, s32 touchMoved
 // look-at output, every frame.
 extern u8 is_cutscene_active;
 static f32 mc_focus_weight = 0.0f;
+static f32 mc_focus_x = 0.0f;
 static f32 mc_focus_y = 0.0f;
+static f32 mc_focus_z = 0.0f;
 static u8 mc_focus_valid = FALSE;
 
 void modern_camera_frame(CameraPaad *AAD, f32 *atX, f32 *atY, f32 *atZ) {
@@ -617,17 +663,24 @@ void modern_camera_frame(CameraPaad *AAD, f32 *atX, f32 *atY, f32 *atZ) {
     if (target == NULL) {
         return;
     }
+    // The focus trails the Kong slightly (like Odyssey), so quick lunges and attacks don't jolt
+    // the view; it catches up within a few frames. Big jumps (warps) are followed at once.
     wantY = target->y_position + 18.0f;
-    if (!mc_focus_valid || (mc_abs(wantY - mc_focus_y) > 150.0f)) {
+    if (!mc_focus_valid || (mc_abs(wantY - mc_focus_y) > 150.0f) ||
+        (mc_abs(target->x_position - mc_focus_x) > 150.0f) || (mc_abs(target->z_position - mc_focus_z) > 150.0f)) {
+        mc_focus_x = target->x_position;
         mc_focus_y = wantY;
+        mc_focus_z = target->z_position;
         mc_focus_valid = TRUE;
     } else {
+        mc_focus_x += (target->x_position - mc_focus_x) * 0.35f;
         mc_focus_y += (wantY - mc_focus_y) * 0.3f;
+        mc_focus_z += (target->z_position - mc_focus_z) * 0.35f;
     }
     w = mc_focus_weight;
-    *atX += (target->x_position - *atX) * w;
+    *atX += (mc_focus_x - *atX) * w;
     *atY += (mc_focus_y - *atY) * w;
-    *atZ += (target->z_position - *atZ) * w;
+    *atZ += (mc_focus_z - *atZ) * w;
 }
 
 RECOMP_PATCH void func_global_asm_8061D1FC(Actor* arg0) {
