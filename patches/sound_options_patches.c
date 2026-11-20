@@ -1048,6 +1048,7 @@ extern OSContPad D_global_asm_807ECD58;   // controller 1 as read this frame
 static u8 fp_mode = FALSE;
 static f32 fp_trans = 1.0f;       // the move in / out: 0 -> 1 going in, 1 -> 0 coming out
 static s32 fp_behind_yaw = -1;    // leaving: the camera angle behind the Kong (-1: none)
+static u8 fp_resume_after_photo = FALSE;   // back into first person once the photo's taken
 static f32 fp_head_eye[6];        // the head view last frame (eye, look-at)
 static f32 fp_yaw = 0.0f;      // where you're looking: facing (like the Kong's y_rotation)
 static f32 fp_pitch = 0.0f;    // up (+) / down (-), angle units
@@ -1122,15 +1123,30 @@ static void fp_update(CameraPaad *CaaD) {
         }
         fp_mode = FALSE;
         fp_last_state = -1;
+        fp_resume_after_photo = FALSE;
         recomp_set_fp_status(0);
         return;
     }
     state = kong->control_state;
     // The game's own first person view (C-Up, the touch button): left again at once, and ours
     // switches on (or, if it's already on, off).
-    if ((state >= 2) && (state <= 5) && !((fp_last_state >= 2) && (fp_last_state <= 5))) {
-        func_global_asm_806EAB44(kong, state != 2);   // (2: on land; 3-5: in the water)
+    // (In the water, 3-5, the game's own first person view is kept, as it always was.)
+    if ((state == 2) && (fp_last_state != 2)) {
+        func_global_asm_806EAB44(kong, 0);
         fp_set_mode(kong, !fp_mode);
+    }
+    // Taking a photo (the camera, Kong states 0x64/0x65): the game's own camera view, then back
+    // into ours once the camera's put away.
+    if (fp_mode && ((state == 0x64) || (state == 0x65))) {
+        fp_set_mode(kong, FALSE);
+        fp_trans = 0.0f;          // (no move back out: straight to the photo view)
+        fp_behind_yaw = -1;
+        fp_resume_after_photo = TRUE;
+    } else if (fp_resume_after_photo && (state != 0x64) && (state != 0x65)) {
+        fp_resume_after_photo = FALSE;
+        if (!modern_camera_free_state(kong)) {
+            fp_set_mode(kong, TRUE);
+        }
     }
     fp_last_state = kong->control_state;
     // B leaves; so do trees, poles and vines (modern_camera_free_state), swimming (Kong states
