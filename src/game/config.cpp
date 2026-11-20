@@ -1420,46 +1420,34 @@ extern "C" void dk64_android_apply_experience(int modern) {
 
 extern "C" void dk64_android_restart_to_launcher();
 
-// Settings > Gameplay > Choose Experience: which one, then a confirmation; applied, then the
-// app restarts (to the main menu) so everything starts fresh with it.
-static void confirm_experience(int modern) {
-    const std::string name = modern ? "Modern" : "Classic";
-    const std::string what = modern
-        ? "Modern Camera, walking in first person, Odyssey-style movement and jump help, feel rumbles, "
-          "full-resolution widescreen graphics with anti-aliasing, quick Kong swapping and button icons that match your controller."
-        : "The N64 as it was: the original camera, controls, moves, 4:3 picture and resolution, cutscene borders and draw distance.";
+// Settings > Gameplay > Choose Experience: one prompt with both choices and Cancel; picking one
+// applies it and restarts the app (to the main menu) so everything starts fresh with it.
+// (A second, confirming prompt can't be opened from a prompt's button: the prompt code would
+// call back into the first one while holding its lock, and freeze.)
+void dk64_android_choose_experience() {
     const std::string unsaved = ultramodern::is_game_started()
         ? " Anything since your last save will be lost." : "";
     recompui::open_choice_prompt(
-        "Switch to " + name + "?",
-        what + "<br /><br />The app restarts to apply it." + unsaved,
-        "Restart Now",
+        "Choose Your Experience",
+        "Modern: the Modern Camera, walking in first person, smoother movement, jump help and feel rumbles, "
+        "sharp widescreen graphics and quick Kong swapping.\n\n"
+        "Classic: as close to the original N64 game as possible.\n\n"
+        "The app restarts to apply your choice." + unsaved,
+        "Modern",
         "Cancel",
-        [modern]() {
-            dk64_android_apply_experience(modern);
+        []() {
+            dk64_android_apply_experience(1);
             dk64_android_restart_to_launcher();
         },
         []() {},
         recompui::ButtonStyle::Primary,
-        recompui::ButtonStyle::Secondary,
+        recompui::ButtonStyle::Tertiary,
         true
     );
-}
-
-void dk64_android_choose_experience() {
-    recompui::open_choice_prompt(
-        "Choose Your Experience",
-        "<recomp-color primary>Modern</recomp-color>: the Modern Camera, walking in first person, smoother movement, "
-        "jump help and feel rumbles, sharp widescreen graphics and quick Kong swapping.<br /><br />"
-        "<recomp-color primary>Classic</recomp-color>: as close to the original N64 game as possible.",
-        "Modern",
-        "Classic",
-        []() { confirm_experience(1); },
-        []() { confirm_experience(0); },
-        recompui::ButtonStyle::Primary,
-        recompui::ButtonStyle::Secondary,
-        false
-    );
+    recompui::set_prompt_extra_button("Classic", []() {
+        dk64_android_apply_experience(0);
+        dk64_android_restart_to_launcher();
+    }, recompui::ButtonStyle::Secondary);
 }
 
 namespace recompui::config {
