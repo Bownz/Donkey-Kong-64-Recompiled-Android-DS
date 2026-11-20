@@ -441,15 +441,23 @@ final class RomIcons {
         return argb == null ? null : Bitmap.createBitmap(argb, spec.width, spec.height, Bitmap.Config.ARGB_8888);
     }
 
-    /** Of {@code frames} consecutive sprite frames, the one with the most visible pixels. */
+    /**
+     * Of {@code frames} consecutive sprite frames, the one with the most visible pixels (the
+     * face-on one). All the frames become its animation (starting from it), for the spin when
+     * one is collected.
+     */
     private static Bitmap loadWidestFrame(RandomAccessFile f, int first, int frames, int w, int h) {
-        int[] best = null;
+        Bitmap[] all = new Bitmap[frames];
+        int best = -1;
         int bestCount = 0;
         for (int i = 0; i < frames; i++) {
-            int[] argb = pixels(f, new Spec(TEXTURES_UNCOMPRESSED, first + i, w, h, true));
+            Spec spec = new Spec(TEXTURES_UNCOMPRESSED, first + i, w, h, true);
+            spec.lenient = true;   // edge-on frames are mostly empty
+            int[] argb = pixels(f, spec);
             if (argb == null) {
                 continue;
             }
+            all[i] = Bitmap.createBitmap(argb, w, h, Bitmap.Config.ARGB_8888);
             int n = 0;
             for (int p : argb) {
                 if ((p >>> 24) != 0) {
@@ -458,10 +466,22 @@ final class RomIcons {
             }
             if (n > bestCount) {
                 bestCount = n;
-                best = argb;
+                best = i;
             }
         }
-        return best == null ? null : Bitmap.createBitmap(best, w, h, Bitmap.Config.ARGB_8888);
+        if (best < 0) {
+            return null;
+        }
+        boolean complete = true;
+        Bitmap[] spin = new Bitmap[frames];
+        for (int i = 0; i < frames; i++) {
+            spin[i] = all[(best + i) % frames];
+            complete &= spin[i] != null;
+        }
+        if (complete) {
+            animations.put(all[best], spin);
+        }
+        return all[best];
     }
 
     /**

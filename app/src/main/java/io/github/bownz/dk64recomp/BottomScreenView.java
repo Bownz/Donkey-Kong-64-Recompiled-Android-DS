@@ -842,7 +842,7 @@ public final class BottomScreenView extends View {
             float sx = r.left + labelW + slot * i;
             float bx = sx + slot * 0.12f + badgeR, cy = r.centerY();
             String spinKey = "carry" + item.label;
-            watch("carryv" + item.label, item.have, spinKey);
+            watchUp("carryv" + item.label, item.have, spinKey);
             float spin = animProgress(spinKey, SPIN_MS);
             int saved = c.save();
             iconSpin = spin;
@@ -1557,6 +1557,14 @@ public final class BottomScreenView extends View {
     }
 
     /** Starts the animation when a watched value changes (not the first time it's seen). */
+    // Only when the value goes up (collecting one, not spending it).
+    private void watchUp(String key, int value, String animKey) {
+        Integer before = lastValue.put(key, value);
+        if (before != null && value > before) {
+            startAnim(animKey);
+        }
+    }
+
     private void watch(String key, int value, String animKey) {
         Integer before = lastValue.put(key, value);
         if (before != null && before != value) {
@@ -1809,7 +1817,7 @@ public final class BottomScreenView extends View {
             tag(c, tmp, value, complete);
             // Spins once (like the item in the game) when its count changes.
             String spinKey = "spin" + tab + r.label;
-            watch("row" + tab + ":" + shownLevel() + ":" + r.label, r.have, spinKey);
+            watchUp("row" + tab + ":" + shownLevel() + ":" + r.label, r.have, spinKey);
             float spin = animProgress(spinKey, SPIN_MS);
             if (spin >= 0) {
                 int saved = c.save();
@@ -1850,10 +1858,7 @@ public final class BottomScreenView extends View {
         if (iconSpin >= 0) {
             return RomIcons.spin(row.icon, iconSpin);
         }
-        if (state.paused || !state.inGame()) {
-            return row.icon;
-        }
-        return RomIcons.wobble(row.icon, android.os.SystemClock.uptimeMillis(), (row.label.hashCode() & 0x7FF) * 3L);
+        return row.icon;   // (still between collections)
     }
 
     private void drawItemIcon(Canvas c, float x, float y, float r, Row row) {
