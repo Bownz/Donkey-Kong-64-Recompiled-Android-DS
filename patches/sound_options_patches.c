@@ -3107,3 +3107,57 @@ RECOMP_PATCH void func_global_asm_80731030(void) { // clearTemporaryFlags()
         temporary_flag_block[flagIndex] = 0;
     }
 }
+// ---- Collectible flags (diagnostics) ---------------------------------------------------------
+// At boot the game numbers the flags of the actors that spawn collectibles (dirt patches,
+// Kasplats...) across all maps' setups, in map order (func_global_asm_80688940). The same, plus a
+// log line for each Rainbow Coin dirt patch (its map, level and flag), so the bottom screen's
+// per-level Rainbow Coin list can match the game.
+typedef struct {
+    u8 pad0[0x32];
+    s16 unk32;   // actor type - 0x10
+    s32 unk34;
+} CfSetupActor;
+
+extern u8 D_global_asm_807500B0;
+extern u16 D_global_asm_807FC408[];
+void func_global_asm_80631F58(void *setup, s32 *arg1, s32 **arg2);
+u16 func_global_asm_80688C84(u16 arg0);
+void func_global_asm_8066B424(void);
+void func_global_asm_8066B434(void *arg0, s32 arg1, s32 arg2);
+void *getPointerTableFile(enum pointertable_e pointerTableIndex, u32 fileIndex, u8 arg2, u8 arg3);
+u8 getLevelIndex(u8 map, u8 arg1);
+
+RECOMP_PATCH void func_global_asm_80688940(void) {
+    s32 actorIndex;
+    s32 numActors;
+    s32 mapIndex;
+    s32 sp60;
+    s32 *sp5C;
+    void *setup;
+    u16 count;
+    CfSetupActor *actors;
+
+    count = 0;
+    if (!D_global_asm_807500B0) {
+        D_global_asm_807500B0 = 1;
+        for (mapIndex = 0; mapIndex < 0xDD; mapIndex++) {
+            D_global_asm_807FC408[mapIndex] = count;
+            setup = getPointerTableFile(9, mapIndex, 1, 1);
+            if (setup) {
+                func_global_asm_80631F58(setup, &sp60, &sp5C);
+                numActors = *sp5C;
+                actors = (CfSetupActor *)&sp5C[1];
+                for (actorIndex = 0; actorIndex < numActors; actorIndex++) {
+                    u16 type = actors[actorIndex].unk32 + 0x10;
+                    if (type == ACTOR_RAINBOW_COIN_PATCH) {
+                        recomp_printf("Collectibles: Rainbow Coin dirt patch: map 0x%02X, level %d, flag 0x%03X\n",
+                            mapIndex, getLevelIndex(mapIndex, TRUE), count + 0x26B);
+                    }
+                    count += func_global_asm_80688C84(type);
+                }
+                func_global_asm_8066B424();
+                func_global_asm_8066B434(setup, 0x168, 0x34);
+            }
+        }
+    }
+}
