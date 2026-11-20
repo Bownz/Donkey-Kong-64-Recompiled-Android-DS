@@ -203,9 +203,11 @@ final class TouchMoves {
         }
 
         final int z = TouchInput.N64_Z;
-        // Putting the gun away from first-person aiming: leave first person first (C-Up), then
-        // Z + C-Left as usual, so the view doesn't stay in first person without the gun.
-        final long lead = (move == Move.WEAPON && state.gunOut && state.firstPerson) ? C_HOLD_MS + 250 : 0;
+        // From first person (either way round with the gun): leave first person first (C-Up),
+        // then Z + C-Left as usual, so the view doesn't stay in first person without the gun.
+        // Pulling the gun out from first person goes back into first person (aiming) after.
+        final long lead = (move == Move.WEAPON && state.firstPerson) ? C_HOLD_MS + 250 : 0;
+        final boolean backToFirstPerson = move == Move.WEAPON && state.firstPerson && !state.gunOut;
         if (lead > 0) {
             TouchInput.setN64Buttons(TouchInput.N64_C_UP);
             handler.postDelayed(() -> TouchInput.setN64Buttons(0), C_HOLD_MS);
@@ -213,11 +215,23 @@ final class TouchMoves {
         handler.postDelayed(() -> TouchInput.setN64Buttons(z), lead);                       // Z
         handler.postDelayed(() -> TouchInput.setN64Buttons(z | c), lead + Z_LEAD_MS);       // + C
         handler.postDelayed(() -> TouchInput.setN64Buttons(z), lead + Z_LEAD_MS + C_HOLD_MS);
+        final long done = lead + Z_LEAD_MS + C_HOLD_MS + Z_TAIL_MS;
+        if (backToFirstPerson) {
+            handler.postDelayed(() -> TouchInput.setN64Buttons(0), done);
+            // Once the gun's out (its animation), C-Up again: first person, aiming.
+            handler.postDelayed(() -> TouchInput.setN64Buttons(TouchInput.N64_C_UP), done + 600);
+            handler.postDelayed(() -> {
+                TouchInput.setN64Buttons(0);
+                running = null;
+                notifyListeners();
+            }, done + 600 + C_HOLD_MS);
+            return;
+        }
         handler.postDelayed(() -> {
             TouchInput.setN64Buttons(0);
             running = null;
             notifyListeners();
-        }, lead + Z_LEAD_MS + C_HOLD_MS + Z_TAIL_MS);
+        }, done);
     }
 
     /**
@@ -255,7 +269,7 @@ final class TouchMoves {
         }
         switch (move) {
             case FIRST_PERSON: return state.canFirstPerson || state.firstPerson || state.gunOut;
-            case WEAPON: return state.canZMoves || state.gunOut;
+            case WEAPON: return state.canZMoves || state.gunOut || state.firstPerson;
             default: return state.canZMoves && !state.gunOut;
         }
     }

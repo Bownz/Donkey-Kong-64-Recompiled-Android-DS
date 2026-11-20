@@ -1024,22 +1024,68 @@ static f32 fp_walk_phase = 0.0f;   // the step cycle, in angle units (a step per
 static f32 fp_walk_bob = 0.0f;     // 0..1: how much bob (eases in while walking, out when stopped)
 static u8 fp_walked = FALSE;       // walked this frame
 
+static f32 fp_vy = 0.0f;     // jumping in first person: the Kong's upward speed
+static u8 fp_air = FALSE;
+
+// First person states: 2-5 (looking), 0x62 (aiming the gun).
+static u8 fp_state(s32 state) {
+    return ((state >= 2) && (state <= 5)) || (state == 0x62);
+}
+
+// Walk in First Person: button prompts in the bottom right ("B Exit", and "ZR Shoot" above it
+// with the gun out), drawn with the game's own small text.
+Gfx *alignHUD(Gfx *dl, u8 alignment);
+Gfx *popHUD(Gfx *dl, u8 alignment);
+Gfx *printStyledText(Gfx *dl, s16 style, s16 x, s16 y, u8 *string, u32 extraBitfield);
+void addActorToTextOverlayRenderArray(void *arg0, void *arg1, u8 arg2);
+extern Gfx **D_1000118;
+extern Mtx D_2000180;
+extern Mtx D_20000C0;
+
+static u8 fp_gun_out(void) {
+    return (gCurrentPlayer != NULL) && ((gCurrentPlayer->control_state == 0x62) ||
+        ((gCurrentPlayer->PaaD != NULL) && (gCurrentPlayer->PaaD->unk8C != 0)));
+}
+
+static Gfx *fp_draw_prompts(Gfx *dl, Actor *unused) {
+    gSPDisplayList(dl++, &D_1000118);
+    gDPSetCombineMode(dl++, G_CC_MODULATEIA_PRIM, G_CC_MODULATEIA_PRIM);
+    gSPMatrix(dl++, &D_2000180, G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_MODELVIEW);
+    gSPMatrix(dl++, &D_20000C0, G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION);
+    gDPPipeSync(dl++);
+    dl = alignHUD(dl, ALIGN_RIGHT);
+    gDPSetPrimColor(dl++, 0, 0, 0xFF, 0xFF, 0xFF, 0xD0);
+    if (fp_gun_out()) {
+        dl = printStyledText(dl, 6, (320 - 12 - (8 * 8)) * 4, 204 * 4, (u8 *)"ZR SHOOT", 1);
+    }
+    dl = printStyledText(dl, 6, (320 - 12 - (6 * 8)) * 4, 218 * 4, (u8 *)"B EXIT", 1);
+    dl = popHUD(dl, ALIGN_RIGHT);
+    return dl;
+}
+
+static void fp_prompts(void) {
+    addActorToTextOverlayRenderArray(fp_draw_prompts, NULL, 5);
+}
+
 // Walk in First Person: the game's first person view stays where it was entered, so as the Kong
 // walks, the view is moved with it: the eye stays at the same place on the Kong as when first
 // person began (so the Kong stays out of sight), looking the way the game says, with a slight
-// step bob (1.5 units up and down per step, easing in and out).
+// step bob (0.8 units up and down per step, easing in and out).
 static u8 fp_view_valid = FALSE;
 static f32 fp_eye_off[3];
 
 static void first_person_view(Actor *target, f32 *eyeX, f32 *eyeY, f32 *eyeZ, f32 *atX, f32 *atY, f32 *atZ) {
     f32 lx, ly, lz, bob;
-    u8 fp = (target != NULL) && (target == gCurrentPlayer) && (target->control_state >= 2) &&
-        (target->control_state <= 5) && (recomp_get_game_feel() & FP_WALK);
+    u8 fp = (target != NULL) && (target == gCurrentPlayer) && fp_state(target->control_state) &&
+        (recomp_get_game_feel() & FP_WALK);
     if (!fp) {
         fp_view_valid = FALSE;
         fp_walk_bob = 0.0f;
+        fp_air = FALSE;
+        fp_vy = 0.0f;
         return;
     }
+    fp_prompts();
     // Until the Kong first moves, the game's own view is used (it zooms in to the Kong's head
     // as first person starts), and where its eye sits on the Kong is kept up to date.
     if (!fp_view_valid) {
@@ -1059,7 +1105,7 @@ static void first_person_view(Actor *target, f32 *eyeX, f32 *eyeY, f32 *eyeZ, f3
     lx = *atX - *eyeX;
     ly = *atY - *eyeY;
     lz = *atZ - *eyeZ;
-    bob = func_global_asm_80612794((s16)(((s32)fp_walk_phase) & 0xFFF)) * 1.5f * fp_walk_bob;
+    bob = func_global_asm_80612794((s16)(((s32)fp_walk_phase) & 0xFFF)) * 0.8f * fp_walk_bob;
     *eyeX = target->x_position + fp_eye_off[0];
     *eyeY = target->y_position + fp_eye_off[1] + bob;
     *eyeZ = target->z_position + fp_eye_off[2];
@@ -1581,6 +1627,28 @@ RECOMP_PATCH u16 func_global_asm_806DFF34(u16 arg0, u16 *arg1) {
             gunWas = gunNow;
         }
     }
+    // Walk in First Person: in first person (looking, or aiming the gun) the C buttons don't
+    // leave it; B does (it presses C-Up, which leaves first person); with the gun out, ZR
+    // shoots (it presses B). The bottom screen's buttons (which press C themselves: bit 4096 of
+    // the game feel flags while they do) still work, so the gun can be pulled out from here.
+    {
+        s32 feel = recomp_get_game_feel();
+        if ((gCurrentPlayer != NULL) && fp_state(gCurrentPlayer->control_state) && (feel & FP_WALK)) {
+            u16 b = result & B_BUTTON;
+            u16 r = result & R_TRIG;
+            result &= ~B_BUTTON;
+            if (!(feel & 4096)) {
+                result &= ~(U_CBUTTONS | D_CBUTTONS | L_CBUTTONS | R_CBUTTONS);
+            }
+            if (b) {
+                result |= U_CBUTTONS;
+            }
+            if (r && fp_gun_out()) {
+                result |= B_BUTTON;
+            }
+            return result;   // (instead of Shoot Gun With, below)
+        }
+    }
     // The gun is out: the Kong's "holding the gun" flag (PlayerAdditionalActorData 0x8C, what
     // the game checks to pull the gun out or put it away), or one of the gun states (aiming...).
     if ((gCurrentPlayer != NULL) && (((gCurrentPlayer->PaaD != NULL) && (gCurrentPlayer->PaaD->unk8C != 0)) ||
@@ -1595,12 +1663,6 @@ RECOMP_PATCH u16 func_global_asm_806DFF34(u16 arg0, u16 *arg1) {
                 result |= B_BUTTON;
             }
         }
-    }
-    // Walk in First Person: in first person the C buttons don't leave it (they'd end your walk);
-    // B leaves first person.
-    if ((gCurrentPlayer != NULL) && (gCurrentPlayer->control_state >= 2) && (gCurrentPlayer->control_state <= 5) &&
-        (recomp_get_game_feel() & FP_WALK)) {
-        result &= ~(U_CBUTTONS | D_CBUTTONS | L_CBUTTONS | R_CBUTTONS);
     }
     return result;
 }
@@ -2041,13 +2103,33 @@ void getStickPosition(s32 *x, s32 *y) {
 // the view, sideways to strafe) at a walk, with the level's walls and floors respected: it
 // won't walk into a wall, or step up or down more than a small step (no walking off ledges).
 
-static void first_person_walk(s32 lx, s32 ly) {
+
+static void first_person_walk(s32 lx, s32 ly, u8 jump) {
     Actor *kong = gCurrentActorPointer;
-    f32 mx, my, mag, fx, fz, rxv, rzv, nx, nz, floorY;
+    f32 mx, my, mag, fx, fz, rxv, rzv, nx, nz, floorY, under;
     s16 hitA = 0, hitB = 0xFFF;
     s32 facing;
     if ((kong == NULL) || !mc_ready()) {
         return;
+    }
+    // A jumps: a short hop (up about 45 units, like a normal jump), landing on whatever's below,
+    // including a ledge you've hopped up onto.
+    if (jump && !fp_air) {
+        fp_vy = 7.5f;
+        fp_air = TRUE;
+    }
+    if (fp_air) {
+        kong->y_position += fp_vy;
+        fp_vy -= 0.65f;
+        under = kong->y_position + 5.0f;
+        if (func_global_asm_80667110(kong->x_position, kong->z_position, &under) &&
+            (under <= kong->y_position + 5.0f) && (kong->y_position <= under) && (fp_vy <= 0.0f)) {
+            kong->y_position = under;
+            fp_air = FALSE;
+            fp_vy = 0.0f;
+            recomp_haptic_pulse(0.12f, 35);
+        }
+        fp_walked = TRUE;   // keep the view with the Kong
     }
     mx = (f32)lx / 80.0f;
     my = (f32)ly / 80.0f;
@@ -2074,9 +2156,17 @@ static void first_person_walk(s32 lx, s32 ly) {
         return;   // a wall
     }
     floorY = kong->y_position + 18.0f;
-    if (!func_global_asm_80667110(nx, nz, &floorY) || (floorY > kong->y_position + 18.0f) ||
-        (floorY < kong->y_position - 18.0f)) {
-        return;   // no floor there, or too big a step
+    if (!func_global_asm_80667110(nx, nz, &floorY) || (floorY > kong->y_position + 18.0f)) {
+        return;   // no floor there, or too high a step
+    }
+    if (fp_air) {
+        // In the air: carry on over (landing is worked out above).
+        kong->x_position = nx;
+        kong->z_position = nz;
+        return;
+    }
+    if (floorY < kong->y_position - 18.0f) {
+        return;   // walking, don't step off a ledge
     }
     fp_walk_phase += _sqrtf(((nx - kong->x_position) * (nx - kong->x_position)) +
                              ((nz - kong->z_position) * (nz - kong->z_position))) * (4096.0f / 28.0f);
@@ -2118,7 +2208,8 @@ RECOMP_PATCH void func_global_asm_806EA628(void) {
             }
         }
         if (walk) {
-            first_person_walk(D_global_asm_807FD610[cc_player_index].unk2E, D_global_asm_807FD610[cc_player_index].unk2F);
+            first_person_walk(D_global_asm_807FD610[cc_player_index].unk2E, D_global_asm_807FD610[cc_player_index].unk2F,
+                (D_global_asm_807FD610[cc_player_index].unk2C & A_BUTTON) != 0);
         }
         getStickPosition(&stick_x, &stick_y);
         temp_a0 = extra_player_info_pointer->unk104->additional_actor_data;

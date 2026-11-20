@@ -209,7 +209,10 @@ void dk64::android::set_game_feel_bit(int bit, bool enabled) {
 int dk64::android::game_feel_flags() {
     return game_feel_extra.load(std::memory_order_relaxed) | (jump_assist.load(std::memory_order_relaxed) ? 1 : 0) | (quick_turn.load(std::memory_order_relaxed) ? 2 : 0) |
         (smooth_running.load(std::memory_order_relaxed) ? 4 : 0) |
-        (movement_polish.load(std::memory_order_relaxed) ? 8 : 0);
+        (movement_polish.load(std::memory_order_relaxed) ? 8 : 0) |
+        // 4096: the touch buttons are pressing a C button right now (so first person lets it
+        // through: the first person button, the gun button...).
+        ((direct_n64_buttons.load(std::memory_order_relaxed) & 0x000F) != 0 ? 4096 : 0);
 }
 
 static std::atomic<bool> haptic_feedback{true};
