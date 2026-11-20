@@ -1266,6 +1266,33 @@ extern "C" int dk64_android_control_preset() {
     return value == "modern" ? 1 : 0;
 }
 
+// Configure Inputs with the Modern layout: each row named by what it does in the game (the
+// Classic layout shows the N64 buttons' own names). Null: keep the usual name.
+extern "C" const char *dk64_android_control_action_name(int input) {
+    using GI = recompinput::GameInput;
+    switch (static_cast<GI>(input)) {
+        case GI::A: return "Jump";
+        case GI::B: return "Attack";
+        case GI::Z: return "Crouch (Z moves)";
+        case GI::L: return "Camera Behind";
+        case GI::R: return "Shoot / Take Photo";
+        case GI::START: return "Pause";
+        case GI::C_UP: return "First Person / Instrument (Z)";
+        case GI::C_DOWN: return "Zoom / Fairy Camera (Z)";
+        case GI::C_LEFT: return "Gun (Z)";
+        case GI::C_RIGHT: return "Orange (Z)";
+        case GI::DPAD_UP: return "Arcade Up";
+        case GI::DPAD_DOWN: return "Arcade Down";
+        case GI::DPAD_LEFT: return "Previous Kong";
+        case GI::DPAD_RIGHT: return "Next Kong";
+        case GI::Y_AXIS_POS: return "Move Forward";
+        case GI::Y_AXIS_NEG: return "Move Back";
+        case GI::X_AXIS_NEG: return "Move Left";
+        case GI::X_AXIS_POS: return "Move Right";
+        default: return nullptr;
+    }
+}
+
 extern "C" void dk64_android_apply_control_preset(int modern) {
     using namespace recompinput;
     const int profile = profiles::get_sp_controller_profile_index();
