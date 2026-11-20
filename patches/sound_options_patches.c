@@ -1032,6 +1032,9 @@ u8 getBonePosition(Actor *actor, s32 boneIndex, f32 *x, f32 *y, f32 *z);
 void func_global_asm_806E225C(u8 arg0, u8 arg1);
 extern Actor *gCurrentActorPointer;
 f32 func_global_asm_806EA2D8(void);
+Gfx *func_global_asm_806FF01C(Gfx *dl, Actor *arg1);
+Gfx *func_global_asm_806FF75C(Gfx *dl, Actor *arg1);
+extern u8 *D_global_asm_807FD568;   // the current Kong's CharacterProgress (weapon at 0x2)
 void func_global_asm_806EAB44(Actor *arg0, u8 arg1);
 Gfx *alignHUD(Gfx *dl, u8 alignment);
 Gfx *popHUD(Gfx *dl, u8 alignment);
@@ -1073,12 +1076,6 @@ static Gfx *fp_draw_prompts(Gfx *dl, Actor *unused) {
     }
     dl = printStyledText(dl, 6, FP_TEXT_X * 4, FP_ROW_EXIT * 4, (u8 *)"EXIT", 1);
     dl = popHUD(dl, ALIGN_RIGHT);
-    // The crosshair, in the middle of the view (the 4:3 picture's middle is the screen's), with
-    // the gun out: where the first person shot goes.
-    if (fp_gun_out()) {
-        gDPSetPrimColor(dl++, 0, 0, 0xFF, 0xFF, 0xFF, 0xF0);
-        dl = printStyledText(dl, 6, (160 - 3) * 4, (120 - 5) * 4, (u8 *)"+", 1);
-    }
     return dl;
 }
 
@@ -1180,6 +1177,15 @@ static void fp_update(CameraPaad *CaaD) {
         CaaD->unkB0 = 0;
         kong->shadow_opacity = 0;   // unseen (still animated, so its head can be followed)
         addActorToTextOverlayRenderArray(fp_draw_prompts, NULL, 5);
+        // With the gun out, the game's own first person crosshair (or the sniper scope with
+        // that upgrade), as func_global_asm_806D2954 shows them: red, or green on a homing lock.
+        if (fp_gun_out()) {
+            if (D_global_asm_807FD568[2] == 7) {
+                addActorToTextOverlayRenderArray(func_global_asm_806FF75C, kong, 5);
+            } else {
+                addActorToTextOverlayRenderArray(func_global_asm_806FF01C, kong, 5);
+            }
+        }
     }
     recomp_set_fp_status((fp_mode ? 1 : 0) | ((fp_mode && fp_gun_out()) ? 2 : 0));
 }
