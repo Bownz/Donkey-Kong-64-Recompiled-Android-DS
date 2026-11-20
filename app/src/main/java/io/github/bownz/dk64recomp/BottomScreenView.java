@@ -707,6 +707,8 @@ public final class BottomScreenView extends View {
         } else if (titleIdle || (state.inGame() && !state.paused && !state.cutscene)) {
             // The health melons' gentle idle bob: a light 20 FPS redraw, not every display frame.
             postInvalidateDelayed(IDLE_FRAME_MS);
+        } else {
+            postInvalidateDelayed(1000);   // the backdrop's slow drift (a pixel at a time)
         }
     }
 
@@ -1230,24 +1232,186 @@ public final class BottomScreenView extends View {
     }
 
     /** Deep jungle backdrop with big leaves around the edges. */
+    // The jungle backdrop: drawn once into a bitmap a little bigger than the screen, then shown
+    // drifting very slowly by a few pixels (a slow figure-of-eight over a couple of minutes),
+    // so nothing sits on the same pixels for long (no burn-in on OLED screens).
+    private Bitmap jungle;
+    private int jungleW, jungleH, jungleMargin;
+    private static final double DRIFT_X_MS = 97_000, DRIFT_Y_MS = 151_000;
+
     private void drawJungle(Canvas c, int w, int h) {
-        paint.setStyle(Paint.Style.FILL);
-        paint.setAlpha(255);
-        paint.setShader(new LinearGradient(0, 0, 0, h, JUNGLE_TOP, JUNGLE_BOTTOM, Shader.TileMode.CLAMP));
-        c.drawRect(0, 0, w, h, paint);
-        paint.setShader(null);
-        // Soft light from above, through the canopy.
-        paint.setAlpha(255);
-        paint.setShader(new LinearGradient(0, 0, 0, h * 0.5f, Color.argb(60, 190, 230, 120), Color.argb(0, 190, 230, 120), Shader.TileMode.CLAMP));
-        c.drawRect(0, 0, w, h * 0.5f, paint);
-        paint.setShader(null);
-        float s = unit;
-        leaf(c, w * 0.02f, h * 1.02f, s * 0.42f, -60, Color.argb(120, 20, 96, 46));
-        leaf(c, w * 0.30f, h * 1.05f, s * 0.34f, -100, Color.argb(100, 30, 110, 50));
-        leaf(c, w * 0.62f, h * 1.03f, s * 0.38f, -75, Color.argb(110, 16, 84, 40));
-        leaf(c, w * 1.01f, h * 0.55f, s * 0.40f, -160, Color.argb(90, 26, 100, 48));
-        leaf(c, w * 0.50f, -h * 0.03f, s * 0.30f, 115, Color.argb(80, 40, 120, 56));
-        leaf(c, -w * 0.01f, h * 0.30f, s * 0.30f, 10, Color.argb(80, 24, 92, 44));
+        if (w <= 0 || h <= 0) {
+            return;
+        }
+        if (jungle == null || jungleW != w || jungleH != h) {
+            jungleMargin = Math.max(4, Math.round(Math.min(w, h) * 0.02f));
+            jungleW = w;
+            jungleH = h;
+            try {
+                jungle = Bitmap.createBitmap(w + 2 * jungleMargin, h + 2 * jungleMargin, Bitmap.Config.ARGB_8888);
+                paintJungle(new Canvas(jungle), w + 2 * jungleMargin, h + 2 * jungleMargin);
+            } catch (OutOfMemoryError e) {
+                jungle = null;
+            }
+        }
+        if (jungle == null) {
+            paint.setShader(new LinearGradient(0, 0, 0, h, JUNGLE_TOP, JUNGLE_BOTTOM, Shader.TileMode.CLAMP));
+            c.drawRect(0, 0, w, h, paint);
+            paint.setShader(null);
+            return;
+        }
+        long now = android.os.SystemClock.uptimeMillis();
+        float dx = (float) Math.sin(2 * Math.PI * (now % (long) DRIFT_X_MS) / DRIFT_X_MS) * jungleMargin;
+        float dy = (float) Math.sin(2 * Math.PI * (now % (long) DRIFT_Y_MS) / DRIFT_Y_MS) * jungleMargin;
+        c.drawBitmap(jungle, -jungleMargin + dx, -jungleMargin + dy, null);
+    }
+
+    /**
+     * A deep-jungle scene in the spirit of DK64's levels (our own drawing, no game art): light
+     * falling through the canopy, distant tree trunks, hanging vines, big palm fronds, ferns along
+     * the floor and a soft vignette, all kept dark so the boards on top stand out.
+     */
+    private void paintJungle(Canvas c, int w, int h) {
+        java.util.Random rnd = new java.util.Random(64);
+        float u = Math.min(w, h);
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        Path path = new Path();
+
+        // Sky through the canopy: deep teal above, earthy green below.
+        p.setShader(new LinearGradient(0, 0, 0, h,
+            new int[] { Color.rgb(28, 84, 64), Color.rgb(22, 66, 40), Color.rgb(12, 34, 20) },
+            new float[] { 0f, 0.45f, 1f }, Shader.TileMode.CLAMP));
+        c.drawRect(0, 0, w, h, p);
+        p.setShader(null);
+
+        // Sunbeams slanting down from the top left.
+        for (int i = 0; i < 4; i++) {
+            float x0 = w * (0.08f + 0.24f * i + rnd.nextFloat() * 0.06f);
+            float bw = u * (0.06f + rnd.nextFloat() * 0.07f);
+            float slant = h * 0.45f;
+            path.reset();
+            path.moveTo(x0, 0);
+            path.lineTo(x0 + bw, 0);
+            path.lineTo(x0 + bw * 2.2f + slant, h);
+            path.lineTo(x0 + slant, h);
+            path.close();
+            p.setShader(new LinearGradient(0, 0, 0, h, Color.argb(34, 236, 220, 120), Color.argb(0, 236, 220, 120), Shader.TileMode.CLAMP));
+            c.drawPath(path, p);
+        }
+        p.setShader(null);
+
+        // Distant trunks, misty.
+        for (int i = 0; i < 6; i++) {
+            float x = w * (i + 0.2f + rnd.nextFloat() * 0.6f) / 6f;
+            float tw = u * (0.035f + rnd.nextFloat() * 0.04f);
+            path.reset();
+            path.moveTo(x - tw * 0.4f, 0);
+            path.lineTo(x + tw * 0.4f, 0);
+            path.quadTo(x + tw * 0.55f, h * 0.6f, x + tw, h);
+            path.lineTo(x - tw, h);
+            path.quadTo(x - tw * 0.55f, h * 0.6f, x - tw * 0.4f, 0);
+            path.close();
+            p.setShader(new LinearGradient(0, 0, 0, h, Color.argb(70, 30, 60, 40), Color.argb(150, 26, 40, 22), Shader.TileMode.CLAMP));
+            c.drawPath(path, p);
+        }
+        p.setShader(null);
+
+        // Hanging vines with little leaves.
+        p.setStyle(Paint.Style.STROKE);
+        p.setStrokeCap(Paint.Cap.ROUND);
+        for (int i = 0; i < 7; i++) {
+            float x = w * (0.05f + 0.9f * rnd.nextFloat());
+            float len = h * (0.18f + rnd.nextFloat() * 0.45f);
+            float sway = u * (0.03f + rnd.nextFloat() * 0.05f) * (rnd.nextBoolean() ? 1 : -1);
+            path.reset();
+            path.moveTo(x, -2);
+            path.cubicTo(x + sway, len * 0.35f, x - sway, len * 0.7f, x + sway * 0.4f, len);
+            p.setStrokeWidth(u * 0.008f);
+            p.setColor(Color.argb(170, 18, 52, 26));
+            c.drawPath(path, p);
+            android.graphics.PathMeasure pm = new android.graphics.PathMeasure(path, false);
+            float[] pos = new float[2], tan = new float[2];
+            p.setStyle(Paint.Style.FILL);
+            for (float d = pm.getLength() * 0.15f; d < pm.getLength(); d += u * 0.05f) {
+                pm.getPosTan(d, pos, tan);
+                boolean left = ((int) (d / (u * 0.05f))) % 2 == 0;
+                smallLeaf(c, p, pos[0], pos[1], u * 0.035f, left ? 140 : 40, Color.argb(190, 30, 86, 38));
+            }
+            p.setStyle(Paint.Style.STROKE);
+        }
+        p.setStyle(Paint.Style.FILL);
+
+        // Palm fronds from the corners and sides.
+        frond(c, p, -u * 0.02f, h * 0.08f, u * 0.62f, 18, Color.argb(200, 20, 72, 34));
+        frond(c, p, w + u * 0.02f, h * 0.14f, u * 0.58f, 160, Color.argb(200, 22, 78, 36));
+        frond(c, p, w * 0.45f, -u * 0.04f, u * 0.40f, 70, Color.argb(160, 26, 88, 42));
+        frond(c, p, -u * 0.03f, h * 0.72f, u * 0.50f, -25, Color.argb(190, 16, 60, 28));
+        frond(c, p, w + u * 0.03f, h * 0.80f, u * 0.55f, 200, Color.argb(190, 16, 62, 30));
+
+        // Ferns and grass along the floor.
+        for (int i = 0; i < 14; i++) {
+            float x = w * (i + rnd.nextFloat()) / 14f;
+            float len = u * (0.10f + rnd.nextFloat() * 0.12f);
+            float a = -90 + (rnd.nextFloat() - 0.5f) * 70;
+            smallLeaf(c, p, x, h + u * 0.01f, len, a, Color.argb(220, 12, 44 + rnd.nextInt(16), 22));
+        }
+
+        // A few motes of light drifting in the beams.
+        for (int i = 0; i < 18; i++) {
+            float x = w * rnd.nextFloat(), y = h * rnd.nextFloat() * 0.8f;
+            p.setColor(Color.argb(40 + rnd.nextInt(40), 250, 236, 150));
+            c.drawCircle(x, y, u * (0.003f + rnd.nextFloat() * 0.004f), p);
+        }
+
+        // Vignette.
+        p.setShader(new android.graphics.RadialGradient(w / 2f, h / 2f, Math.max(w, h) * 0.75f,
+            new int[] { Color.argb(0, 0, 0, 0), Color.argb(0, 0, 0, 0), Color.argb(130, 0, 10, 4) },
+            new float[] { 0f, 0.55f, 1f }, Shader.TileMode.CLAMP));
+        c.drawRect(0, 0, w, h, p);
+        p.setShader(null);
+    }
+
+    /** A palm frond: a curved rib with leaflets along both sides, from (x, y) at angle degrees. */
+    private void frond(Canvas c, Paint p, float x, float y, float len, float angle, int color) {
+        int saved = c.save();
+        c.translate(x, y);
+        c.rotate(angle);
+        Path rib = new Path();
+        rib.moveTo(0, 0);
+        rib.quadTo(len * 0.5f, -len * 0.12f, len, len * 0.10f);
+        p.setStyle(Paint.Style.STROKE);
+        p.setStrokeWidth(len * 0.02f);
+        p.setColor(color);
+        c.drawPath(rib, p);
+        p.setStyle(Paint.Style.FILL);
+        android.graphics.PathMeasure pm = new android.graphics.PathMeasure(rib, false);
+        float[] pos = new float[2], tan = new float[2];
+        int n = 13;
+        for (int i = 1; i <= n; i++) {
+            float d = pm.getLength() * i / (n + 1f);
+            pm.getPosTan(d, pos, tan);
+            float ribAngle = (float) Math.toDegrees(Math.atan2(tan[1], tan[0]));
+            float l = len * 0.30f * (1f - 0.6f * i / n);
+            smallLeaf(c, p, pos[0], pos[1], l, ribAngle - 55, color);
+            smallLeaf(c, p, pos[0], pos[1], l, ribAngle + 55, color);
+        }
+        c.restoreToCount(saved);
+    }
+
+    /** A plain slender leaf (filled), from (x, y), length len, at angle degrees. */
+    private void smallLeaf(Canvas c, Paint p, float x, float y, float len, float angle, int color) {
+        int saved = c.save();
+        c.translate(x, y);
+        c.rotate(angle);
+        Path leafPath = new Path();
+        float wdt = len * 0.22f;
+        leafPath.moveTo(0, 0);
+        leafPath.quadTo(len * 0.4f, -wdt, len, 0);
+        leafPath.quadTo(len * 0.4f, wdt, 0, 0);
+        leafPath.close();
+        p.setColor(color);
+        c.drawPath(leafPath, p);
+        c.restoreToCount(saved);
     }
 
     /** A jungle leaf from (x, y), length len, pointing at angle degrees, with a midrib. */
