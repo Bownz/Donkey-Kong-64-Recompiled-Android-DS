@@ -895,7 +895,7 @@ public final class BottomScreenView extends View {
             String value = String.valueOf(item.have);
             text.setTextAlign(Paint.Align.LEFT);
             text.setTextSize(fitText(value, slot - (bx - sx) - badgeR * 1.15f, r.height() * 0.46f));
-            outlined(c, value, bx + badgeR * 1.05f, cy + text.getTextSize() * 0.36f, BANANA);
+            dkNumber(c, value, bx + badgeR * 1.05f, cy + text.getTextSize() * 0.36f, false);
         }
     }
 
@@ -1060,8 +1060,11 @@ public final class BottomScreenView extends View {
                 }
                 text.setTextAlign(Paint.Align.CENTER);
                 text.setTextSize(fitText(value, colW * 0.86f, tmp.height() * 0.46f));
-                outlined(c, value, board.left + nameW + colW * (col + 0.5f), cy + text.getTextSize() * 0.36f,
-                    locked || r == null || r.total == 0 ? Color.rgb(140, 130, 120) : complete ? COMPLETE : BANANA);
+                if (locked || r == null || r.total == 0) {
+                    outlined(c, value, board.left + nameW + colW * (col + 0.5f), cy + text.getTextSize() * 0.36f, Color.rgb(140, 130, 120));
+                } else {
+                    dkNumber(c, value, board.left + nameW + colW * (col + 0.5f), cy + text.getTextSize() * 0.36f, complete);
+                }
             }
         }
 
@@ -1554,6 +1557,72 @@ public final class BottomScreenView extends View {
         c.drawText(s, x, y, text);
     }
 
+    // DK64-style numbers: yellow with a thick red outline edged in dark brown (green with a dark
+    // green outline once complete), like the game's HUD and pause-screen counters.
+    private static final int DK_RED = Color.rgb(196, 22, 18), DK_EDGE = Color.rgb(48, 6, 2);
+    private static final int DK_GREEN_EDGE = Color.rgb(18, 92, 20);
+
+    private void dkNumber(Canvas c, String s, float x, float y, boolean complete) {
+        float size = text.getTextSize();
+        text.setStyle(Paint.Style.STROKE);
+        text.setStrokeJoin(Paint.Join.ROUND);
+        text.setStrokeWidth(size * 0.34f);
+        text.setColor(DK_EDGE);
+        c.drawText(s, x, y, text);
+        text.setStrokeWidth(size * 0.22f);
+        text.setColor(complete ? DK_GREEN_EDGE : DK_RED);
+        c.drawText(s, x, y, text);
+        text.setStyle(Paint.Style.FILL);
+        text.setColor(complete ? COMPLETE : BANANA);
+        c.drawText(s, x, y, text);
+    }
+
+    /**
+     * An action button as the end of a DK barrel: round-ended, end-grain staves, a thick iron
+     * hoop round the rim; it glows when lit (pressed, gun out, camera up).
+     */
+    private void barrelEnd(Canvas c, RectF r, boolean lit) {
+        float rad = r.height() * 0.45f;
+        paint.setStyle(Paint.Style.FILL);
+        if (lit) {
+            paint.setColor(Color.argb(90, 255, 224, 112));
+            tmp2.set(r.left - unit * 0.012f, r.top - unit * 0.012f, r.right + unit * 0.012f, r.bottom + unit * 0.012f);
+            c.drawRoundRect(tmp2, rad + unit * 0.012f, rad + unit * 0.012f, paint);
+        }
+        paint.setAlpha(255);
+        paint.setShader(new android.graphics.RadialGradient(r.centerX(), r.centerY(), Math.max(r.width(), r.height()) * 0.7f,
+            lit ? Color.rgb(212, 146, 76) : Color.rgb(190, 126, 62), lit ? Color.rgb(120, 70, 28) : Color.rgb(104, 58, 20), Shader.TileMode.CLAMP));
+        c.drawRoundRect(r, rad, rad, paint);
+        paint.setShader(null);
+        // End grain: the staves' joins.
+        int saved = c.save();
+        path.reset();
+        path.addRoundRect(r, rad, rad, Path.Direction.CW);
+        c.clipPath(path);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(unit * 0.003f);
+        paint.setColor(Color.argb(110, 60, 30, 8));
+        for (int i = 1; i < 5; i++) {
+            float x = r.left + r.width() * i / 5f;
+            c.drawLine(x, r.top, x, r.bottom, paint);
+        }
+        c.restoreToCount(saved);
+        // The iron hoop.
+        float hoop = r.height() * 0.07f;
+        tmp2.set(r.left + hoop / 2, r.top + hoop / 2, r.right - hoop / 2, r.bottom - hoop / 2);
+        paint.setStrokeWidth(hoop);
+        paint.setColor(Color.rgb(74, 74, 82));
+        c.drawRoundRect(tmp2, rad - hoop / 2, rad - hoop / 2, paint);
+        paint.setStrokeWidth(hoop * 0.3f);
+        paint.setColor(Color.argb(90, 255, 255, 255));
+        tmp2.set(r.left + hoop * 0.6f, r.top + hoop * 0.6f, r.right - hoop * 0.6f, r.bottom - hoop * 0.6f);
+        c.drawRoundRect(tmp2, rad - hoop * 0.6f, rad - hoop * 0.6f, paint);
+        paint.setStrokeWidth(unit * 0.004f);
+        paint.setColor(Color.rgb(32, 32, 36));
+        c.drawRoundRect(r, rad, rad, paint);
+        paint.setStyle(Paint.Style.FILL);
+    }
+
     /** A DK barrel (front view) filling r: bulging staves, two iron hoops. */
     private void barrel(Canvas c, RectF r, boolean lit, boolean locked, int litColor) {
         barrel(c, r, lit, locked, litColor, false);
@@ -1593,7 +1662,8 @@ public final class BottomScreenView extends View {
         }
         // Hoops.
         paint.setStrokeWidth(r.height() * 0.07f);
-        paint.setColor(locked ? Color.rgb(72, 72, 72) : Color.rgb(58, 58, 64));
+        // (Each Kong's barrel has hoops in its colour.)
+        paint.setColor(locked ? Color.rgb(72, 72, 72) : darker(litColor));
         float h1 = r.top + r.height() * 0.17f, h2 = r.bottom - r.height() * 0.17f;
         c.drawLine(r.left + bulge * 0.2f, h1, r.right - bulge * 0.2f, h1, paint);
         c.drawLine(r.left + bulge * 0.2f, h2, r.right - bulge * 0.2f, h2, paint);
@@ -2144,7 +2214,10 @@ public final class BottomScreenView extends View {
         float rad = r.height() * 0.3f;
         paint.setStyle(Paint.Style.FILL);
         paint.setAlpha(255);
-        paint.setShader(new LinearGradient(0, r.top, 0, r.bottom, Color.rgb(240, 150, 50), Color.rgb(184, 96, 26), Shader.TileMode.CLAMP));
+        // A pale tag (the DK numbers' red outline reads best on it); a little golden once complete.
+        paint.setShader(new LinearGradient(0, r.top, 0, r.bottom,
+            complete ? Color.rgb(255, 236, 150) : Color.rgb(252, 240, 210),
+            complete ? Color.rgb(232, 196, 90) : Color.rgb(226, 204, 160), Shader.TileMode.CLAMP));
         c.drawRoundRect(r, rad, rad, paint);
         paint.setShader(null);
         paint.setStyle(Paint.Style.STROKE);
@@ -2159,7 +2232,7 @@ public final class BottomScreenView extends View {
         text.setTextAlign(Paint.Align.CENTER);
         float textLeft = r.left + r.height() * 0.55f;   // clear of the badge
         text.setTextSize(fitText(value, r.right - textLeft - rad, r.height() * 0.68f));
-        outlined(c, value, (textLeft + r.right) / 2, r.centerY() + text.getTextSize() * 0.36f, complete ? COMPLETE : CREAM);
+        dkNumber(c, value, (textLeft + r.right) / 2, r.centerY() + text.getTextSize() * 0.36f, complete);
     }
 
     private static int darker(int color) {
@@ -2238,7 +2311,7 @@ public final class BottomScreenView extends View {
                 float sq = 1f - 0.08f * (float) Math.sin(Math.PI * squash);
                 c.scale(sq, sq, r.centerX(), r.centerY());
             }
-            woodPanel(c, r, r.height() * 0.18f, pressed);
+            barrelEnd(c, r, pressed);
 
             // Icon, with the count beside it.
             boolean hasCount = !counts[i].isEmpty();
@@ -2316,7 +2389,7 @@ public final class BottomScreenView extends View {
                     float grow = 1f + 0.3f * (float) Math.sin(Math.PI * bump);
                     c.scale(grow, grow, countRight - textWidth(counts[i]) / 2f, iconY);
                 }
-                outlined(c, tickedCount("tick" + move, counts[i]), countRight, iconY + text.getTextSize() * 0.36f, BANANA);
+                dkNumber(c, tickedCount("tick" + move, counts[i]), countRight, iconY + text.getTextSize() * 0.36f, false);
                 c.restoreToCount(countSaved);
             }
             c.restoreToCount(saved);
