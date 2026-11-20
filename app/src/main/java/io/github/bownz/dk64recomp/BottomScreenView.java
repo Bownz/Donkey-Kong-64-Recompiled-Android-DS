@@ -2311,12 +2311,21 @@ public final class BottomScreenView extends View {
                 float sq = 1f - 0.08f * (float) Math.sin(Math.PI * squash);
                 c.scale(sq, sq, r.centerX(), r.centerY());
             }
-            barrelEnd(c, r, pressed);
+            woodPanel(c, r, r.height() * 0.18f, pressed);
 
             // Icon, with the count beside it.
             boolean hasCount = !counts[i].isEmpty();
             float iconR = Math.min(r.height() * 0.36f, r.width() * (hasCount ? 0.22f : 0.3f));
-            float iconX = hasCount ? r.left + r.width() * 0.1f + iconR : r.centerX();
+            float iconX = r.centerX();
+            float countSize = 0f, countGap = iconR * 0.3f;
+            if (hasCount) {
+                // The item and its count side by side, close together, centred on the button.
+                text.setTextAlign(Paint.Align.LEFT);
+                countSize = fitText("000", r.width() * 0.42f, r.height() * 0.36f);
+                text.setTextSize(countSize);
+                float group = iconR * 2f + countGap + textWidth(counts[i]);
+                iconX = r.centerX() - group / 2f + iconR;
+            }
             float iconY = r.centerY();
             // Picking more up (the count going up): the item spins once, like the collectibles
             // (the game's own spin frames where it has them, otherwise a turn round).
@@ -2377,19 +2386,18 @@ public final class BottomScreenView extends View {
             }
             c.restoreToCount(iconSaved);
             if (hasCount) {
-                float countLeft = iconX + iconR * 1.2f;
-                float countRight = r.right - r.width() * 0.1f;
-                text.setTextAlign(Paint.Align.RIGHT);
-                text.setTextSize(fitText("000", countRight - countLeft, r.height() * 0.36f));
+                float countLeft = iconX + iconR + countGap;
+                text.setTextAlign(Paint.Align.LEFT);
+                text.setTextSize(countSize);
                 // The count bumps when it changes (an orange thrown, ammo used or picked up).
                 watch("count" + move, parseCount(counts[i]), "bump" + move);
                 float bump = animProgress("bump" + move, BUMP_MS);
                 int countSaved = c.save();
                 if (bump >= 0) {
                     float grow = 1f + 0.3f * (float) Math.sin(Math.PI * bump);
-                    c.scale(grow, grow, countRight - textWidth(counts[i]) / 2f, iconY);
+                    c.scale(grow, grow, countLeft + textWidth(counts[i]) / 2f, iconY);
                 }
-                dkNumber(c, tickedCount("tick" + move, counts[i]), countRight, iconY + text.getTextSize() * 0.36f, false);
+                dkNumber(c, tickedCount("tick" + move, counts[i]), countLeft, iconY + text.getTextSize() * 0.36f, false);
                 c.restoreToCount(countSaved);
             }
             c.restoreToCount(saved);

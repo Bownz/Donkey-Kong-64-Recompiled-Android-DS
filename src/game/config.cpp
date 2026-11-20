@@ -361,6 +361,95 @@ extern "C" void dk64_android_set_button_icons(int enabled);
 extern "C" int dk64_android_has_second_screen();
 extern "C" void dk64_android_edit_touch_layout();
 
+// Combined options (see add_dual_screen_options): an option made of a few others.
+struct CombinedOption {
+    const char *id;
+    const char *name;
+    const char *desc;
+    std::vector<recomp::config::ConfigOptionEnumOption> choices;   // the last one: Custom
+    std::vector<std::string> parts;                               // the options it sets
+    std::vector<std::vector<uint32_t>> sets;                       // their values, per choice
+    bool second_screen_only;
+};
+static bool combined_syncing = false;
+
+static const std::vector<CombinedOption> &combined_options() {
+    static const std::vector<CombinedOption> list = {
+        { "android_bottom_layout", "Bottom Screen",
+          "What the second screen shows: <recomp-color primary>Info only</recomp-color> (health, Kongs and collectibles), "
+          "<recomp-color primary>Info + Buttons</recomp-color> (also the oranges, gun, instrument, camera and first person buttons), "
+          "or <recomp-color primary>Buttons on Z</recomp-color> (the buttons slide in while you hold Z). Off leaves the second screen free.",
+          { {0u, "Off", "Off"}, {1u, "Info", "Info only"}, {2u, "Buttons", "Info + Buttons"}, {3u, "OnZ", "Buttons on Z"}, {4u, "Custom", "Custom"} },
+          { "android_bottom_screen", "android_bottom_buttons", "android_bottom_first_person" },
+          { {0u, 1u, 1u}, {1u, 0u, 0u}, {1u, 1u, 1u}, {1u, 2u, 1u} }, true },
+        { "android_touch_feedback_level", "Touch Feedback",
+          "A short vibration when you press a touch button, and how strong.",
+          { {0u, "Off", "Off"}, {1u, "Light", "Light"}, {2u, "Medium", "Medium"}, {3u, "Strong", "Strong"}, {4u, "Custom", "Custom"} },
+          { "android_touch_feedback", "android_touch_feedback_strength" },
+          { {0u, 2u}, {1u, 1u}, {1u, 2u}, {1u, 3u} }, false },
+        { "android_feel_rumbles", "Feel Rumbles",
+          "Small rumbles for game feel, like recent 3D platformers: landings, skids, each banana and coin, a Golden Banana, "
+          "shots and oranges, getting hurt, running into walls, playing an instrument, and hits that land with a small "
+          "camera punch. On your controller, or the phone with touch controls; as strong as Rumble Strength.",
+          { {0u, "Off", "Off"}, {1u, "On", "On"}, {2u, "Custom", "Custom"} },
+          { "android_haptic_feedback", "android_hit_feel" },
+          { {0u, 0u}, {1u, 1u} }, false },
+        { "android_first_person_mode", "First Person",
+          "<recomp-color primary>Classic</recomp-color>: as on the N64. "
+          "<recomp-color primary>Right Stick Looks</recomp-color>: the game's own view, looking with the right stick. "
+          "<recomp-color primary>Modern</recomp-color>: walk with the left stick and look with the right (in the water too), "
+          "ZR shoots, B leaves, with smoother looking, a kick when you shoot and a dip when you land.",
+          { {0u, "Classic", "Classic"}, {1u, "RightStick", "Right Stick Looks"}, {2u, "Modern", "Modern"}, {3u, "Custom", "Custom"} },
+          { "android_fp_right_stick", "android_fp_walk", "android_fp_polish" },
+          { {0u, 0u, 0u}, {1u, 0u, 0u}, {1u, 1u, 1u} }, false },
+        { "android_jump_help", "Jump Help",
+          "<recomp-color primary>Jump Assist</recomp-color>: a jump pressed just before landing, or just after running off a ledge, still happens. "
+          "<recomp-color primary>Full</recomp-color>: also steer much more in mid-air (pulling back brakes instead of flipping round).",
+          { {0u, "Off", "Off"}, {1u, "Assist", "Jump Assist"}, {2u, "Full", "Full"}, {3u, "Custom", "Custom"} },
+          { "android_jump_assist", "android_air_control" },
+          { {0u, 0u}, {1u, 0u}, {1u, 1u} }, false },
+        { "android_movement", "Movement",
+          "<recomp-color primary>Modern</recomp-color>: Odyssey-style running. Speed builds and eases off smoothly, "
+          "reversing gives a quick skid turn, running feels more responsive, and you can jump straight out of a punch or a roll, keeping its speed.",
+          { {0u, "Classic", "Classic"}, {1u, "Modern", "Modern"}, {2u, "Custom", "Custom"} },
+          { "android_quick_turn", "android_smooth_running", "android_movement_polish", "android_move_chaining" },
+          { {0u, 0u, 0u, 0u}, {1u, 1u, 1u, 1u} }, false },
+    };
+    return list;
+}
+
+// Sets each combined option from the options it's made of (Custom if they match none of its
+// choices). Called once the settings are loaded, and after the Experience changes them.
+void dk64_sync_combined_options() {
+    recomp::config::Config &dual = recompui::config::get_config("dual_screen");
+    combined_syncing = true;
+    for (const CombinedOption &co : combined_options()) {
+        uint32_t found = static_cast<uint32_t>(co.sets.size());   // Custom
+        for (size_t c = 0; c < co.sets.size() && found == co.sets.size(); c++) {
+            bool match = true;
+            for (size_t i = 0; i < co.parts.size(); i++) {
+                const auto v = dual.get_option_value(co.parts[i]);
+                // Off for the bottom screen / touch feedback: the others don't matter.
+                if ((i > 0) && (c == 0) && (co.sets[0][0] == 0u) &&
+                    (std::string(co.id) == "android_bottom_layout" || std::string(co.id) == "android_touch_feedback_level")) {
+                    continue;
+                }
+                if (std::get<uint32_t>(v) != co.sets[c][i]) {
+                    match = false;
+                    break;
+                }
+            }
+            if (match) {
+                found = static_cast<uint32_t>(c);
+            }
+        }
+        if (std::get<uint32_t>(dual.get_option_value(co.id)) != found) {
+            dual.update_option_value(co.id, found);
+        }
+    }
+    combined_syncing = false;
+}
+
 static void add_dual_screen_options(recomp::config::Config &config) {
     using EnumOptionVector = const std::vector<recomp::config::ConfigOptionEnumOption>;
     // Devices with one screen: the bottom screen's options (Bottom Screen, Touch Kong Swap)
@@ -642,8 +731,6 @@ static void add_dual_screen_options(recomp::config::Config &config) {
     // More modern-platformer options (patches/game_feel_patches.c), each a bit of the game feel flags.
     struct GameFeelOption { const char *id; const char *name; const char *desc; int bit; };
     static const GameFeelOption game_feel_options[] = {
-        { "android_ledge_grab", "Ledge Grab",
-          "A jump that falls just short of a ledge is caught and the Kong pulls itself up onto it.", 16 },
         { "android_move_chaining", "Move Chaining",
           "Jump straight out of a punch or a running attack, keeping its speed (a roll into a jump goes further).", 32 },
         { "android_air_control", "Air Control",
@@ -744,6 +831,32 @@ static void add_dual_screen_options(recomp::config::Config &config) {
                 recompui::config::get_config("dual_screen").save_config();
             }
         });
+
+    // ---- Combined options --------------------------------------------------------------------
+    // Each sets a few of the options above (which stay, unlisted, and keep their saved values).
+    // They show "Custom" when those have been mixed some other way (by an older version, or a
+    // future Advanced list). Their own values are only derived (dk64_sync_combined_options).
+    for (const CombinedOption &co : combined_options()) {
+        config.add_enum_option(co.id, co.name, co.desc, co.choices, 0u, co.second_screen_only && one_screen);
+        const CombinedOption *opt = &co;
+        config.add_option_change_callback(co.id,
+            [opt](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
+                if ((context == recomp::config::OptionChangeContext::Load) || combined_syncing) {
+                    return;
+                }
+                const uint32_t choice = std::get<uint32_t>(cur);
+                if (choice >= opt->sets.size()) {
+                    return;   // Custom: leave them as they are
+                }
+                recomp::config::Config &dual = recompui::config::get_config("dual_screen");
+                for (size_t i = 0; i < opt->parts.size(); i++) {
+                    dual.update_option_value(opt->parts[i], opt->sets[choice][i]);
+                }
+                if (context == recomp::config::OptionChangeContext::Permanent) {
+                    dual.save_config();
+                }
+            });
+    }
 }
 #endif
 
@@ -997,41 +1110,31 @@ void dk64::init_config() {
             configure,
             option(g, gopts::joystick_deadzone),
             option(g, gopts::rumble_strength),
-            option(d, "android_haptic_feedback"),
-            option(d, "android_gun_button"),
-            option(d, "android_jump_assist"),
-            option(d, "android_quick_turn"),
-            option(d, "android_smooth_running"),
-            option(d, "android_movement_polish"),
-            option(d, "android_ledge_grab"),
-            option(d, "android_move_chaining"),
-            option(d, "android_air_control"),
-            option(d, "android_hit_feel"),
-            option(d, "android_fast_transitions"),
-            option(d, "android_fp_right_stick"),
-            option(d, "android_fp_walk"),
-            option(d, "android_camera_polish"),
-            option(d, "android_fp_polish"),
-            option(g, keys::swimming_invert_mode),
             option(d, "android_button_icons"),
-            header("Touch"),
-            option(d, "android_touch_controls"),
-            edit_touch,
-            option(d, "android_bottom_screen"),
-            option(d, "android_bottom_buttons"),
-            option(d, "android_bottom_first_person"),
-            option(d, "android_drag_camera"),
-            option(d, "android_touch_kong_swap"),
-            option(d, "android_touch_feedback"),
-            option(d, "android_touch_feedback_strength"),
             header("Camera"),
             option(g, keys::camera_type),
+            option(d, "android_camera_polish"),
             option(g, keys::analog_camera_sensitivity),
             option(g, keys::third_person_camera_invert_mode),
+            header("First Person"),
+            option(d, "android_first_person_mode"),
+            option(d, "android_gun_button"),
             option(g, keys::first_person_invert_mode),
             header("Gyro"),
             option(g, gopts::gyro_sensitivity),
             option(g, keys::gyro_invert_mode),
+            header("Swimming"),
+            option(g, keys::swimming_invert_mode),
+        }, { g, d });
+
+        recompui::config::create_layout_tab("Touch", "touch", {
+            option(d, "android_touch_controls"),
+            edit_touch,
+            option(d, "android_drag_camera"),
+            option(d, "android_touch_feedback_level"),
+            header("Bottom Screen"),
+            option(d, "android_bottom_layout"),
+            option(d, "android_touch_kong_swap"),
         }, { g, d });
 
         auto &sound_config = recompui::config::create_sound_tab("Audio");
@@ -1060,12 +1163,18 @@ void dk64::init_config() {
 
         recompui::config::create_layout_tab("Gameplay", "gameplay", {
             option(g, "android_experience"),
+            header("Game Feel"),
+            option(d, "android_movement"),
+            option(d, "android_jump_help"),
+            option(d, "android_feel_rumbles"),
+            option(d, "android_fast_transitions"),
+            header("Story"),
             option(g, keys::story_skip),
-            option(g, keys::lightning_flashes),
             option(g, keys::skip_launcher),
+            option(g, keys::lightning_flashes),
             header("Storage"),
             files,
-        }, { g });
+        }, { g, d });
     }
 
     set_control_defaults();
@@ -1102,6 +1211,7 @@ void dk64::init_config() {
     recompui::config::finalize();
 
 #if defined(__ANDROID__)
+    dk64_sync_combined_options();   // the combined options from what was loaded
     // Once: set-ups from before B backed out of menus get Back (Menu) on B.
     {
         const std::filesystem::path marker = recomp::get_config_path() / "menu_back_b.txt";
@@ -1268,12 +1378,13 @@ extern "C" void dk64_android_apply_experience(int modern) {
     dual.update_option_value("android_quick_turn", static_cast<uint32_t>(modern ? 1u : 0u));
     dual.update_option_value("android_smooth_running", static_cast<uint32_t>(modern ? 1u : 0u));
     dual.update_option_value("android_movement_polish", static_cast<uint32_t>(modern ? 1u : 0u));
-    for (const char *id : { "android_ledge_grab", "android_move_chaining", "android_air_control",
+    for (const char *id : { "android_move_chaining", "android_air_control",
                             "android_hit_feel", "android_fast_transitions",
                             "android_fp_right_stick", "android_fp_walk",
                             "android_camera_polish", "android_fp_polish" }) {
         dual.update_option_value(id, static_cast<uint32_t>(modern ? 1u : 0u));
     }
+    dk64_sync_combined_options();
     dual.save_config();
 
     recomp::config::Config &general = recompui::config::get_general_config();

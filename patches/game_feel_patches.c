@@ -63,7 +63,6 @@ typedef struct {
 #define GF_QUICK_TURN 2
 #define GF_SMOOTH_RUN 4
 #define GF_POLISH 8
-#define GF_LEDGE_GRAB 16
 #define GF_MOVE_CHAIN 32
 #define GF_AIR_CONTROL 64
 #define GF_HIT_FEEL 128
@@ -414,13 +413,6 @@ static void gf_wall_bump(Actor *kong, s32 state, u8 onGround) {
     }
 }
 
-// ---- Ledge Grab ------------------------------------------------------------------------------
-// A jump that falls just short of a ledge (the Kong's feet up to ~38 units below its top, the
-// ledge just ahead in the direction it's moving) is caught: the Kong is lifted up level with the
-// top over a few frames, then stepped onto it, and lands there as usual.
-static s32 gf_ledge_frames = 0;      // >0: climbing
-static s32 gf_ledge_cooldown = 0;
-static f32 gf_ledge_from[3], gf_ledge_to[3];
 static f32 gf_prev_x = 0.0f, gf_prev_z = 0.0f;
 
 static u8 gf_air_state(s32 state) {
@@ -434,64 +426,6 @@ static u8 gf_air_state(s32 state) {
             return TRUE;
     }
     return FALSE;
-}
-
-static void gf_ledge_grab(Actor *kong, s32 state, u8 onGround, f32 mvx, f32 mvz) {
-    f32 len, fx, fz, px, pz, top, t, e;
-    if (gf_ledge_cooldown > 0) {
-        gf_ledge_cooldown--;
-    }
-    if (gf_ledge_frames > 0) {
-        // Climbing: first up (frames 1-5, clear of the ledge's face), then on (6-8).
-        gf_ledge_frames++;
-        if (gf_ledge_frames <= 5) {
-            t = (f32)(gf_ledge_frames - 1) / 4.0f;
-            e = t * t * (3.0f - (2.0f * t));
-            kong->y_position = gf_ledge_from[1] + ((gf_ledge_to[1] - gf_ledge_from[1]) * e);
-            kong->x_position = gf_ledge_from[0];
-            kong->z_position = gf_ledge_from[2];
-        } else {
-            t = (f32)(gf_ledge_frames - 5) / 3.0f;
-            kong->y_position = gf_ledge_to[1];
-            kong->x_position = gf_ledge_from[0] + ((gf_ledge_to[0] - gf_ledge_from[0]) * t);
-            kong->z_position = gf_ledge_from[2] + ((gf_ledge_to[2] - gf_ledge_from[2]) * t);
-        }
-        kong->y_velocity = 0.0f;
-        if (gf_ledge_frames >= 8) {
-            gf_ledge_frames = 0;
-            gf_ledge_cooldown = 20;
-        }
-        return;
-    }
-    if (onGround || !gf_air_state(state) || (kong->y_velocity >= 0.0f) || (gf_ledge_cooldown > 0) ||
-        modern_camera_free_state(kong) || (((kong->unk6A & 2) != 0) && (kong->y_position < kong->unkAC))) {
-        return;
-    }
-    len = _sqrtf((mvx * mvx) + (mvz * mvz));
-    if ((len < 0.5f) || (len > 40.0f)) {
-        return;   // falling straight down, or a warp
-    }
-    fx = mvx / len;
-    fz = mvz / len;
-    px = kong->x_position + (fx * 24.0f);
-    pz = kong->z_position + (fz * 24.0f);
-    top = kong->y_position + 40.0f;
-    if (!func_global_asm_80667110(px, pz, &top) || (top > kong->y_position + 40.0f)) {
-        return;
-    }
-    // The ledge's top is above the feet but within reach, and well above the floor under the
-    // Kong (a real ledge, not a slope).
-    if ((top <= kong->y_position + 2.0f) || (top > kong->y_position + 38.0f) || (kong->floor > top - 20.0f)) {
-        return;
-    }
-    gf_ledge_from[0] = kong->x_position;
-    gf_ledge_from[1] = kong->y_position;
-    gf_ledge_from[2] = kong->z_position;
-    gf_ledge_to[0] = kong->x_position + (fx * 26.0f);
-    gf_ledge_to[1] = top + 2.0f;
-    gf_ledge_to[2] = kong->z_position + (fz * 26.0f);
-    gf_ledge_frames = 1;
-    recomp_haptic_pulse(0.15f, 40);
 }
 
 // ---- Move Chaining -------------------------------------------------------------------------
@@ -523,7 +457,7 @@ static void gf_move_chain(Actor *kong, PlayerAdditionalActorData *paad, s32 stat
 // the direction you jumped in); pulling back brakes instead of flipping round.
 static void gf_air_control(Actor *kong, PlayerAdditionalActorData *paad, s32 state, u8 onGround) {
     s32 diff;
-    if (onGround || !gf_air_state(state) || (gf_ledge_frames > 0) || (paad->unk4 < 5.0f)) {
+    if (onGround || !gf_air_state(state) || (paad->unk4 < 5.0f)) {
         return;
     }
     diff = ((((kong->unkEE & 0xFFF) - (kong->y_rotation & 0xFFF)) + 0x800) & 0xFFF) - 0x800;
@@ -757,13 +691,6 @@ void game_feel_update(void) {
     }
     gf_wall_bump(kong, state, onGround);
     {
-        f32 mvx = kong->x_position - gf_prev_x;
-        f32 mvz = kong->z_position - gf_prev_z;
-        if (flags & GF_LEDGE_GRAB) {
-            gf_ledge_grab(kong, state, onGround, mvx, mvz);
-        } else {
-            gf_ledge_frames = 0;
-        }
         gf_prev_x = kong->x_position;
         gf_prev_z = kong->z_position;
     }
