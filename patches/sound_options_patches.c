@@ -13,6 +13,7 @@ RECOMP_DECLARE_EVENT(recomp_on_new_file_start());
 RECOMP_DECLARE_EVENT(recomp_on_dirty_file_start());
 RECOMP_DECLARE_EVENT(recomp_on_flag_check(s16 *flag, u8 *flag_type));
 extern s32 dk64_android_tag_target; // android_hooks.c
+extern s32 dk64_in_every_frame_event; // boot_logos_patches.c
 extern f32 loading_zone_transition_speed;
 extern u8 is_cutscene_active;
 RECOMP_DECLARE_EVENT(recomp_on_flag_change(s16 *flag, u8 *target_state, u8 *flag_type));
@@ -2990,11 +2991,10 @@ RECOMP_PATCH u8 isFlagSet(s16 flagIndex, u8 flagType) { // TODO: Can we use the 
     // freed for the moment it takes Tag Anywhere to swap to them. Never while a map is loading
     // or a cutscene runs: the map would be built as if the other Kongs were still caged (they
     // would stand at their rescue spots for the rest of the visit).
-    // Only while the swap's D-Pad press is actually held (a few frames): any other check during
-    // the swap (e.g. a caged Kong's spawner as you walk near the cage) sees the real flags, or
+    // Only inside the mods' per-frame event (Tag Anywhere choosing the next Kong): the game's own
+    // checks during the swap (e.g. a caged Kong's spawner near its cage) see the real flags, or
     // that Kong would stand in its opened cage for the rest of the visit.
-    if ((dk64_android_tag_target >= 0) && (flagType == FLAG_TYPE_PERMANENT) &&
-        (D_global_asm_807ECD58.button & (L_JPAD | R_JPAD)) &&
+    if ((dk64_android_tag_target >= 0) && (flagType == FLAG_TYPE_PERMANENT) && dk64_in_every_frame_event &&
         (loading_zone_transition_speed <= 0.0f) && (is_cutscene_active == 0)) {
         static const s16 kong_freed_flags[5] = { 0x181, 0x006, 0x046, 0x042, 0x075 };
         s32 k;
@@ -3038,6 +3038,24 @@ RECOMP_PATCH u8 isFlagSet(s16 flagIndex, u8 flagType) { // TODO: Can we use the 
                         flagIndex, (k < 5) ? "Kong freed" : ((k == 5) ? "Shockwave" : "Japes Rainbow Coin"),
                         value, current_map, dk64_android_tag_target);
                 }
+            }
+        }
+        // Rainbow Coins (0x2A6-0x2B5): which map checks which, to match the bottom screen's
+        // per-level list to the game (once per flag per map).
+        if ((flagType == FLAG_TYPE_PERMANENT) && (flagIndex >= 0x2A6) && (flagIndex <= 0x2B5)) {
+            static u16 seen[16];
+            static s32 seenMap = -1;
+            s32 i = flagIndex - 0x2A6;
+            if (current_map != seenMap) {
+                seenMap = current_map;
+                for (i = 0; i < 16; i++) {
+                    seen[i] = 0;
+                }
+                i = flagIndex - 0x2A6;
+            }
+            if (!seen[i]) {
+                seen[i] = 1;
+                recomp_printf("Flags: Rainbow Coin flag 0x%03X checked in map 0x%02X: %d\n", flagIndex, current_map, value);
             }
         }
         return value;

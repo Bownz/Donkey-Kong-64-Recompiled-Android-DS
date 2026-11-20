@@ -22,6 +22,7 @@ extern u8 D_menu_800339D0_02175720;
 extern s16 D_global_asm_807476F4;
 RECOMP_DECLARE_EVENT(recomp_on_init());
 RECOMP_DECLARE_EVENT(dk64recomp_every_frame());
+s32 dk64_in_every_frame_event = 0;   // read by isFlagSet (sound_options_patches.c)
 void dk64_android_hooks_every_frame(void);
 RECOMP_DECLARE_EVENT(recomp_on_map_load());
 RECOMP_DECLARE_EVENT(recomp_on_eeprom_load());
@@ -307,8 +308,11 @@ RECOMP_PATCH void func_global_asm_805FBFF4(s32 arg0) {
 
         // @recomp: Input-handler reporting and frame counting for the Android bottom screen.
         dk64_android_hooks_every_frame();
-        // @recomp: Fire per-frame event.
+        // @recomp: Fire per-frame event. (Touch Kong Swap: the only time other Kongs may read as
+        // not freed is while mods run here, i.e. while Tag Anywhere picks the next Kong.)
+        dk64_in_every_frame_event = 1;
         dk64recomp_every_frame();
+        dk64_in_every_frame_event = 0;
         // @recomp Run Ui Callbacks
         recomp_run_ui_callbacks();
         if (D_global_asm_8076A0B1 & 1 && !D_global_asm_8076A0B2) {
