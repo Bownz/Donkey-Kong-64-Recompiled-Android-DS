@@ -905,8 +905,10 @@ static void mc_zone_preset(CameraPaad *AAD) {
     if ((mode < 0) || (mode > 20)) {
         return;
     }
-    mc_zone_height = mc_clamp((f32)D_global_asm_80747B60[mode][1].height, 12.0f, 60.0f);
-    mc_zone_distance = mc_clamp((f32)D_global_asm_80747B60[mode][1].distance, 50.0f, 160.0f);
+    // A little more room than the stock camera allows (12 higher, 15% further), so it doesn't
+    // feel pinned, while staying well under a tunnel's ceiling.
+    mc_zone_height = mc_clamp((f32)D_global_asm_80747B60[mode][1].height + 12.0f, 12.0f, 72.0f);
+    mc_zone_distance = mc_clamp((f32)D_global_asm_80747B60[mode][1].distance * 1.15f, 50.0f, 175.0f);
 }
 
 // The game decides the zone from where its camera is, and the camera is ours: turned so it
