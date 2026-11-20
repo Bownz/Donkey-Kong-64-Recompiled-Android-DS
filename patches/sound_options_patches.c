@@ -1026,9 +1026,10 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
 
     active = (is_cutscene_active == 0) && mc_allowed() && (target != NULL) &&
         (target == gCurrentPlayer) && !(AAD->unkAC & 0x2000) && !mc_game_locked(AAD) &&
-        ((AAD->unkF3 == 1) || (AAD->unkF3 == 5) || (AAD->unkF3 == 12)) && mc_ready();
+        ((AAD->unkF3 == 1) || (AAD->unkF3 == 5)) && !mc_vine_state(target) && mc_ready();
     // (Camera mode 2 is the game's fixed camera for tight spots such as tunnel entrances: left
-    // to the game, blended in and out.)
+    // to the game, blended in and out. Vines (Kong states 0x57/0x58, camera mode 12) also get
+    // the game's own vine camera, untouched; the Modern Camera picks up from it on letting go.)
     if (active != mc_active_now) {
         recomp_printf("Modern Camera: %s (map 0x%02X, camera mode %d, Kong state 0x%02X, cutscene %d)\n",
             active ? "on" : "off", current_map, AAD->unkF3, (target != NULL) ? target->control_state : 0xFF,
