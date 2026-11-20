@@ -1134,6 +1134,7 @@ static void fp_update(CameraPaad *CaaD) {
         fp_mode = FALSE;
         fp_last_state = -1;
         fp_resume_after_photo = FALSE;
+        fp_in_photo = FALSE;
         recomp_set_fp_status(0);
         return;
     }
@@ -1243,6 +1244,30 @@ static void fp_update(CameraPaad *CaaD) {
     recomp_set_fp_status(((fp_mode || fp_in_photo) ? 1 : 0) | (((fp_mode && fp_gun_out()) || fp_in_photo) ? 2 : 0) | (fp_in_photo ? 4 : 0));
 }
 
+// Shoot Gun With: ZR (outside first person): with the gun out, ZR shoots and B puts it away
+// (the input mapping, 806DFF34), with the same "SHOOT" / "EXIT" prompts and glyphs.
+extern s32 D_global_asm_80767CC0;   // the game's frame counter
+static u8 gun_tp_prompts = FALSE;
+static s32 putAwayAt = -100;              // B pressed to put the gun away (game frame)
+static u8 gun_b_was = FALSE, gun_b_new = FALSE;
+
+static u8 gun_tp_active(void) {
+    Actor *kong = gCurrentPlayer;
+    return (kong != NULL) && !fp_mode && !fp_in_photo && (recomp_get_gun_button() == 1) &&
+        (kong->PaaD != NULL) && (kong->PaaD->unk8C != 0) && gameIsInAdventureMode() &&
+        (is_cutscene_active == 0) && !gameIsInDKTVMode();
+}
+
+static void gun_prompts_update(void) {
+    gun_tp_prompts = gun_tp_active();
+    if (gun_tp_prompts) {
+        addActorToTextOverlayRenderArray(fp_draw_prompts, NULL, 5);
+        recomp_set_fp_status(1 | 2);
+    } else if (!fp_mode && !fp_in_photo) {
+        recomp_set_fp_status(0);
+    }
+}
+
 // The view from the Kong's head (its head bone, 6, as the game itself follows it), looking where
 // you're looking. Returns TRUE when it placed the camera.
 // The view from the Kong's head, steady: the Kong's position (not its head bone's, which sways
@@ -1287,9 +1312,14 @@ static u8 fp_camera(Actor *target, f32 *eyeX, f32 *eyeY, f32 *eyeZ, f32 *atX, f3
         static f32 fwd = 6.0f;
         f32 want = 6.0f;
         s16 hitA = 0, hitB = 0xFFF;
-        while ((want > -14.0f) &&
+        // (Wider than the near edge, and one more step back once clear: looking along a wall at
+        // an angle, the view's corners reach further than straight ahead.)
+        while ((want > -20.0f) &&
             (func_global_asm_80671E00(target->x_position + (fx * want), target->y_position + eyeH,
-                target->z_position + (fz * want), 10.0f, &hitA, &hitB, 1U, 0xBCU) != 0)) {
+                target->z_position + (fz * want), 15.0f, &hitA, &hitB, 1U, 0xBCU) != 0)) {
+            want -= 4.0f;
+        }
+        if (want < 6.0f) {
             want -= 4.0f;
         }
         fwd += (want - fwd) * ((want < fwd) ? 0.6f : 0.2f);
@@ -1905,6 +1935,11 @@ RECOMP_PATCH u16 func_global_asm_806DFF34(u16 arg0, u16 *arg1) {
         (void)r;   // (ZR shoots: fp_update)
         return result;   // (instead of Shoot Gun With, below)
     }
+    {
+        u8 b = (result & B_BUTTON) != 0;
+        gun_b_new = b && !gun_b_was;
+        gun_b_was = b;
+    }
     // The gun is out: the Kong's "holding the gun" flag (PlayerAdditionalActorData 0x8C, what
     // the game checks to pull the gun out or put it away), or one of the gun states (aiming...).
     if ((gCurrentPlayer != NULL) && (((gCurrentPlayer->PaaD != NULL) && (gCurrentPlayer->PaaD->unk8C != 0)) ||
@@ -1913,7 +1948,19 @@ RECOMP_PATCH u16 func_global_asm_806DFF34(u16 arg0, u16 *arg1) {
         if (mode != 0) {
             u8 r = (result & R_TRIG) != 0;
             if (mode == 1) {
+                // B puts the gun away: Z held, then Z + C-Left (the game's own combo for it).
+                s32 t;
+                if (gun_b_new && !fp_mode && (gCurrentPlayer->PaaD != NULL) && (gCurrentPlayer->PaaD->unk8C != 0)) {
+                    putAwayAt = D_global_asm_80767CC0;
+                }
                 result &= ~B_BUTTON;
+                t = D_global_asm_80767CC0 - putAwayAt;
+                if ((t >= 0) && (t < 6)) {
+                    result |= Z_TRIG;
+                    if (t >= 2) {
+                        result |= L_CBUTTONS;
+                    }
+                }
             }
             if (r) {
                 result |= B_BUTTON;
@@ -2053,6 +2100,7 @@ RECOMP_PATCH void func_global_asm_8061D1FC(Actor* arg0) {
     }
     // Walk in First Person (fp_update): your view, nothing else turns the camera.
     fp_update(CaaD);
+    gun_prompts_update();
     if (fp_mode) {
         return;
     }

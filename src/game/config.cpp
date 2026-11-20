@@ -549,7 +549,7 @@ static void add_dual_screen_options(recomp::config::Config &config) {
         gun_button_option,
         "Shoot Gun With",
         "Which button fires the gun while it's out. <recomp-color primary>B</recomp-color>: as on the N64. "
-        "<recomp-color primary>ZR</recomp-color>: the right trigger (the N64's R) instead. "
+        "<recomp-color primary>ZR</recomp-color>: the right trigger (the N64's R) instead, and B puts the gun away (with on-screen prompts). "
         "<recomp-color primary>B and ZR</recomp-color>: either.",
         gun_button_options,
         0u
