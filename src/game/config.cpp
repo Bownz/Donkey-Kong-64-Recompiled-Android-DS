@@ -154,7 +154,7 @@ static void add_general_options(recomp::config::Config &config) {
     config.add_enum_option(
         dk64::configkeys::general::camera_type,
         "Camera Type",
-        "Changes the camera behavior.<br /><recomp-color primary>Free Cam</recomp-color>: Camera can be controlled via pressing C-Left and C-Right. The camera does not try to push itself behind the player.<br /><recomp-color primary>Follow Cam</recomp-color>: Similar to <recomp-color secondary>Free Cam</recomp-color>, but the camera tries to push itself behind the player.<br /><recomp-color primary>Better Free Cam</recomp-color>: Similar to <recomp-color secondary>Free Cam</recomp-color>, but instead of a button press turning the camera 45 degrees, holding the button moves the camera at 5 degrees per frame.<br /><recomp-color primary>Analog Camera</recomp-color>: Control of the camera is controlled by your right analogue stick. It is advised that C-Up is remapped to something outside your right analogue stick in order to have a good time with this.<br /><recomp-color primary>Modern Camera</recomp-color>: Right stick camera that feels like recent 3D platformers: smooth turning, up/down tilts the camera, L swings it behind your Kong, and it drifts gently back behind you while you run.",
+        "Changes the camera behavior.<br /><recomp-color primary>Free Cam</recomp-color>: Camera can be controlled via pressing C-Left and C-Right. The camera does not try to push itself behind the player.<br /><recomp-color primary>Follow Cam</recomp-color>: Similar to <recomp-color secondary>Free Cam</recomp-color>, but the camera tries to push itself behind the player.<br /><recomp-color primary>Better Free Cam</recomp-color>: Similar to <recomp-color secondary>Free Cam</recomp-color>, but instead of a button press turning the camera 45 degrees, holding the button moves the camera at 5 degrees per frame.<br /><recomp-color primary>Analog Camera</recomp-color>: Control of the camera is controlled by your right analogue stick. It is advised that C-Up is remapped to something outside your right analogue stick in order to have a good time with this.<br /><recomp-color primary>Modern Camera</recomp-color>: Right stick camera that feels like recent 3D platformers: smooth turning, up/down tilts the camera, L swings it behind your Kong, and it drifts gently back behind you while you run. It also eases out of the game's fixed-camera spots instead of cutting, pulls back out from walls smoothly, widens the view a little at full speed, and coasts to a stop when you let go of the stick.",
         camera_type_options,
         dk64::CameraTypeMode::Free
     );
@@ -1113,7 +1113,6 @@ void dk64::init_config() {
             option(d, "android_button_icons"),
             header("Camera"),
             option(g, keys::camera_type),
-            option(d, "android_camera_polish"),
             option(g, keys::analog_camera_sensitivity),
             option(g, keys::third_person_camera_invert_mode),
             header("First Person"),
@@ -1381,7 +1380,7 @@ extern "C" void dk64_android_apply_experience(int modern) {
     for (const char *id : { "android_move_chaining", "android_air_control",
                             "android_hit_feel", "android_fast_transitions",
                             "android_fp_right_stick", "android_fp_walk",
-                            "android_camera_polish", "android_fp_polish" }) {
+                            "android_fp_polish" }) {
         dual.update_option_value(id, static_cast<uint32_t>(modern ? 1u : 0u));
     }
     dk64_sync_combined_options();
