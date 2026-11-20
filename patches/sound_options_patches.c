@@ -1181,6 +1181,13 @@ static void fp_update(CameraPaad *CaaD) {
         while (fp_yaw >= 4096.0f) {
             fp_yaw -= 4096.0f;
         }
+        // Throwing an orange (Kong state 0x2C): the Kong turns to where you're looking, so it
+        // flies that way (the throw goes the way the Kong faces, func_global_asm_80618104; it's
+        // thrown level, as in the game's own first person view).
+        if (kong->control_state == 0x2C) {
+            kong->y_rotation = ((s32)fp_yaw) & 0xFFF;
+            kong->unkEE = kong->y_rotation;
+        }
         // The Kong's movement is relative to the camera: put the game's camera behind your view.
         CaaD->unkB2 = (((s32)fp_yaw) + 0x800) & 0xFFF;
         CaaD->unkB0 = 0;
