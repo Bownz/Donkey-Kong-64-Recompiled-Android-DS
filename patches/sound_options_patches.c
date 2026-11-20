@@ -1171,7 +1171,7 @@ static void fp_update(CameraPaad *CaaD) {
         sx = (s32)(rx * 80.0f);
         sy = (s32)(-ry * 80.0f);
         getStickPosition(&sx, &sy);
-        k = func_global_asm_806EA2D8();
+        k = 1.0f;   // (the game's own speed, without its 1/5 slowdown while Z is held)
         fp_yaw -= ((f32)sx * 0.08f * k * 4096.0f) / 360.0f;
         // (The game's look height counts the other way round from our tilt: up on the stick, with
         // the invert settings as the game applies them, looks up.)
