@@ -621,6 +621,24 @@ static void add_dual_screen_options(recomp::config::Config &config) {
             }
         });
 
+    // Movement Polish: lean into turns, landing squash, momentum jumps (patches/game_feel_patches.c).
+    static const std::string movement_polish_option = "android_movement_polish";
+    config.add_enum_option(
+        movement_polish_option,
+        "Movement Polish",
+        "Small touches from recent 3D platformers: the Kong leans into tight turns while running, "
+        "squashes a little when landing from a big fall, and a jump from a full run carries a bit further.",
+        on_off_options,
+        1u
+    );
+    config.add_option_change_callback(movement_polish_option,
+        [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
+            dk64::android::set_movement_polish(std::get<uint32_t>(cur) == 1u);
+            if (context == recomp::config::OptionChangeContext::Permanent) {
+                recompui::config::get_config("dual_screen").save_config();
+            }
+        });
+
     // Small rumbles for game feel, like Odyssey: landings (stronger the longer the fall, and for
     // the Simian Slam) and skidding round. On the controller, or the phone with touch controls.
     static const std::string haptic_feedback_option = "android_haptic_feedback";
@@ -634,7 +652,7 @@ static void add_dual_screen_options(recomp::config::Config &config) {
         "Small rumbles for game feel, like recent 3D platformers: landing (stronger after a long fall "
         "or a Simian Slam) and skidding round when you turn sharply while running. "
         "Also: a soft tap for each banana and coin, a strong one for a Golden Banana, a tick for each "
-        "shot and orange, a thump when you're hurt, and a beat while playing an instrument. "
+        "shot and orange, a thump when you're hurt, a bump when you run into a wall, and a beat while playing an instrument. "
         "On your controller, or the phone when you play with the touch controls. The strength follows Rumble Strength.",
         haptic_feedback_options,
         1u
@@ -945,6 +963,7 @@ void dk64::init_config() {
             option(d, "android_jump_assist"),
             option(d, "android_quick_turn"),
             option(d, "android_smooth_running"),
+            option(d, "android_movement_polish"),
             option(g, keys::swimming_invert_mode),
             option(d, "android_button_icons"),
             header("Touch"),
@@ -1199,6 +1218,7 @@ extern "C" void dk64_android_apply_experience(int modern) {
     dual.update_option_value("android_jump_assist", static_cast<uint32_t>(modern ? 1u : 0u));
     dual.update_option_value("android_quick_turn", static_cast<uint32_t>(modern ? 1u : 0u));
     dual.update_option_value("android_smooth_running", static_cast<uint32_t>(modern ? 1u : 0u));
+    dual.update_option_value("android_movement_polish", static_cast<uint32_t>(modern ? 1u : 0u));
     dual.save_config();
 
     recomp::config::Config &general = recompui::config::get_general_config();

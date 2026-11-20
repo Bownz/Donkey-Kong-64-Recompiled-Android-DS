@@ -62,6 +62,7 @@ typedef struct {
 #define GF_JUMP_ASSIST 1
 #define GF_QUICK_TURN 2
 #define GF_SMOOTH_RUN 4
+#define GF_POLISH 8
 
 // ---- Collectables ---------------------------------------------------------------------------
 
@@ -218,14 +219,163 @@ static void gf_start_jump(Actor *kong, PlayerAdditionalActorData *paad) {
     paad->unk58 = D_global_asm_80767CC0 - 0x1E;
 }
 
+// ---- Movement Polish -------------------------------------------------------------------------
+// Run lean: the Kong tilts into tight turns while running (its roll, z_rotation; up to ~11
+// degrees, eased). Landing squash: a quick, subtle squash and stretch back after a big fall
+// (the model's scale, put back exactly). Momentum jumps: a jump from a full run carries ~12%
+// further than from standing.
+static f32 gf_lean = 0.0f;
+static u8 gf_leaning = FALSE;
+static s32 gf_last_yaw = -1;
+static s32 gf_squash_frames = 0;
+static f32 gf_base_scale[3];
+
+static void gf_squash_restore(Actor *kong) {
+    if ((gf_squash_frames > 0) && (kong->animation_state != NULL)) {
+        kong->animation_state->scale_x = gf_base_scale[0];
+        kong->animation_state->scale_y = gf_base_scale[1];
+        kong->animation_state->scale_z = gf_base_scale[2];
+    }
+    gf_squash_frames = 0;
+}
+
+static void gf_polish_off(Actor *kong) {
+    if (gf_leaning) {
+        kong->z_rotation = 0;
+        gf_leaning = FALSE;
+    }
+    gf_lean = 0.0f;
+    gf_squash_restore(kong);
+}
+
+static void gf_polish(Actor *kong, PlayerAdditionalActorData *paad, s32 state, u8 onGround, s32 landedAfter) {
+    s32 yaw = kong->y_rotation & 0xFFF;
+    s32 turn = 0;
+    f32 top = D_global_asm_807531FC[D_global_asm_807FD584];
+    f32 want = 0.0f;
+    if (top < 50.0f) {
+        top = 150.0f;
+    }
+
+    // Lean into turns while running.
+    if (gf_last_yaw >= 0) {
+        turn = ((yaw - gf_last_yaw + 0x800) & 0xFFF) - 0x800;
+    }
+    gf_last_yaw = yaw;
+    if ((state == 0x0D) && onGround) {
+        f32 speed = kong->unkB8 / top;
+        if (speed > 1.0f) {
+            speed = 1.0f;
+        }
+        want = (f32)turn * 3.0f * speed;
+        if (want > 128.0f) {
+            want = 128.0f;
+        } else if (want < -128.0f) {
+            want = -128.0f;
+        }
+    }
+    gf_lean += (want - gf_lean) * 0.2f;
+    if ((state == 0x0D) || (gf_lean > 2.0f) || (gf_lean < -2.0f)) {
+        if ((state == 0x0D) || (state == 0x0C)) {
+            kong->z_rotation = (s16)(((s32)gf_lean) & 0xFFF);
+            gf_leaning = TRUE;
+        } else if (gf_leaning) {
+            kong->z_rotation = 0;   // jumping, attacking...: upright at once
+            gf_leaning = FALSE;
+            gf_lean = 0.0f;
+        }
+    } else if (gf_leaning) {
+        kong->z_rotation = 0;
+        gf_leaning = FALSE;
+    }
+
+    // Landing squash after a fall of half a second or more (not the Simian Slam, which has its
+    // own landing).
+    if (kong->animation_state != NULL) {
+        if ((landedAfter >= 15) && (gf_squash_frames == 0) && (state != 0x1C) && !modern_camera_free_state(kong)) {
+            gf_base_scale[0] = kong->animation_state->scale_x;
+            gf_base_scale[1] = kong->animation_state->scale_y;
+            gf_base_scale[2] = kong->animation_state->scale_z;
+            gf_squash_frames = 1;
+        }
+        if (gf_squash_frames > 0) {
+            // 8 frames: squashed to 85% at once, back to normal with a slight overshoot.
+            static const f32 curve[8] = { 0.85f, 0.87f, 0.92f, 0.98f, 1.03f, 1.02f, 1.0f, 1.0f };
+            f32 y = curve[gf_squash_frames - 1];
+            f32 xz = 1.0f + ((1.0f - y) * 0.5f);
+            kong->animation_state->scale_x = gf_base_scale[0] * xz;
+            kong->animation_state->scale_y = gf_base_scale[1] * y;
+            kong->animation_state->scale_z = gf_base_scale[2] * xz;
+            gf_squash_frames++;
+            if (gf_squash_frames > 8) {
+                gf_squash_frames = 1;   // so restore writes the base back
+                gf_squash_restore(kong);
+            }
+        }
+    }
+
+    // Momentum jump: the jump has just started from a run at (nearly) full speed.
+    if ((state == 0x17) && (gf_last_state == 0x0D) && (kong->unkB8 > top * 0.8f)) {
+        paad->unk38 *= 1.12f;   // the jump's top speed
+        kong->unkB8 *= 1.12f;
+    }
+}
+
+// ---- Wall bump ------------------------------------------------------------------------------
+// Running into a wall at (nearly) full speed: a small rumble (Haptic Feedback). Detected by the
+// Kong suddenly covering far less ground than its running speed would.
+static f32 gf_last_x = 0.0f, gf_last_z = 0.0f;
+static f32 gf_moved_ratio = 0.0f;   // usual ground covered per unit of speed while running
+static s32 gf_bump_cooldown = 0;
+static s32 gf_stuck_frames = 0;
+
+static void gf_wall_bump(Actor *kong, s32 state, u8 onGround) {
+    f32 dx = kong->x_position - gf_last_x;
+    f32 dz = kong->z_position - gf_last_z;
+    f32 moved = _sqrtf((dx * dx) + (dz * dz));
+    f32 top = D_global_asm_807531FC[D_global_asm_807FD584];
+    f32 speed = kong->unkB8;
+    gf_last_x = kong->x_position;
+    gf_last_z = kong->z_position;
+    if (top < 50.0f) {
+        top = 150.0f;
+    }
+    if (gf_bump_cooldown > 0) {
+        gf_bump_cooldown--;
+    }
+    if ((state != 0x0D) || !onGround || (speed < top * 0.7f) || (moved > 100.0f)) {
+        gf_stuck_frames = 0;
+        return;
+    }
+    if (moved > 0.01f) {
+        f32 ratio = moved / speed;
+        if (ratio > gf_moved_ratio * 0.6f) {
+            gf_moved_ratio += (ratio - gf_moved_ratio) * 0.1f;   // learn the normal rate
+        }
+    }
+    if ((gf_moved_ratio > 0.0f) && (moved < speed * gf_moved_ratio * 0.25f)) {
+        gf_stuck_frames++;
+        if ((gf_stuck_frames == 2) && (gf_bump_cooldown == 0)) {
+            recomp_haptic_pulse(0.35f, 60);
+            gf_bump_cooldown = 30;
+        }
+    } else {
+        gf_stuck_frames = 0;
+    }
+}
+
 void game_feel_update(void) {
     Actor *kong = gCurrentPlayer;
     PlayerAdditionalActorData *paad;
     s32 flags, state, health;
     u16 pressed;
     u8 onGround;
+    s32 landedAfter;
 
     if ((kong == NULL) || (is_cutscene_active != 0) || gameIsInDKTVMode() || !gameIsInAdventureMode()) {
+        if (kong != NULL) {
+            gf_polish_off(kong);
+        }
         gf_last_health = -1000;
         gf_last_state = -1;
         gf_instrument_frames = 0;
@@ -251,7 +401,9 @@ void game_feel_update(void) {
 
     // On the ground: the game's own test (the Kong within 4 units of the floor).
     onGround = (kong->y_position - kong->floor) < 4.0f;
+    landedAfter = 0;
     if (onGround) {
+        landedAfter = gf_air_frames;
         gf_air_frames = 0;
         gf_left_by_walking = FALSE;
     } else {
@@ -309,5 +461,11 @@ void game_feel_update(void) {
         }
         lastSpeed = kong->unkB8;
     }
+    if (flags & GF_POLISH) {
+        gf_polish(kong, paad, state, onGround, landedAfter);
+    } else {
+        gf_polish_off(kong);
+    }
+    gf_wall_bump(kong, state, onGround);
     gf_last_state = state;
 }

@@ -178,6 +178,11 @@ int dk64::android::gun_button() {
 static std::atomic<bool> jump_assist{true};
 static std::atomic<bool> quick_turn{true};
 static std::atomic<bool> smooth_running{true};
+static std::atomic<bool> movement_polish{true};
+
+void dk64::android::set_movement_polish(bool enabled) {
+    movement_polish.store(enabled, std::memory_order_relaxed);
+}
 
 void dk64::android::set_smooth_running(bool enabled) {
     smooth_running.store(enabled, std::memory_order_relaxed);
@@ -193,7 +198,8 @@ void dk64::android::set_quick_turn(bool enabled) {
 
 int dk64::android::game_feel_flags() {
     return (jump_assist.load(std::memory_order_relaxed) ? 1 : 0) | (quick_turn.load(std::memory_order_relaxed) ? 2 : 0) |
-        (smooth_running.load(std::memory_order_relaxed) ? 4 : 0);
+        (smooth_running.load(std::memory_order_relaxed) ? 4 : 0) |
+        (movement_polish.load(std::memory_order_relaxed) ? 8 : 0);
 }
 
 static std::atomic<bool> haptic_feedback{true};

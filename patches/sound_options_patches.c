@@ -820,6 +820,8 @@ static void mc_fade(f32 distance) {
 // In a tight space the camera stays low and a little closer, under any ceiling, like the
 // game's own camera there; it eases in and out (mc_tight).
 static f32 mc_tight = 0.0f;
+static f32 mc_run_tilt = 0.0f;    // height change running up or down slopes
+static f32 mc_water_dip = 0.0f;   // the view's dip on diving in
 static u8 mc_tight_pairs = 0;     // bit per direction: walls both ways
 static u8 mc_tight_dir = 0;
 static u8 mc_tight_logged = FALSE;
@@ -1097,8 +1099,37 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
     } else {
         mc_update_tight(target);
     }
+    // Running feel (Odyssey-like, all eased):
+    //  - at speed the camera pulls out a little (up to 8%) and comes back in as you slow;
+    //  - running downhill it rises a little (up to 25) to show the way down; uphill it drops a
+    //    little (up to 12) to look up the slope;
+    //  - diving into water, the view dips briefly and settles (mc_water_dip, below).
     {
-        f32 height = mc_height;
+        static f32 pull = 0.0f, tilt = 0.0f, slope = 0.0f, lastFloor = 0.0f, lastX = 0.0f, lastZ = 0.0f;
+        f32 wantPull = 0.0f, wantTilt = 0.0f;
+        f32 mx = target->x_position - lastX;
+        f32 mz = target->z_position - lastZ;
+        f32 moved = _sqrtf((mx * mx) + (mz * mz));
+        if ((target->control_state == 0x0D) && (mc_air_frames == 0)) {
+            wantPull = 0.08f * mc_clamp((target->unkB8 - 100.0f) / 100.0f, 0.0f, 1.0f);
+            if ((moved > 0.5f) && (moved < 40.0f)) {
+                slope += (mc_clamp((target->floor - lastFloor) / moved, -1.0f, 1.0f) - slope) * 0.1f;
+            }
+            wantTilt = (slope < 0.0f) ? (-slope * 50.0f) : (-slope * 24.0f);
+            wantTilt = mc_clamp(wantTilt, -12.0f, 25.0f);
+        } else {
+            slope *= 0.9f;
+        }
+        lastFloor = target->floor;
+        lastX = target->x_position;
+        lastZ = target->z_position;
+        pull += (wantPull - pull) * 0.03f;
+        tilt += (wantTilt - tilt) * 0.03f;
+        distance *= 1.0f + pull;
+        mc_run_tilt = tilt;
+    }
+    {
+        f32 height = mc_height + mc_run_tilt;
         if (mc_tight > 0.01f) {
             if (height > 30.0f) {
                 height += (30.0f - height) * mc_tight;
@@ -1298,6 +1329,18 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
     camY = mc_eye_y;
     camZ = mc_eye_z;
 
+    // Diving into water: a short dip of the view (eye and focus) that settles over ~half a second.
+    {
+        static u8 wasInWater = FALSE;
+        u8 inWater = ((target->unk6A & 2) != 0) && (kongY < target->unkAC);
+        if (inWater && !wasInWater && mc_eye_valid) {
+            mc_water_dip = -22.0f;
+        }
+        wasInWater = inWater;
+        mc_water_dip *= 0.88f;
+        camY += mc_water_dip;
+    }
+
     // Blended with the game's camera while handing over.
     w = mc_weight;
     *eyeX += (camX - *eyeX) * w;
@@ -1306,6 +1349,12 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
     *atX += (mc_focus_x - *atX) * w;
     *atY += (mc_focus_y - *atY) * w;
     *atZ += (mc_focus_z - *atZ) * w;
+    *atY += mc_water_dip * 0.6f * w;
+    // The game rolls its camera with the Kong; the Kong's lean into turns (game_feel_patches.c)
+    // shouldn't roll the view.
+    if ((w >= 0.99f) && ((target->control_state == 0x0C) || (target->control_state == 0x0D))) {
+        camera->z_rotation = 0;
+    }
     if (w >= 0.99f) {
         camera->position.f[0] = *eyeX;
         camera->position.f[1] = *eyeY;

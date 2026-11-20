@@ -38,6 +38,7 @@ namespace dk64::android {
     int gun_button();
     void set_jump_assist(bool enabled);       // Jump Assist (Input): buffered jumps, coyote time
     void set_quick_turn(bool enabled);        // Quick Turn (Input): no skid on sharp turns
+    void set_movement_polish(bool enabled);   // Movement Polish (Input): lean, landing squash, momentum jumps
     void set_smooth_running(bool enabled);    // Smooth Running (Input): gradual speed up / slow down
     int game_feel_flags();                    // bit 0 Jump Assist, bit 1 Quick Turn, bit 2 Smooth Running
     bool haptic_feedback_enabled();
