@@ -1046,6 +1046,9 @@ extern Mtx D_20000C0;
 extern OSContPad D_global_asm_807ECD58;   // controller 1 as read this frame
 
 static u8 fp_mode = FALSE;
+static f32 fp_trans = 1.0f;       // the move in / out: 0 -> 1 going in, 1 -> 0 coming out
+static s32 fp_behind_yaw = -1;    // leaving: the camera angle behind the Kong (-1: none)
+static f32 fp_head_eye[6];        // the head view last frame (eye, look-at)
 static f32 fp_yaw = 0.0f;      // where you're looking: facing (like the Kong's y_rotation)
 static f32 fp_pitch = 0.0f;    // up (+) / down (-), angle units
 static s32 fp_last_state = -1;
@@ -1087,8 +1090,13 @@ static void fp_set_mode(Actor *kong, u8 on) {
     if (on) {
         fp_yaw = (f32)(kong->y_rotation & 0xFFF);
         fp_pitch = 0.0f;
+        fp_trans = 0.0f;   // the camera moves in to the Kong's head (fp_transition)
     } else {
         kong->shadow_opacity = 0xFF;
+        // Back behind the Kong, facing where you were looking; the camera moves back out.
+        kong->y_rotation = ((s32)fp_yaw) & 0xFFF;
+        fp_behind_yaw = ((s32)fp_yaw) & 0xFFF;
+        fp_trans = 1.0f;
     }
     recomp_printf("Walk in First Person: %s\n", on ? "on" : "off");
 }
@@ -1132,6 +1140,15 @@ static void fp_update(CameraPaad *CaaD) {
         gCurrentActorPointer = kong;
         func_global_asm_806E225C(1, 1);
         gCurrentActorPointer = was;
+    }
+    // Just left: the game's camera goes behind the Kong too (for the other camera types; the
+    // Modern Camera takes this angle when it takes over, modern_camera_frame).
+    if (!fp_mode && (fp_behind_yaw >= 0)) {
+        CaaD->unkB2 = fp_behind_yaw;
+        CaaD->unkB0 = 0;
+        if (!modern_cam_enabled()) {
+            fp_behind_yaw = -1;
+        }
     }
     if (fp_mode) {
         f32 rx, ry;
@@ -1238,7 +1255,56 @@ static u8 fp_camera(Actor *target, f32 *eyeX, f32 *eyeY, f32 *eyeZ, f32 *atX, f3
     return TRUE;
 }
 
+static void modern_camera_frame_inner(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f32 *eyeZ, f32 *atX, f32 *atY, f32 *atZ);
+
+// Places the camera: called from the camera update with its eye and look-at outputs. Walk in
+// First Person's view moves in from wherever the camera was to the Kong's head (and back out
+// to the camera behind the Kong when it ends) over about half a second, like the game's own
+// first person view does.
 void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f32 *eyeZ, f32 *atX, f32 *atY, f32 *atZ) {
+    static f32 last[6];
+    static u8 lastValid = FALSE;
+    static f32 from[6];
+    static u8 wasFp = FALSE;
+    f32 *out[6];
+    f32 e;
+    s32 i;
+    out[0] = eyeX; out[1] = eyeY; out[2] = eyeZ; out[3] = atX; out[4] = atY; out[5] = atZ;
+    if (fp_mode && !wasFp) {
+        for (i = 0; i < 6; i++) {
+            from[i] = lastValid ? last[i] : *out[i];   // where the camera was
+        }
+    }
+    modern_camera_frame_inner(camera, AAD, eyeX, eyeY, eyeZ, atX, atY, atZ);
+    if (fp_mode) {
+        for (i = 0; i < 6; i++) {
+            fp_head_eye[i] = *out[i];
+        }
+        if (fp_trans < 1.0f) {
+            fp_trans += 0.07f;
+            e = mc_clamp(fp_trans, 0.0f, 1.0f);
+            e = e * e * (3.0f - (2.0f * e));
+            for (i = 0; i < 6; i++) {
+                *out[i] = from[i] + ((*out[i] - from[i]) * e);
+            }
+        }
+    } else if (fp_trans > 0.0f) {
+        // Coming out: from the head view back to the camera (behind the Kong).
+        fp_trans -= 0.07f;
+        e = mc_clamp(fp_trans, 0.0f, 1.0f);
+        e = e * e * (3.0f - (2.0f * e));
+        for (i = 0; i < 6; i++) {
+            *out[i] = *out[i] + ((fp_head_eye[i] - *out[i]) * e);
+        }
+    }
+    wasFp = fp_mode;
+    for (i = 0; i < 6; i++) {
+        last[i] = *out[i];
+    }
+    lastValid = TRUE;
+}
+
+static void modern_camera_frame_inner(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f32 *eyeZ, f32 *atX, f32 *atY, f32 *atZ) {
     Actor *target = AAD->unk0;
     f32 kongY, wantY, dx, dz, distance, wantX, wantYEye, wantZ, lineX, lineY, lineZ, length, t, lo, hi, mid, reach;
     f32 camX, camY, camZ, w, frameTarget, startX, startY, startZ;
@@ -1268,6 +1334,10 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
         static s32 lastMap = -1;
         if (active && (!mc_active_now || (current_map != lastMap)) && (target != NULL) && mc_ready()) {
             mc_yaw = (f32)(func_global_asm_80665DE0(target->x_position, target->z_position, *eyeX, *eyeZ) & 0xFFF);
+            if (fp_behind_yaw >= 0) {
+                mc_yaw = (f32)fp_behind_yaw;   // leaving Walk in First Person: behind the Kong
+                mc_height = 55.0f;
+            }
             mc_yaw_valid = TRUE;
             mc_yaw_velocity = 0.0f;
             mc_recentering = FALSE;
@@ -1277,6 +1347,7 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
             mc_reach = 1.0f;
         }
         lastMap = current_map;
+        fp_behind_yaw = -1;
     }
     mc_active_now = active;
     if (active) {
