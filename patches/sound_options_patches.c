@@ -621,6 +621,7 @@ u8 modern_camera_free_state(Actor *kong) {
 static void modern_camera_input(Actor *camera, CameraPaad *CaaD, s32 touchMoved, f32 touchX, f32 touchY) {
     f32 stickX, stickY, dt, sensitivity, blend, yawStep, tilt, speed, follow;
     s32 behind, diff;
+    u8 onTree;
 
     if (!mc_yaw_valid) {
         mc_yaw = (f32)(CaaD->unkB2 & 0xFFF);
@@ -665,6 +666,8 @@ static void modern_camera_input(Actor *camera, CameraPaad *CaaD, s32 touchMoved,
     // Vines: the game's own vine view (modern_camera_frame), turned and raised by however much
     // you've changed it on a vine, remembered for every vine until you press L.
     mc_on_vine = mc_vine_state(gCurrentPlayer);
+    // Climbing a tree or pole: no automatic turning (the Kong turns as it moves round the trunk).
+    onTree = (gCurrentPlayer->control_state == 0x59) || (gCurrentPlayer->control_state == 0x5A);
     if (mc_on_vine) {
         mc_recentering = FALSE;
     }
@@ -684,7 +687,7 @@ static void modern_camera_input(Actor *camera, CameraPaad *CaaD, s32 touchMoved,
         if (t >= 1.0f) {
             mc_recentering = FALSE;
         }
-    } else if (mc_follow_strong && !mc_on_vine) {
+    } else if (mc_follow_strong && !mc_on_vine && !onTree) {
         // After L: stays behind the Kong as it runs and turns (about 4x the normal follow, no
         // waiting), until you turn the camera yourself. Running back towards the camera (more
         // than ~135 degrees off) doesn't spin it round.
@@ -693,7 +696,7 @@ static void modern_camera_input(Actor *camera, CameraPaad *CaaD, s32 touchMoved,
         if ((follow > 0.02f) && (diff > -0x600) && (diff < 0x600)) {
             yawStep += diff * 0.05f * follow * dt;
         }
-    } else if ((mc_idle > 50.0f) && !mc_on_vine) {
+    } else if ((mc_idle > 50.0f) && !mc_on_vine && !onTree) {
         // Gentle follow while running; never while running towards the camera (more than
         // ~120 degrees off), so turning round to face it doesn't spin the view.
         speed = gCurrentPlayer->unkB8;
@@ -1025,6 +1028,10 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
     if (!mc_focus_valid) {
         mc_frame_y = mc_ground_y;
         mc_frame_speed = 0.0f;
+    } else if ((target->control_state == 0x59) || (target->control_state == 0x5A)) {
+        // Climbing a tree or pole: follow the climb gently, not each pull up the trunk.
+        mc_frame_y += (mc_ground_y - mc_frame_y) * 0.06f;
+        mc_frame_speed = 0.0f;
     } else if (modern_camera_free_state(target) || (mc_air_frames > 45)) {
         mc_frame_y += (mc_ground_y - mc_frame_y) * 0.3f;
         mc_frame_speed = 0.0f;
@@ -1056,6 +1063,12 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
         mc_focus_z = target->z_position;
         mc_focus_valid = TRUE;
         mc_reach = 1.0f;
+    } else if ((target->control_state == 0x59) || (target->control_state == 0x5A)) {
+        // Climbing: the Kong shifts round the trunk and bobs as it climbs; the view stays put
+        // and only drifts after it, so it doesn't sway with every move.
+        mc_focus_x += (target->x_position - mc_focus_x) * 0.03f;
+        mc_focus_y += (wantY - mc_focus_y) * 0.06f;
+        mc_focus_z += (target->z_position - mc_focus_z) * 0.03f;
     } else if (mc_vine_state(target)) {
         mc_focus_x += (target->x_position - mc_focus_x) * 0.04f;
         mc_focus_y += (wantY - mc_focus_y) * 0.05f;
