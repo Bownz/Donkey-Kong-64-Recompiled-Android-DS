@@ -1335,10 +1335,15 @@ extern "C" void dk64_android_apply_control_preset(int modern) {
                     }
                 }
             }
-            // ...which the instrument (Y) and the fairy camera (X) take: one press each instead
-            // of Z + C Up / Z + C Down.
-            profiles::set_input_binding(profile, GameInput::INSTRUMENT, 0, y);
-            profiles::set_input_binding(profile, GameInput::FAIRY_CAMERA, 0, x);
+            // ...which the gun (X) and oranges (Y) take: one press each instead of Z + C Left /
+            // Z + C Right. (Instrument and Fairy Camera start unassigned.)
+            for (size_t b = 0; b < num_bindings_per_input; b++) {
+                for (GameInput shortcut : { GameInput::INSTRUMENT, GameInput::FAIRY_CAMERA, GameInput::GUN, GameInput::ORANGE }) {
+                    profiles::set_input_binding(profile, shortcut, b, InputField{});
+                }
+            }
+            profiles::set_input_binding(profile, GameInput::GUN, 0, x);
+            profiles::set_input_binding(profile, GameInput::ORANGE, 0, y);
         } else {
             for (size_t b = 0; b < num_bindings_per_input; b++) {
                 for (GameInput shortcut : { GameInput::INSTRUMENT, GameInput::FAIRY_CAMERA, GameInput::GUN, GameInput::ORANGE }) {
