@@ -1061,6 +1061,7 @@ static u16 fp_last_raw = 0;
 // rows; the app draws the button glyphs just left of FP_TEXT_X (keep in step with
 // FirstPersonPromptView.java).
 #define FP_TEXT_X 252
+#define FP_TEXT_X_PHOTO 190   // the camera: left of the film count (HUD x 290, its icon 19.5 left)
 #define FP_ROW_SHOOT 200
 #define FP_ROW_EXIT 214
 
@@ -1085,11 +1086,11 @@ static Gfx *fp_draw_prompts(Gfx *dl, Actor *unused) {
     dl = alignHUD(dl, ALIGN_RIGHT);
     gDPSetPrimColor(dl++, 0, 0, 0xFF, 0xFF, 0xFF, 0xE0);
     if (fp_in_photo) {
-        dl = printStyledText(dl, 6, FP_TEXT_X * 4, FP_ROW_SHOOT * 4, (u8 *)"PHOTO", 1);
+        dl = printStyledText(dl, 6, FP_TEXT_X_PHOTO * 4, FP_ROW_SHOOT * 4, (u8 *)"PHOTO", 1);
     } else if (fp_gun_out()) {
         dl = printStyledText(dl, 6, FP_TEXT_X * 4, FP_ROW_SHOOT * 4, (u8 *)"SHOOT", 1);
     }
-    dl = printStyledText(dl, 6, FP_TEXT_X * 4, FP_ROW_EXIT * 4, (u8 *)"EXIT", 1);
+    dl = printStyledText(dl, 6, (fp_in_photo ? FP_TEXT_X_PHOTO : FP_TEXT_X) * 4, FP_ROW_EXIT * 4, (u8 *)"EXIT", 1);
     dl = popHUD(dl, ALIGN_RIGHT);
     return dl;
 }
@@ -1239,7 +1240,7 @@ static void fp_update(CameraPaad *CaaD) {
             }
         }
     }
-    recomp_set_fp_status(((fp_mode || fp_in_photo) ? 1 : 0) | (((fp_mode && fp_gun_out()) || fp_in_photo) ? 2 : 0));
+    recomp_set_fp_status(((fp_mode || fp_in_photo) ? 1 : 0) | (((fp_mode && fp_gun_out()) || fp_in_photo) ? 2 : 0) | (fp_in_photo ? 4 : 0));
 }
 
 // The view from the Kong's head (its head bone, 6, as the game itself follows it), looking where

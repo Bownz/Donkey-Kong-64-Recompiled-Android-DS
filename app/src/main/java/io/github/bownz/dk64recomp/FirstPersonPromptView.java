@@ -20,7 +20,8 @@ import android.view.View;
  * ROW_SHOOT / ROW_EXIT (keep in step with FP_TEXT_X / FP_ROW_* in the patch).
  */
 final class FirstPersonPromptView extends View {
-    private static final float TEXT_X = 252f, ROW_SHOOT = 200f, ROW_EXIT = 214f;
+    private static final float TEXT_X = 252f, TEXT_X_PHOTO = 190f,   // (status & 4: the camera)
+            ROW_SHOOT = 200f, ROW_EXIT = 214f;
     private static final float ROW_HEIGHT = 10f;   // the text's height, game units
 
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -87,7 +88,7 @@ final class FirstPersonPromptView extends View {
         String text = useGlyph ? glyph : fallback;
         glyphPaint.setTypeface(useGlyph ? promptFont : Typeface.DEFAULT_BOLD);
         glyphPaint.setTextSize(ROW_HEIGHT * 1.5f * s);
-        float textLeft = getWidth() - ((320f - TEXT_X) * s);
+        float textLeft = getWidth() - ((320f - ((status & 4) != 0 ? TEXT_X_PHOTO : TEXT_X)) * s);
         float w = glyphPaint.measureText(text);
         float x = textLeft - (3f * s) - w;
         float mid = (row + (ROW_HEIGHT / 2f)) * s;
