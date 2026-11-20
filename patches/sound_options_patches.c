@@ -189,8 +189,8 @@ u8 modern_camera_free_state(Actor *kong);
 RECOMP_PATCH u8 func_global_asm_80621174(s32 arg0, PlayerAdditionalActorData *arg1, Actor *arg2) {
     // @recomp: Modern Camera: the game never pushes the camera behind the Kong (during attacks,
     // on trees and vines...); the Modern Camera's own gentle follow does that job.
-    if (modern_cam_enabled()) {
-        return FALSE;
+    if (modern_cam_enabled() && (arg2->control_state != 0x63)) {
+        return FALSE;   // (0x63, Diddy's Rocketbarrel: the game's own follow-behind camera)
     }
     // Formatting is off here for better manual formatting. Whitespace doesn't affect the match here.
     // clang-format off
@@ -573,6 +573,10 @@ static u8 mc_allowed(void) {
     u32 i;
 
     if (!modern_cam_enabled() || gameIsInDKTVMode() || (is_cutscene_active != 0)) {
+        return FALSE;
+    }
+    // Diddy's Rocketbarrel (Kong state 0x63): the game's own camera, following behind.
+    if ((gCurrentPlayer != NULL) && (gCurrentPlayer->control_state == 0x63)) {
         return FALSE;
     }
     // Not in the intro, menus, story scenes and endings, nor while the game has taken the
