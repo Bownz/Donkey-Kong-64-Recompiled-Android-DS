@@ -13,10 +13,10 @@ index 1961e29..8193aae 100644
      float get_input_analog(int controller_num, const InputField& field);
      float get_input_analog(int controller_num, const std::span<const InputField> fields);
 diff --git a/recompinput/include/recompinput/input_types.h b/recompinput/include/recompinput/input_types.h
-index f5ed6c0..b697ca0 100644
+index f5ed6c0..894815a 100644
 --- a/recompinput/include/recompinput/input_types.h
 +++ b/recompinput/include/recompinput/input_types.h
-@@ -37,10 +37,17 @@ namespace recompinput {
+@@ -37,10 +37,19 @@ namespace recompinput {
          DEFINE_INPUT(TAB_LEFT_MENU, 0, "Tab Left (Menu)") \
          DEFINE_INPUT(TAB_RIGHT_MENU, 0, "Tab Right (Menu)")
  
@@ -24,7 +24,9 @@ index f5ed6c0..b697ca0 100644
 +    // game turns them into Z, then Z + C (see dk64_android_report_extra_actions).
 +    #define DEFINE_DK64_ACTION_INPUTS() \
 +        DEFINE_INPUT(INSTRUMENT, 0, "Instrument") \
-+        DEFINE_INPUT(FAIRY_CAMERA, 0, "Fairy Camera")
++        DEFINE_INPUT(FAIRY_CAMERA, 0, "Fairy Camera") \
++        DEFINE_INPUT(GUN, 0, "Gun") \
++        DEFINE_INPUT(ORANGE, 0, "Orange")
 +
      #define DEFINE_ALL_INPUTS() \
          DEFINE_N64_AXIS_INPUTS() \
@@ -35,7 +37,7 @@ index f5ed6c0..b697ca0 100644
  
      #define DEFINE_INPUT(name, value, readable) name,
      // - Enum containing every recomp input.
-@@ -68,6 +75,13 @@ namespace recompinput {
+@@ -68,6 +77,13 @@ namespace recompinput {
  
      
      // A single input. Combines the source of the input (see InputType) and a specific key/button/axis.
@@ -338,7 +340,7 @@ index c6786e6..73eda2e 100644
      default:
          return recompinput::unknown_device_input;
 diff --git a/recompinput/src/profiles.cpp b/recompinput/src/profiles.cpp
-index c89956e..16dd4c9 100644
+index c89956e..5301444 100644
 --- a/recompinput/src/profiles.cpp
 +++ b/recompinput/src/profiles.cpp
 @@ -371,6 +371,20 @@ namespace recompinput {
@@ -352,7 +354,7 @@ index c89956e..16dd4c9 100644
 +    // Told player 1's own N64 buttons (from the controller/keyboard, before the on-screen
 +    // ones are added), e.g. so a toggle that holds Z can hand over to a real Z press.
 +    extern "C" void dk64_android_report_physical_n64_buttons(uint16_t buttons) __attribute__((weak));
-+    // Told which of the DK64 shortcut inputs are held (1 Instrument, 2 Fairy Camera).
++    // Told which of the DK64 shortcut inputs are held (1 Instrument, 2 Fairy Camera, 4 Gun, 8 Orange).
 +    extern "C" void dk64_android_report_extra_actions(uint32_t actions) __attribute__((weak));
 +#endif
 +
@@ -362,7 +364,7 @@ index c89956e..16dd4c9 100644
      bool profiles::get_n64_input(int player_index, uint16_t* buttons_out, float* x_out, float* y_out) {
          uint16_t cur_buttons = 0;
          float cur_x = 0.0f;
-@@ -401,10 +415,47 @@ namespace recompinput {
+@@ -401,10 +415,49 @@ namespace recompinput {
              int profile_index_kb = players::is_single_player_mode() ? profiles::get_sp_keyboard_profile_index() : players_input_profile_indices[player_index].second;
              check_buttons(profile_index_cont);
              check_buttons(profile_index_kb);
@@ -376,6 +378,8 @@ index c89956e..16dd4c9 100644
 +                    const input_mapping_array &mappings = input_profiles[profile_index].mappings;
 +                    actions |= recompinput::get_input_digital(player_index, mappings[(size_t)GameInput::INSTRUMENT]) ? 1u : 0u;
 +                    actions |= recompinput::get_input_digital(player_index, mappings[(size_t)GameInput::FAIRY_CAMERA]) ? 2u : 0u;
++                    actions |= recompinput::get_input_digital(player_index, mappings[(size_t)GameInput::GUN]) ? 4u : 0u;
++                    actions |= recompinput::get_input_digital(player_index, mappings[(size_t)GameInput::ORANGE]) ? 8u : 0u;
 +                }
 +                dk64_android_report_extra_actions(actions);
 +            }
@@ -1817,7 +1821,7 @@ index 0561657..06088b1 100644
  
      std::string_view get_type_name() override { return "ConfigOptionEnum"; }
 diff --git a/recompui/src/config/ui_config_page_controls.cpp b/recompui/src/config/ui_config_page_controls.cpp
-index f379a6f..924d53d 100644
+index f379a6f..4e31154 100644
 --- a/recompui/src/config/ui_config_page_controls.cpp
 +++ b/recompui/src/config/ui_config_page_controls.cpp
 @@ -1,4 +1,5 @@
@@ -1889,7 +1893,7 @@ index f379a6f..924d53d 100644
 +                }
 +            }
 +            int group;
-+            if (input == GI::INSTRUMENT || input == GI::FAIRY_CAMERA) {
++            if (input == GI::INSTRUMENT || input == GI::FAIRY_CAMERA || input == GI::GUN || input == GI::ORANGE) {
 +                if (!controls_show_actions()) {
 +                    continue;   // Classic: the N64's own buttons only
 +                }

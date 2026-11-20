@@ -2132,8 +2132,8 @@ RECOMP_PATCH u16 func_global_asm_806DFF34(u16 arg0, u16 *arg1) {
         call++;
     }
     if (call == 0) {
-        // The Instrument and Fairy Camera shortcuts (Configure Inputs, Modern): a fresh press
-        // plays Z + C-Up / Z + C-Down. With the camera out, Fairy Camera puts it away again
+        // The Instrument, Fairy Camera, Gun and Orange shortcuts (Configure Inputs, Modern): a
+        // fresh press plays Z + C-Up / C-Down / C-Left / C-Right. With the camera out, Fairy Camera puts it away again
         // (C-Down on its own).
         s32 actions = recomp_get_extra_actions();
         s32 pressed = actions & ~lastActions;
@@ -2142,11 +2142,22 @@ RECOMP_PATCH u16 func_global_asm_806DFF34(u16 arg0, u16 *arg1) {
             combo_at = D_global_asm_80767CC0 - 2;   // straight to the C part...
             combo_c = D_CBUTTONS;
             fp_photo_exit_c = TRUE;                 // ...without Z
+        } else if ((pressed & 4) && fp_mode) {
+            // Gun in Walk in First Person: C-Left on its own (as the touch gun button does).
+            combo_at = D_global_asm_80767CC0 - 2;
+            combo_c = L_CBUTTONS;
+            fp_photo_exit_c = TRUE;
         } else if (pressed & 1) {
             combo_start(U_CBUTTONS);
             fp_photo_exit_c = FALSE;
         } else if (pressed & 2) {
             combo_start(D_CBUTTONS);
+            fp_photo_exit_c = FALSE;
+        } else if (pressed & 4) {
+            combo_start(L_CBUTTONS);
+            fp_photo_exit_c = FALSE;
+        } else if (pressed & 8) {
+            combo_start(R_CBUTTONS);
             fp_photo_exit_c = FALSE;
         }
     }

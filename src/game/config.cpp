@@ -1044,6 +1044,8 @@ static void set_control_defaults() {
 
 static void set_control_descriptions() {
     recompinput::set_game_input_description(recompinput::GameInput::INSTRUMENT, "Plays your Kong's instrument in one press (the same as Z + C Up).");
+    recompinput::set_game_input_description(recompinput::GameInput::GUN, "Takes out your Kong's gun in one press (the same as Z + C Left), or puts it away.");
+    recompinput::set_game_input_description(recompinput::GameInput::ORANGE, "Throws an orange in one press (the same as Z + C Right).");
     recompinput::set_game_input_description(recompinput::GameInput::FAIRY_CAMERA, "Takes out the fairy camera in one press (the same as Z + C Down). Press it again, or B, to put it away.");
     recompinput::set_game_input_description(recompinput::GameInput::Y_AXIS_POS, "Used to move and for steering while swimming. Axis inversion for swimming can be configured in the General tab.");
     recompinput::set_game_input_description(recompinput::GameInput::Y_AXIS_NEG, "Used to move and for steering while swimming. Axis inversion for swimming can be configured in the General tab.");
@@ -1283,8 +1285,10 @@ extern "C" const char *dk64_android_control_action_name(int input) {
         case GI::C_DOWN: return "Camera Zoom";
         case GI::INSTRUMENT: return "Instrument";
         case GI::FAIRY_CAMERA: return "Fairy Camera";
-        case GI::C_LEFT: return "Gun (Z)";
-        case GI::C_RIGHT: return "Orange (Z)";
+        case GI::C_LEFT: return "C Left (Gun with Z)";
+        case GI::C_RIGHT: return "C Right (Orange with Z)";
+        case GI::GUN: return "Gun";
+        case GI::ORANGE: return "Orange";
         case GI::DPAD_UP: return "Arcade Up";
         case GI::DPAD_DOWN: return "Arcade Down";
         case GI::DPAD_LEFT: return "Previous Kong";
@@ -1337,8 +1341,9 @@ extern "C" void dk64_android_apply_control_preset(int modern) {
             profiles::set_input_binding(profile, GameInput::FAIRY_CAMERA, 0, x);
         } else {
             for (size_t b = 0; b < num_bindings_per_input; b++) {
-                profiles::set_input_binding(profile, GameInput::INSTRUMENT, b, InputField{});
-                profiles::set_input_binding(profile, GameInput::FAIRY_CAMERA, b, InputField{});
+                for (GameInput shortcut : { GameInput::INSTRUMENT, GameInput::FAIRY_CAMERA, GameInput::GUN, GameInput::ORANGE }) {
+                    profiles::set_input_binding(profile, shortcut, b, InputField{});
+                }
             }
         }
         profiles::save_controls_config(recomp::get_config_path() / (recompui::config::controls::id + ".json"));
