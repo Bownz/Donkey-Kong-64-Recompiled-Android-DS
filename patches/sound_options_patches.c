@@ -1044,8 +1044,10 @@ extern Gfx **D_1000118;
 extern Mtx D_2000180;
 extern Mtx D_20000C0;
 extern OSContPad D_global_asm_807ECD58;   // controller 1 as read this frame
+extern OSContPad *D_global_asm_807ECDEC;  // the pad the Kong's input is read from (func_global_asm_806E0050)
 
 static u8 fp_mode = FALSE;
+static u8 fp_water = FALSE;     // ours, entered in the water: no swimming, A does nothing
 static f32 fp_trans = 1.0f;       // the move in / out: 0 -> 1 going in, 1 -> 0 coming out
 static s32 fp_behind_yaw = -1;    // leaving: the camera angle behind the Kong (-1: none)
 static u8 fp_resume_after_photo = FALSE;   // back into first person once the photo's taken
@@ -1141,10 +1143,21 @@ static void fp_update(CameraPaad *CaaD) {
     state = kong->control_state;
     // The game's own first person view (C-Up, the touch button): left again at once, and ours
     // switches on (or, if it's already on, off).
-    // (In the water, 3-5, the game's own first person view is kept, as it always was.)
+    // (The camera, 4/5, is the game's own, as it always was.)
     if ((state == 2) && (fp_last_state != 2)) {
         func_global_asm_806EAB44(kong, 0);
         fp_set_mode(kong, !fp_mode);
+        fp_water = FALSE;
+    }
+    // In the water (Kong state 3) too: ours, but working like the game's there: the Kong stays
+    // put (the left stick doesn't swim, A does nothing: the input mapping), you look around.
+    if ((state == 3) && (fp_last_state != 3)) {
+        func_global_asm_806EAB44(kong, 1);
+        fp_set_mode(kong, !fp_mode);
+        fp_water = fp_mode;
+    }
+    if (!fp_mode) {
+        fp_water = FALSE;
     }
     // Taking a photo (the camera, Kong states 0x64/0x65): the game's own camera view, then back
     // into ours once the camera's put away.
@@ -1172,9 +1185,10 @@ static void fp_update(CameraPaad *CaaD) {
     // B leaves; so do trees, poles and vines (modern_camera_free_state), swimming (Kong states
     // 0x4E/0x4F, or under the water's surface) and the Rocketbarrel. Getting hit doesn't.
     if (fp_mode && ((rawNew & B_BUTTON) || modern_camera_free_state(kong) || (kong->control_state == 0x63) ||
-        (kong->control_state == 0x4E) || (kong->control_state == 0x4F) ||
-        (((kong->unk6A & 2) != 0) && (kong->y_position < kong->unkAC - 10.0f)))) {
+        (!fp_water && ((kong->control_state == 0x4E) || (kong->control_state == 0x4F) ||
+        (((kong->unk6A & 2) != 0) && (kong->y_position < kong->unkAC - 10.0f)))))) {
         fp_set_mode(kong, FALSE);
+        fp_water = FALSE;
     }
     // ZR with the gun out: the game's own first person shot (func_global_asm_806E225C with its
     // first person flag: from the view, where it points, up and down too), as the Kong.
@@ -1933,6 +1947,13 @@ RECOMP_PATCH u16 func_global_asm_806DFF34(u16 arg0, u16 *arg1) {
         s32 feel = recomp_get_game_feel();
         u16 r = result & R_TRIG;
         result &= ~B_BUTTON;
+        if (fp_water) {
+            // In the water: the Kong stays put, as in the game's own view there (the stick is
+            // read just after this, from the same pad).
+            result &= ~(A_BUTTON | Z_TRIG);
+            D_global_asm_807ECDEC->stick_x = 0;
+            D_global_asm_807ECDEC->stick_y = 0;
+        }
         if (!(feel & 4096)) {
             result &= ~(U_CBUTTONS | D_CBUTTONS | L_CBUTTONS | R_CBUTTONS);
         }

@@ -1255,6 +1255,7 @@ extern "C" void dk64_android_apply_experience(int modern) {
     dual.update_option_value("android_button_icons", static_cast<uint32_t>(modern ? 1u : 0u));
     dual.update_option_value("android_haptic_feedback", static_cast<uint32_t>(modern ? 1u : 0u));
     dual.update_option_value("android_jump_assist", static_cast<uint32_t>(modern ? 1u : 0u));
+    dual.update_option_value("android_gun_button", static_cast<uint32_t>(modern ? 1u : 0u));   // ZR shoots, B puts it away
     dual.update_option_value("android_quick_turn", static_cast<uint32_t>(modern ? 1u : 0u));
     dual.update_option_value("android_smooth_running", static_cast<uint32_t>(modern ? 1u : 0u));
     dual.update_option_value("android_movement_polish", static_cast<uint32_t>(modern ? 1u : 0u));
