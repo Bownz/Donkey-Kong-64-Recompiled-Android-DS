@@ -480,6 +480,9 @@ static f32 mc_tilt_velocity = 0.0f;
 static f32 mc_height = 55.0f;       // camera height above the framed ground (below 0: under the Kong)
 static u8 mc_height_valid = FALSE;
 static f32 mc_distance = 0.0f;      // the usual distance (0: not set yet)
+static f32 mc_tight = 0.0f;        // 0..1: in a camera zone (tunnels...), see mc_update_tight
+static f32 mc_run_tilt = 0.0f;    // height change running up or down slopes
+static f32 mc_zone_height = 30.0f, mc_zone_distance = 110.0f;   // the game's close preset
 static f32 mc_reach = 1.0f;         // how far out along the line the camera is (1 = all the way)
 static f32 mc_idle = 0.0f;
 static u8 mc_recentering = FALSE;
@@ -717,6 +720,23 @@ static void modern_camera_input(Actor *camera, CameraPaad *CaaD, s32 touchMoved,
             mc_height += (55.0f - mc_height) * 0.008f * follow * dt;
         }
     }
+    // Round corners, like the game's own camera (func_global_asm_80620F00): the Kong's clearance
+    // feelers (PlayerAdditionalActorData 0x114 towards the camera, 0x118 and 0x11A either side of
+    // it) show the view's about to be blocked on one side only, so it eases round the other way,
+    // at half the game's rate. Only while the Kong's moving and you aren't turning the camera.
+    if (!mc_on_vine && !onTree && !mc_recentering && (mc_idle > 15.0f) && (gCurrentPlayer->PaaD != NULL) &&
+        (gCurrentPlayer->unkB8 > 20.0f)) {
+        f32 reach = ((mc_tight > 0.5f) ? mc_zone_distance : mc_distance) * 0.8f;
+        PlayerAdditionalActorData *feel = gCurrentPlayer->PaaD;
+        u8 back = feel->unk114 < reach;
+        u8 left = feel->unk118 < reach;
+        u8 right = feel->unk11A < reach;
+        if (back && left && !right) {
+            yawStep += 0x19 * dt;
+        } else if (back && right && !left) {
+            yawStep -= 0x19 * dt;
+        }
+    }
     if (mc_on_vine) {
         mc_vine_offset = (f32)MC_ANGLE_WRAP((s32)(mc_vine_offset + yawStep));
         yawStep = 0.0f;
@@ -830,78 +850,61 @@ static void mc_fade(f32 distance) {
     }
 }
 
-// Tunnels and corridors: a tunnel's ceiling is usually only scenery (no collision for the floor
-// lookup or the wall test to find), so it's recognised by its walls instead: walls close on
-// both sides of the Kong (within 100 units each way), along any of four directions (checked one
-// direction per frame, at about head-and-a-half height so low fences and railings don't count).
-// In a tight space the camera stays low and a little closer, under any ceiling, like the
-// game's own camera there; it eases in and out (mc_tight).
-static f32 mc_tight = 0.0f;
-static f32 mc_run_tilt = 0.0f;    // height change running up or down slopes
-static u8 mc_tight_pairs = 0;     // bit per direction: walls both ways
-static u8 mc_tight_dir = 0;
-static u8 mc_tight_logged = FALSE;
+// Tunnels and other tight spots, the way the game's own camera handles them: the levels mark
+// them as camera zones (CameraPaad 0x8; func_global_asm_8061D1FC switches the camera to the
+// "close" preset there and sets CameraPaad 0xAC bit 8). In a zone, the Modern Camera stays
+// within that close preset's height and distance (from the game's table, per Kong and size,
+// func_global_asm_8062217C), so it's as low and near as the stock camera there, but stays free
+// to turn. It eases in and out (mc_tight).
+typedef struct {
+    u16 height;     // unk0: CameraPaad 0xB8
+    u16 distance;   // unk2: CameraPaad 0xA4
+} MCCameraPreset;   // Struct80747B60
+extern MCCameraPreset D_global_asm_80747B60[][4];
+extern u8 current_character_index[];
+extern s32 D_global_asm_807FBB68;
 
-static f32 mc_wall_within(f32 x, f32 y, f32 z, f32 dx, f32 dz, f32 range) {
-    s16 hitA = 0, hitB = 0xFFF;
-    f32 d;
-    for (d = 10.0f; d <= range; d += 10.0f) {
-        if (func_global_asm_80671E00(x + (dx * d), y, z + (dz * d), 5.0f, &hitA, &hitB, 1U, 0xBCU) != 0) {
-            return d;
-        }
-    }
-    return -1.0f;
+static s32 mc_zone_logged = -1;
+
+static u8 mc_in_zone(CameraPaad *AAD) {
+    return ((AAD->unkAC & 8) != 0) && (AAD->unk8 != 0) && ((s32)AAD->unk8 < 0x9B);
 }
 
-static f32 mc_tight_a[4], mc_tight_b[4];   // wall distances each way, per direction (-1: none)
-static s32 mc_tight_log_frames = 0;
+// The game's close preset (preset 1) for the current Kong, as func_global_asm_8062217C picks it.
+static void mc_zone_preset(CameraPaad *AAD) {
+    s32 mode = (current_character_index[AAD->unkFB] * 2) + (character_change_array[AAD->unkFB].unk2C0 != 1) + 7;
+    if (current_map == MAP_FACTORY_MAD_JACK) {
+        mode = 0;
+    } else if (D_global_asm_807FBB68 & 2) {
+        mode = 2;
+    } else if ((D_global_asm_807FBB64 & 1) && (current_map != MAP_GALLEON_PUFFTOSS)) {
+        mode = 3;
+    } else if (D_global_asm_807FBB64 & 0x80) {
+        mode = 4;
+    } else if (AAD->unkAC & 0x20000) {
+        mode = 5;
+    } else if (D_global_asm_807FBB64 & 0x04000000) {
+        mode = 6;
+    } else if ((AAD->unkF3 == 5) || (AAD->unkF3 == 0xC) || (AAD->unkF3 == 0xA)) {
+        mode = 1;
+    }
+    if ((mode < 0) || (mode > 20)) {
+        return;
+    }
+    mc_zone_height = mc_clamp((f32)D_global_asm_80747B60[mode][1].height, 12.0f, 60.0f);
+    mc_zone_distance = mc_clamp((f32)D_global_asm_80747B60[mode][1].distance, 50.0f, 160.0f);
+}
 
-static void mc_update_tight(Actor *target) {
-    f32 dx, dz, a, b;
-    s32 angle = (mc_tight_dir * 0x200) & 0xFFF;   // 0, 45, 90, 135 degrees
-    f32 y = target->y_position + 40.0f;
-    s32 k, best;
-    mc_direction_with(mc_convention, angle, &dx, &dz);
-    // Measured out to 200 each way (for the log); tight is walls within 100 on both sides.
-    a = mc_wall_within(target->x_position, y, target->z_position, dx, dz, 200.0f);
-    b = mc_wall_within(target->x_position, y, target->z_position, -dx, -dz, 200.0f);
-    mc_tight_a[mc_tight_dir] = a;
-    mc_tight_b[mc_tight_dir] = b;
-    if ((a >= 0.0f) && (b >= 0.0f) && (a <= 100.0f) && (b <= 100.0f)) {
-        mc_tight_pairs |= (1 << mc_tight_dir);
-    } else {
-        mc_tight_pairs &= ~(1 << mc_tight_dir);
+static void mc_update_tight(CameraPaad *AAD) {
+    u8 zone = mc_in_zone(AAD);
+    if (zone) {
+        mc_zone_preset(AAD);
     }
-    mc_tight_dir = (mc_tight_dir + 1) & 3;
-    // Held for a second and a half after the walls were last seen both sides, so a tunnel whose
-    // width varies doesn't flick the camera up and down.
-    {
-        static s32 hold = 0;
-        if (mc_tight_pairs != 0) {
-            hold = 45;
-        } else if (hold > 0) {
-            hold--;
-        }
-        mc_tight += (((hold > 0) ? 1.0f : 0.0f) - mc_tight) * 0.08f;
-    }
-    if ((mc_tight_pairs != 0) != mc_tight_logged) {
-        mc_tight_logged = (mc_tight_pairs != 0);
-        recomp_printf("Modern Camera: tight space %s (map 0x%02X)\n", mc_tight_logged ? "on" : "off", current_map);
-    }
-    // Every 2 seconds: the narrowest walls-on-both-sides gap around the Kong, for tuning.
-    if (++mc_tight_log_frames >= 60) {
-        mc_tight_log_frames = 0;
-        best = -1;
-        for (k = 0; k < 4; k++) {
-            if ((mc_tight_a[k] >= 0.0f) && (mc_tight_b[k] >= 0.0f) &&
-                ((best < 0) || ((mc_tight_a[k] + mc_tight_b[k]) < (mc_tight_a[best] + mc_tight_b[best])))) {
-                best = k;
-            }
-        }
-        if (best >= 0) {
-            recomp_printf("Modern Camera: walls %d / %d (dir %d, map 0x%02X, Kong state 0x%02X)\n",
-                (s32)mc_tight_a[best], (s32)mc_tight_b[best], best, current_map, target->control_state);
-        }
+    mc_tight += ((zone ? 1.0f : 0.0f) - mc_tight) * 0.08f;
+    if ((s32)zone != mc_zone_logged) {
+        mc_zone_logged = zone;
+        recomp_printf("Modern Camera: camera zone %s (map 0x%02X, zone %d, close preset height %d distance %d)\n",
+            zone ? "on" : "off", current_map, AAD->unk8, (s32)mc_zone_height, (s32)mc_zone_distance);
     }
 }
 
@@ -1118,12 +1121,12 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
     if (mc_on_vine) {
         distance *= 1.2f;
     }
-    // Tunnels and corridors (mc_update_tight): low (at most 30 above the ground, so ~level with
-    // the Kong's head) and at most 110 out. Tilting down still works.
+    // Camera zones (tunnels...; mc_update_tight): within the game's close preset. Tilting down
+    // still works.
     if (mc_on_vine) {
         mc_tight += (0.0f - mc_tight) * 0.08f;
     } else {
-        mc_update_tight(target);
+        mc_update_tight(AAD);
     }
     // Running feel (Odyssey-like, all eased):
     //  - at speed the camera pulls out a little (up to 8%) and comes back in as you slow;
@@ -1158,11 +1161,11 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
     {
         f32 height = mc_height + mc_run_tilt;
         if (mc_tight > 0.01f) {
-            if (height > 30.0f) {
-                height += (30.0f - height) * mc_tight;
+            if (height > mc_zone_height) {
+                height += (mc_zone_height - height) * mc_tight;
             }
-            if (distance > 110.0f) {
-                distance += (110.0f - distance) * mc_tight;
+            if (distance > mc_zone_distance) {
+                distance += (mc_zone_distance - distance) * mc_tight;
             }
         }
         mc_direction_with(mc_convention, ((s32)mc_yaw) & 0xFFF, &dx, &dz);
