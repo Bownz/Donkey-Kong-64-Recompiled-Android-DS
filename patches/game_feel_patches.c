@@ -168,7 +168,6 @@ static s32 gf_last_health = -1000;
 static s32 gf_air_frames = 0;           // frames since the Kong last stood on the ground
 static s32 gf_last_state = -1;
 static u8 gf_left_by_walking = FALSE;   // left the ground without jumping (walked off a ledge)
-static s32 gf_turn_frames = 0;
 
 // Each Kong's instrument gets its own beat (frames within a 16-frame bar: strength).
 static void gf_instrument_beat(void) {
@@ -217,6 +216,66 @@ static void gf_start_jump(Actor *kong, PlayerAdditionalActorData *paad) {
     kong->control_state_progress = 0;
     playAnimation(kong, 0x10);
     paad->unk58 = D_global_asm_80767CC0 - 0x1E;
+}
+
+// ---- Quick Turn ------------------------------------------------------------------------------
+// The running state's handler (Kong state 0x0D), the game's own code, except that with Quick Turn
+// a sharp reversal at speed doesn't start the skid (0x0E): the Kong turns to face the stick at
+// once, loses most of its speed, and carries on running (with the skid's rumble).
+extern PlayerAdditionalActorData *extra_player_info_pointer;
+extern Actor *gCurrentActorPointer;
+extern f32 D_global_asm_807531E0[];
+s32 handleInputsForControlState(s32 arg0);
+s32 func_global_asm_806CDD24(Actor *arg0, f32 arg1, f32 arg2, s32 arg3);
+u8 func_global_asm_8061CB50(void);
+s16 func_global_asm_806CC14C(s16 arg0, s16 arg1);
+void func_global_asm_806CC948(void);
+void func_global_asm_806CC8B8(void);
+void renderActor(Actor *arg0, u8 arg1);
+
+static u8 gf_pivoted = FALSE;   // a Quick Turn happened (Smooth Running lets the speed drop)
+
+RECOMP_PATCH void func_global_asm_806D332C(void) {
+    u32 newControlState;
+
+    if (gCurrentActorPointer->control_state_progress == 0) {
+        gCurrentActorPointer->control_state_progress++;
+        extra_player_info_pointer->unkC = -1;
+        extra_player_info_pointer->unkE = -1;
+    }
+    if (handleInputsForControlState(0x13) == 0) {
+        newControlState = func_global_asm_806CDD24(gCurrentActorPointer, gCurrentActorPointer->unkB8, extra_player_info_pointer->unk4, 1);
+        if (newControlState != 0xD) {
+            gCurrentActorPointer->control_state = (u8)newControlState & 0xFF;
+            gCurrentActorPointer->control_state_progress = 0;
+        }
+    }
+    if ((!func_global_asm_8061CB50())
+        && (D_global_asm_807531E0[D_global_asm_807FD584] < gCurrentActorPointer->unkB8)
+        && (D_global_asm_807531E0[D_global_asm_807FD584] < extra_player_info_pointer->unk4)
+        && (extra_player_info_pointer->unkC >= 0)
+        && (func_global_asm_806CC14C(extra_player_info_pointer->unkC, extra_player_info_pointer->unkA) >= 0x401)
+        && (func_global_asm_806CC14C(gCurrentActorPointer->unkEE, extra_player_info_pointer->unkA) >= 0x539)) {
+        if ((recomp_get_game_feel() & GF_QUICK_TURN) && (gCurrentActorPointer->control_state == 0xD)) {
+            // @recomp: Quick Turn: pivot instead of skidding.
+            gCurrentActorPointer->y_rotation = gCurrentActorPointer->unkEE & 0xFFF;
+            extra_player_info_pointer->unkA = gCurrentActorPointer->y_rotation;
+            gCurrentActorPointer->unkB8 *= 0.4f;
+            extra_player_info_pointer->unkC = -1;   // the turn is done: don't trigger again
+            recomp_haptic_pulse(0.25f, 70);
+            gf_pivoted = TRUE;
+            func_global_asm_806CC8B8();
+        } else {
+            gCurrentActorPointer->control_state = 0xE;
+            gCurrentActorPointer->control_state_progress = 0;
+            func_global_asm_806CC948();
+        }
+    } else {
+        func_global_asm_806CC8B8();
+    }
+    extra_player_info_pointer->unkC = extra_player_info_pointer->unkE;
+    extra_player_info_pointer->unkE = extra_player_info_pointer->unkA;
+    renderActor(gCurrentActorPointer, 0);
 }
 
 // ---- Movement Polish -------------------------------------------------------------------------
@@ -427,29 +486,6 @@ void game_feel_update(void) {
         }
     }
 
-    // Quick Turn: the skid (0x0E: the dust and its rumble when you reverse while running) is cut
-    // short after 4 frames: the Kong faces the new way at once (unkEE, the way the stick points),
-    // keeps a little speed, and goes back to standing, from which the game runs it the new way
-    // straight away (the stick's still held).
-    if (flags & GF_QUICK_TURN) {
-        if ((state == 0x0E) && (gf_last_state != 0x0E)) {
-            gf_turn_frames = 0;
-        }
-        if (state == 0x0E) {
-            gf_turn_frames++;
-            if (gf_turn_frames >= 4) {
-                f32 top = D_global_asm_807531FC[D_global_asm_807FD584];
-                kong->y_rotation = kong->unkEE & 0xFFF;
-                paad->unkA = kong->y_rotation;
-                kong->unkB8 = ((top > 50.0f) ? top : 150.0f) * 0.3f;
-                kong->control_state = 0x0C;
-                kong->control_state_progress = 0;
-                playAnimation(kong, 9);
-                gf_last_yaw = -1;   // no lean from the sudden turn
-                state = 0x0C;
-            }
-        }
-    }
     // Smooth Running: the speed builds up over about a third of a second from standing (instead
     // of almost at once) and runs down over a few frames when you let go, so running has a bit
     // of weight. Only between standing and running (attacks, rolls and jumps set their own speed).
@@ -463,13 +499,16 @@ void game_feel_update(void) {
         up = top * 0.09f;     // ~11 frames to full speed
         down = top * 0.2f;    // ~5 frames to a stop
         if (((state == 0x0C) || (state == 0x0D)) && ((gf_last_state == 0x0C) || (gf_last_state == 0x0D)) && onGround) {
-            if (kong->unkB8 > lastSpeed + up) {
+            if (gf_pivoted) {
+                // a Quick Turn: keep its speed drop
+            } else if (kong->unkB8 > lastSpeed + up) {
                 kong->unkB8 = lastSpeed + up;
             } else if (kong->unkB8 < lastSpeed - down) {
                 kong->unkB8 = lastSpeed - down;
             }
         }
         lastSpeed = kong->unkB8;
+        gf_pivoted = FALSE;
     }
     if (flags & GF_POLISH) {
         gf_polish(kong, paad, state, onGround, landedAfter);
