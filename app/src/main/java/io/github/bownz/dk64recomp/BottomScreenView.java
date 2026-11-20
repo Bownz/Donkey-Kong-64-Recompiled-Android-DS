@@ -682,7 +682,9 @@ public final class BottomScreenView extends View {
         long now = android.os.SystemClock.uptimeMillis();
         float dt = dimTime == 0 ? 0f : Math.min(100f, now - dimTime);
         dimTime = now;
-        float target = state.inGame() && state.cutscene && !state.paused ? 1f : 0f;
+        // Also the menus once the logo has gone (title screen, file select...), until a game starts.
+        boolean menus = !state.inGame() && titleGone;
+        float target = menus || (state.inGame() && state.cutscene && !state.paused) ? 1f : 0f;
         if (dim != target) {
             float step = dt / DIM_FADE_MS;
             dim = target > dim ? Math.min(target, dim + step) : Math.max(target, dim - step);
