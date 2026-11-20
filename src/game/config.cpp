@@ -1365,7 +1365,23 @@ extern "C" void dk64_android_apply_experience(int modern) {
         static_cast<uint32_t>(modern ? ultramodern::renderer::AspectRatio::Expand : ultramodern::renderer::AspectRatio::Original));
     graphics.update_option_value(recompui::config::graphics::options::hr_option,
         static_cast<uint32_t>(modern ? ultramodern::renderer::HUDRatioMode::Clamp16x9 : ultramodern::renderer::HUDRatioMode::Original));
+    // Classic: the cutscene borders and the original draw distance; Modern: no borders, and
+    // things stay drawn a bit further away.
+    graphics.update_option_value(dk64::configkeys::graphics::cutscene_borders,
+        static_cast<uint32_t>(modern ? dk64::CutsceneBordersMode::Off : dk64::CutsceneBordersMode::On));
+    graphics.update_option_value(dk64::configkeys::graphics::draw_distance, modern ? 30.0 : 0.0);
     graphics.save_config();
+
+    // Camera: Modern Camera, or the original's own (Free Cam); lightning flashes as in the
+    // original, or toned down.
+    {
+        recomp::config::Config &gen = recompui::config::get_general_config();
+        gen.update_option_value(dk64::configkeys::general::camera_type,
+            static_cast<uint32_t>(modern ? dk64::CameraTypeMode::Modern : dk64::CameraTypeMode::Free));
+        gen.update_option_value(dk64::configkeys::general::lightning_flashes,
+            static_cast<uint32_t>(modern ? dk64::LightningFlashMode::Reduced : dk64::LightningFlashMode::Vanilla));
+        gen.save_config();
+    }
 
     recomp::mods::enable_mod("dk64_tag_anywhere", modern != 0);
     recomp::config::Config &dual = recompui::config::get_config("dual_screen");
