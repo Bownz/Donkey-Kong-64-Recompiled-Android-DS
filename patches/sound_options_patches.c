@@ -3000,6 +3000,7 @@ RECOMP_PATCH u8 isFlagSet(s16 flagIndex, u8 flagType) { // TODO: Can we use the 
         s32 k;
         for (k = 0; k < 5; k++) {
             if ((flagIndex == kong_freed_flags[k]) && (k != dk64_android_tag_target)) {
+                recomp_printf("Flags: Kong %d freed flag hidden for the touch swap (map 0x%02X)\n", k, current_map);
                 return FALSE;
             }
         }
@@ -3013,7 +3014,31 @@ RECOMP_PATCH u8 isFlagSet(s16 flagIndex, u8 flagType) { // TODO: Can we use the 
             flagBlock = temporary_flag_block;
     }
     flagByte = flagIndex >> 3;
-    return flagBlock[flagByte] >> (s16)(flagIndex - flagByte * 8) & 1;
+    {
+        u8 value = flagBlock[flagByte] >> (s16)(flagIndex - flagByte * 8) & 1;
+        // Diagnostics (a freed Kong seen in its cage): each change in what a Kong's freed flag
+        // reads as, per map, goes to the session log.
+        if (flagType == FLAG_TYPE_PERMANENT) {
+            static const s16 freed[5] = { 0x181, 0x006, 0x046, 0x042, 0x075 };
+            static s8 last[5] = { -1, -1, -1, -1, -1 };
+            static s32 lastMap = -1;
+            s32 k;
+            if (current_map != lastMap) {
+                lastMap = current_map;
+                for (k = 0; k < 5; k++) {
+                    last[k] = -1;
+                }
+            }
+            for (k = 0; k < 5; k++) {
+                if ((flagIndex == freed[k]) && (last[k] != (s8)value)) {
+                    last[k] = (s8)value;
+                    recomp_printf("Flags: Kong %d freed flag reads %d (map 0x%02X, tag target %d)\n",
+                        k, value, current_map, dk64_android_tag_target);
+                }
+            }
+        }
+        return value;
+    }
 }
 
 RECOMP_PATCH void setFlag(s16 flagIndex, u8 newValue, u8 flagType) {
