@@ -1069,6 +1069,13 @@ static u8 fp_gun_out(void) {
         ((gCurrentPlayer->PaaD != NULL) && (gCurrentPlayer->PaaD->unk8C != 0)));
 }
 
+// The fairy camera (Kong states 4/5 looking through it, 0x64/0x65 taking the photo).
+static u8 fp_photo_state(s32 state) {
+    return (state == 4) || (state == 5) || (state == 0x64) || (state == 0x65);
+}
+
+static u8 fp_in_photo = FALSE;   // the camera is out (with Walk in First Person on): its prompts
+
 static Gfx *fp_draw_prompts(Gfx *dl, Actor *unused) {
     gSPDisplayList(dl++, &D_1000118);
     gDPSetCombineMode(dl++, G_CC_MODULATEIA_PRIM, G_CC_MODULATEIA_PRIM);
@@ -1077,7 +1084,9 @@ static Gfx *fp_draw_prompts(Gfx *dl, Actor *unused) {
     gDPPipeSync(dl++);
     dl = alignHUD(dl, ALIGN_RIGHT);
     gDPSetPrimColor(dl++, 0, 0, 0xFF, 0xFF, 0xFF, 0xE0);
-    if (fp_gun_out()) {
+    if (fp_in_photo) {
+        dl = printStyledText(dl, 6, FP_TEXT_X * 4, FP_ROW_SHOOT * 4, (u8 *)"PHOTO", 1);
+    } else if (fp_gun_out()) {
         dl = printStyledText(dl, 6, FP_TEXT_X * 4, FP_ROW_SHOOT * 4, (u8 *)"SHOOT", 1);
     }
     dl = printStyledText(dl, 6, FP_TEXT_X * 4, FP_ROW_EXIT * 4, (u8 *)"EXIT", 1);
@@ -1137,18 +1146,27 @@ static void fp_update(CameraPaad *CaaD) {
     }
     // Taking a photo (the camera, Kong states 0x64/0x65): the game's own camera view, then back
     // into ours once the camera's put away.
-    if (fp_mode && ((state == 0x64) || (state == 0x65))) {
+    if (fp_mode && fp_photo_state(state)) {
         fp_set_mode(kong, FALSE);
         fp_trans = 0.0f;          // (no move back out: straight to the photo view)
         fp_behind_yaw = -1;
         fp_resume_after_photo = TRUE;
-    } else if (fp_resume_after_photo && (state != 0x64) && (state != 0x65)) {
+    } else if (fp_resume_after_photo && !fp_photo_state(state)) {
         fp_resume_after_photo = FALSE;
         if (!modern_camera_free_state(kong)) {
             fp_set_mode(kong, TRUE);
         }
     }
     fp_last_state = kong->control_state;
+    // The camera (with Walk in First Person on): ZR takes the photo and B puts the camera away
+    // (the input mapping); B also means "out of first person too".
+    fp_in_photo = fp_photo_state(kong->control_state);
+    if (fp_in_photo) {
+        if (rawNew & B_BUTTON) {
+            fp_resume_after_photo = FALSE;
+        }
+        addActorToTextOverlayRenderArray(fp_draw_prompts, NULL, 5);
+    }
     // B leaves; so do trees, poles and vines (modern_camera_free_state), swimming (Kong states
     // 0x4E/0x4F, or under the water's surface) and the Rocketbarrel. Getting hit doesn't.
     if (fp_mode && ((rawNew & B_BUTTON) || modern_camera_free_state(kong) || (kong->control_state == 0x63) ||
@@ -1221,7 +1239,7 @@ static void fp_update(CameraPaad *CaaD) {
             }
         }
     }
-    recomp_set_fp_status((fp_mode ? 1 : 0) | ((fp_mode && fp_gun_out()) ? 2 : 0));
+    recomp_set_fp_status(((fp_mode || fp_in_photo) ? 1 : 0) | (((fp_mode && fp_gun_out()) || fp_in_photo) ? 2 : 0));
 }
 
 // The view from the Kong's head (its head bone, 6, as the game itself follows it), looking where
@@ -1858,6 +1876,24 @@ RECOMP_PATCH u16 func_global_asm_806DFF34(u16 arg0, u16 *arg1) {
     // Walk in First Person: B leaves it (fp_update; so it isn't an attack here); the controller's
     // C buttons do nothing (the touch buttons' still work: bit 4096 of the game feel flags while
     // they press one); ZR shoots with the gun out (it presses B), facing where you look.
+    // The camera (with Walk in First Person on): ZR takes the photo (B), B puts it away (C-Down,
+    // as the game does); the controller's C buttons do nothing (the touch buttons' still work).
+    if ((gCurrentPlayer != NULL) && fp_photo_state(gCurrentPlayer->control_state) && (recomp_get_game_feel() & FP_WALK)) {
+        s32 feel = recomp_get_game_feel();
+        u16 b = result & B_BUTTON;
+        u16 r = result & R_TRIG;
+        result &= ~(B_BUTTON | R_TRIG);
+        if (!(feel & 4096)) {
+            result &= ~(U_CBUTTONS | D_CBUTTONS | L_CBUTTONS | R_CBUTTONS);
+        }
+        if (b) {
+            result |= D_CBUTTONS;
+        }
+        if (r) {
+            result |= B_BUTTON;
+        }
+        return result;
+    }
     if (fp_mode && (gCurrentPlayer != NULL)) {
         s32 feel = recomp_get_game_feel();
         u16 r = result & R_TRIG;

@@ -243,8 +243,9 @@ final class RomIcons {
             return still;
         }
         int n = frames.length;
-        int w = Math.max(1, Math.min(2, n / 8));
-        double s = Math.sin(2 * Math.PI * (((timeMs + phaseMs) % 3000) / 3000.0));
+        // Just one frame either side, briskly: enough that the icon doesn't look flat.
+        int w = 1;
+        double s = Math.sin(2 * Math.PI * (((timeMs + phaseMs) % 1200) / 1200.0));
         int p = (int) Math.round(s * w);
         return frames[((p % n) + n) % n];
     }
