@@ -2139,8 +2139,27 @@ RECOMP_PATCH u16 func_global_asm_806DFF34(u16 arg0, u16 *arg1) {
         // fresh press plays Z + C-Up / C-Down / C-Left / C-Right. With the camera out, Fairy Camera puts it away again
         // (C-Down on its own).
         s32 actions = recomp_get_extra_actions();
-        s32 pressed = actions & ~lastActions;
+        s32 pressed;
+        // Modern layout: Z + the right stick pushed up plays the instrument (Z + C-Up; C-Up
+        // itself is the stick pressed in, First Person). The stick on its own stays the camera;
+        // down, left and right with Z are already C-Down, C-Left and C-Right (fairy camera, gun,
+        // orange).
+        {
+            f32 rx, ry;
+            recomp_get_right_analog_inputs(&rx, &ry);   // (y: down is positive)
+            if ((result & Z_TRIG) && (ry < -0.6f) && (rx > -0.5f) && (rx < 0.5f) && !fp_mode) {
+                actions |= 16;
+            }
+        }
+        pressed = actions & ~lastActions;
         lastActions = actions;
+        if (pressed & 16) {
+            // Z is already held: just C-Up.
+            combo_at = D_global_asm_80767CC0 - 2;
+            combo_c = U_CBUTTONS;
+            fp_photo_exit_c = TRUE;
+            pressed = 0;
+        }
         if ((pressed & 2) && (gCurrentPlayer != NULL) && fp_photo_state(gCurrentPlayer->control_state)) {
             combo_at = D_global_asm_80767CC0 - 2;   // straight to the C part...
             combo_c = D_CBUTTONS;
