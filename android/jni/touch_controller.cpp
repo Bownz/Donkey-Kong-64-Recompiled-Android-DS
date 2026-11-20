@@ -196,7 +196,7 @@ void dk64::android::set_quick_turn(bool enabled) {
     quick_turn.store(enabled, std::memory_order_relaxed);
 }
 
-static std::atomic<int> game_feel_extra{16 | 32 | 64 | 128 | 256};
+static std::atomic<int> game_feel_extra{16 | 32 | 64 | 128 | 256 | 512};
 
 void dk64::android::set_game_feel_bit(int bit, bool enabled) {
     if (enabled) {

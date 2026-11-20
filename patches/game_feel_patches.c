@@ -536,9 +536,8 @@ static void gf_air_control(Actor *kong, PlayerAdditionalActorData *paad, s32 sta
 }
 
 // ---- Hit Feel -------------------------------------------------------------------------------
-// When something near the Kong loses health (a punch, a slam, a shot landing), a moment of
-// hit-stop (the Kong and what it hit freeze for 3 frames), a short kick of the camera
-// (game_feel_camera_kick, used by the Modern Camera) and a rumble.
+// When something near the Kong loses health (a punch, a slam, a shot landing): a short kick of
+// the camera (game_feel_camera_kick, used by the Modern Camera) and a rumble.
 extern u16 D_global_asm_807FBB34;
 typedef struct {
     Actor *actor;
@@ -613,23 +612,7 @@ static void gf_hit_feel(Actor *kong) {
         }
         if ((j < GF_TRACKED) && (hp < gf_tracked_health[j]) && (gf_tracked_health[j] > 0) &&
             (gf_tracked_health[j] - hp) < 100) {
-            // A hit: freeze both for 3 frames.
-            gf_stop_frames = 3;
-            gf_stop_target = a;
-            gf_stop_kong[0] = kong->x_position;
-            gf_stop_kong[1] = kong->y_position;
-            gf_stop_kong[2] = kong->z_position;
-            gf_stop_enemy[0] = a->x_position;
-            gf_stop_enemy[1] = a->y_position;
-            gf_stop_enemy[2] = a->z_position;
-            if (kong->animation_state != NULL) {
-                gf_stop_kong_anim = kong->animation_state->unk48;
-                kong->animation_state->unk48 = 0.0f;
-            }
-            if (a->animation_state != NULL) {
-                gf_stop_enemy_anim = a->animation_state->unk48;
-                a->animation_state->unk48 = 0.0f;
-            }
+            // A hit: a camera punch and a rumble (no freeze).
             gf_kick = 1.0f;
             recomp_haptic_pulse(0.45f, 70);
         }

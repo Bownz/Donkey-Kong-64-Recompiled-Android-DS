@@ -1,6 +1,7 @@
 #include "common_structs.h"
 #include "patches_main.h"
 #include "ui.h"
+#include "input.h"
 
 #define gScissorUpLX D_global_asm_80744498
 #define gScissorUpLY D_global_asm_8074449C
@@ -94,6 +95,27 @@ void updateLag(s32 value) {
     D_global_asm_80744478 = value;
 }
 
+// @recomp (Android): Fast-Forward Cutscenes (Input option, Game Feel bit 512): holding B during
+// a cutscene runs the game at twice its speed (each frame advances twice as far; the frame's
+// pacing is unchanged), so the cutscene plays out, events and all, in half the time.
+extern OSContPad D_global_asm_807ECD58;   // controller 1 as read this frame
+
+static void cutscene_fast_forward(void) {
+    static u8 logged = FALSE;
+    u8 on = (is_cutscene_active == 1) && (D_global_asm_807ECD58.button & B_BUTTON) &&
+        (recomp_get_game_feel() & 512) && !gameIsInDKTVMode();
+    if (on) {
+        D_global_asm_80744478 *= 2;
+        if (D_global_asm_80744478 > 6) {
+            D_global_asm_80744478 = 6;
+        }
+    }
+    if (on != logged) {
+        recomp_printf("Cutscene fast-forward %s\n", on ? "on" : "off");
+        logged = on;
+    }
+}
+
 RECOMP_PATCH void func_global_asm_80600674(void) {
     s32 max_boost = 1;
     s32 min_boost = 20;
@@ -165,6 +187,7 @@ RECOMP_PATCH void func_global_asm_80600674(void) {
             }
         }
         D_global_asm_8076AF10 = osdata->frame_count;
+        cutscene_fast_forward();
         return;
     }
     osdata = &D_global_asm_80767A40;
@@ -175,6 +198,7 @@ RECOMP_PATCH void func_global_asm_80600674(void) {
     }
 
     D_global_asm_8076AF10 = osdata->frame_count;
+    cutscene_fast_forward();
     //recomp_printf("D_global_asm_80744478 is %d:\n", D_global_asm_80744478);
 }
 
