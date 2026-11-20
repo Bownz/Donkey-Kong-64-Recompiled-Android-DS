@@ -191,8 +191,10 @@ final class TouchMoves {
             return;
         }
 
-        if (move == Move.FIRST_PERSON) {
+        if (move == Move.FIRST_PERSON || (move == Move.CAMERA && (state.swimming || state.camera))) {
             // C-Up on its own enters first-person view, and pressing it again leaves it.
+            // The camera: in the water C-Down on its own takes it out (Z there would dive), and
+            // C-Down on its own puts it away again (func_global_asm_806E9804 / 806E9ACC).
             TouchInput.setN64Buttons(c);
             handler.postDelayed(() -> {
                 TouchInput.setN64Buttons(0);
@@ -282,6 +284,7 @@ final class TouchMoves {
         switch (move) {
             case FIRST_PERSON: return state.canFirstPerson || state.firstPerson || state.gunOut;
             case WEAPON: return state.canZMoves || state.gunOut || state.firstPerson;
+            case CAMERA: return (state.canZMoves || state.swimming) && !state.gunOut;
             default: return state.canZMoves && !state.gunOut;
         }
     }
@@ -313,7 +316,7 @@ final class TouchMoves {
             // In first person (or the camera) Z + C-Up would just leave the view.
             case INSTRUMENT: return state.swimming || state.climbing || state.gunOut || state.firstPerson || state.camera
                 || k.instrumentEnergy <= 0;
-            case CAMERA: return !state.camera && (state.swimming || state.climbing || state.gunOut || state.film <= 0);
+            case CAMERA: return !state.camera && (state.climbing || state.gunOut || state.film <= 0);
             default: return false;
         }
     }
