@@ -1133,8 +1133,12 @@ static void fp_update(CameraPaad *CaaD) {
         fp_set_mode(kong, !fp_mode);
     }
     fp_last_state = kong->control_state;
-    if (fp_mode && ((rawNew & B_BUTTON) || mc_vine_state(kong) || (kong->control_state == 0x63))) {
-        fp_set_mode(kong, FALSE);   // B leaves; so do vines and the Rocketbarrel
+    // B leaves; so do trees, poles and vines (modern_camera_free_state), swimming (Kong states
+    // 0x4E/0x4F, or under the water's surface) and the Rocketbarrel. Getting hit doesn't.
+    if (fp_mode && ((rawNew & B_BUTTON) || modern_camera_free_state(kong) || (kong->control_state == 0x63) ||
+        (kong->control_state == 0x4E) || (kong->control_state == 0x4F) ||
+        (((kong->unk6A & 2) != 0) && (kong->y_position < kong->unkAC - 10.0f)))) {
+        fp_set_mode(kong, FALSE);
     }
     // ZR with the gun out: the game's own first person shot (func_global_asm_806E225C with its
     // first person flag: from the view, where it points, up and down too), as the Kong.
