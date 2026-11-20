@@ -2087,8 +2087,11 @@ static u16 dk_map_buttons(u16 arg0, u16 *arg1) {
             D_global_asm_807ECDEC->stick_x = 0;
             D_global_asm_807ECDEC->stick_y = 0;
         }
+        // The controller's C buttons do nothing here, except C-Up: the First Person button
+        // leaves first person again (the game's view comes on and fp_update turns ours off).
+        // The Gun shortcut still works (combo bits, added after this).
         if (!(feel & 4096)) {
-            result &= ~(U_CBUTTONS | D_CBUTTONS | L_CBUTTONS | R_CBUTTONS);
+            result &= ~(D_CBUTTONS | L_CBUTTONS | R_CBUTTONS);
         }
         (void)r;   // (ZR shoots: fp_update)
         return result;   // (instead of Shoot Gun With, below)
