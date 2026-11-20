@@ -651,7 +651,7 @@ static void add_dual_screen_options(recomp::config::Config &config) {
         "Haptic Feedback",
         "Small rumbles for game feel, like recent 3D platformers: landing (stronger after a long fall "
         "or a Simian Slam) and skidding round when you turn sharply while running. "
-        "Also: a soft tap for each banana and coin, a strong one for a Golden Banana, a tick for each "
+        "Also: footsteps (Chunky heaviest, Tiny lightest), a soft tap for each banana and coin, a strong one for a Golden Banana, a tick for each "
         "shot and orange, a thump when you're hurt, a bump when you run into a wall, and a beat while playing an instrument. "
         "On your controller, or the phone when you play with the touch controls. The strength follows Rumble Strength.",
         haptic_feedback_options,
