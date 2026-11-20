@@ -1051,6 +1051,8 @@ static s32 fp_behind_yaw = -1;    // leaving: the camera angle behind the Kong (
 static f32 fp_head_eye[6];        // the head view last frame (eye, look-at)
 static f32 fp_yaw = 0.0f;      // where you're looking: facing (like the Kong's y_rotation)
 static f32 fp_pitch = 0.0f;    // up (+) / down (-), angle units
+static f32 fp_look_h = 0.0f;   // the game's first person look height (-80..50), fp_pitch from it
+void getStickPosition(s32 *x, s32 *y);
 static s32 fp_last_state = -1;
 static u16 fp_last_raw = 0;
 
@@ -1090,6 +1092,7 @@ static void fp_set_mode(Actor *kong, u8 on) {
     if (on) {
         fp_yaw = (f32)(kong->y_rotation & 0xFFF);
         fp_pitch = 0.0f;
+        fp_look_h = 0.0f;
         fp_trans = 0.0f;   // the camera moves in to the Kong's head (fp_transition)
     } else {
         kong->shadow_opacity = 0xFF;
@@ -1151,38 +1154,23 @@ static void fp_update(CameraPaad *CaaD) {
         }
     }
     if (fp_mode) {
-        f32 rx, ry;
-        s32 invX = 0, invY = 0;
+        // Looking, exactly as the game's own first person view does it (func_global_asm_806EA628
+        // with First Person Right Stick Looks): the right stick as the N64 stick, then the gyro
+        // and mouse and all the invert settings through getStickPosition, at the game's speed
+        // (func_global_asm_806EA2D8). Up and down moves a look height from 80 below to 50 above,
+        // as there; here it tilts the view (8 angle units per unit: about 35 degrees up, 55 down).
+        f32 rx, ry, k;
+        s32 sx, sy;
         recomp_get_right_analog_inputs(&rx, &ry);
         rx = recomp_apply_per_axis_deadzone(rx);
         ry = recomp_apply_per_axis_deadzone(ry);
-        recomp_get_first_person_inverted_axes(&invX, &invY);
-        if (invX) {
-            rx = -rx;
-        }
-        if (invY) {
-            ry = -ry;
-        }
-        fp_yaw -= rx * 70.0f * getFrameDelta();
-        fp_pitch -= ry * 45.0f * getFrameDelta();
-        // Gyro (and mouse) aiming, as in the game's own first person view (getStickPosition:
-        // the same deltas, inversion settings and scale).
-        {
-            f32 gyx = 0.0f, gyy = 0.0f, msx = 0.0f, msy = 0.0f, k;
-            s32 igx = 0, igy = 0, imx = 0, imy = 0;
-            recomp_get_gyro_deltas(&gyy, &gyx);
-            recomp_get_gyro_inverted_axes(&igx, &igy);
-            recomp_get_mouse_deltas(&msx, &msy);
-            recomp_get_mouse_inverted_axes(&imx, &imy);
-            gyx = igx ? -gyx : gyx;
-            gyy = igy ? gyy : -gyy;
-            msx = imx ? -msx : msx;
-            msy = imy ? msy : -msy;
-            k = func_global_asm_806EA2D8();
-            fp_yaw -= (gyx + msx) * 0.08f * k * (4096.0f / 360.0f);
-            fp_pitch += (gyy + msy) * 0.6f * k;
-        }
-        fp_pitch = mc_clamp(fp_pitch, -0x380, 0x380);
+        sx = (s32)(rx * 80.0f);
+        sy = (s32)(-ry * 80.0f);
+        getStickPosition(&sx, &sy);
+        k = func_global_asm_806EA2D8();
+        fp_yaw -= ((f32)sx * 0.08f * k * 4096.0f) / 360.0f;
+        fp_look_h = mc_clamp(fp_look_h + ((f32)sy * 0.04f * k), -80.0f, 50.0f);
+        fp_pitch = fp_look_h * 8.0f;
         while (fp_yaw < 0.0f) {
             fp_yaw += 4096.0f;
         }
