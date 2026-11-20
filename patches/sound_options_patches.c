@@ -1060,9 +1060,19 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
         mc_focus_y += (wantY - mc_focus_y) * 0.05f;
         mc_focus_z += (target->z_position - mc_focus_z) * 0.04f;
     } else {
-        mc_focus_x += (target->x_position - mc_focus_x) * 0.35f;
+        // Look-ahead, a light one like Odyssey's: while running, the view leans a little (up
+        // to 14 units) the way the Kong is running, easing in and out over about a second, so
+        // there's a bit more room ahead. Standing, attacking or jumping, it's centred on the Kong.
+        static f32 lead = 0.0f;
+        f32 want = 0.0f, fx, fz;
+        if ((target->control_state == 0x0D) && (mc_air_frames == 0)) {
+            want = 14.0f * mc_clamp(target->unkB8 / 150.0f, 0.0f, 1.0f);
+        }
+        lead += (want - lead) * 0.035f;
+        mc_direction_with(mc_convention, target->y_rotation & 0xFFF, &fx, &fz);   // points behind
+        mc_focus_x += ((target->x_position - (fx * lead)) - mc_focus_x) * 0.35f;
         mc_focus_y = wantY;   // already eased (mc_frame_y)
-        mc_focus_z += (target->z_position - mc_focus_z) * 0.35f;
+        mc_focus_z += ((target->z_position - (fz * lead)) - mc_focus_z) * 0.35f;
     }
 
     // Where the camera wants to be: out along its angle at the usual distance (a little closer

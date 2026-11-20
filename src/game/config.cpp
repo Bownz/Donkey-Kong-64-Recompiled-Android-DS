@@ -603,6 +603,24 @@ static void add_dual_screen_options(recomp::config::Config &config) {
             }
         });
 
+    // Smooth Running: speed builds up and runs down over a few frames (patches/game_feel_patches.c).
+    static const std::string smooth_running_option = "android_smooth_running";
+    config.add_enum_option(
+        smooth_running_option,
+        "Smooth Running",
+        "Running builds up to full speed over about a third of a second and slows to a stop over a "
+        "few frames when you let go, for a little weight, instead of starting and stopping at once.",
+        on_off_options,
+        1u
+    );
+    config.add_option_change_callback(smooth_running_option,
+        [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
+            dk64::android::set_smooth_running(std::get<uint32_t>(cur) == 1u);
+            if (context == recomp::config::OptionChangeContext::Permanent) {
+                recompui::config::get_config("dual_screen").save_config();
+            }
+        });
+
     // Small rumbles for game feel, like Odyssey: landings (stronger the longer the fall, and for
     // the Simian Slam) and skidding round. On the controller, or the phone with touch controls.
     static const std::string haptic_feedback_option = "android_haptic_feedback";
@@ -926,6 +944,7 @@ void dk64::init_config() {
             option(d, "android_gun_button"),
             option(d, "android_jump_assist"),
             option(d, "android_quick_turn"),
+            option(d, "android_smooth_running"),
             option(g, keys::swimming_invert_mode),
             option(d, "android_button_icons"),
             header("Touch"),
@@ -1179,6 +1198,7 @@ extern "C" void dk64_android_apply_experience(int modern) {
     dual.update_option_value("android_haptic_feedback", static_cast<uint32_t>(modern ? 1u : 0u));
     dual.update_option_value("android_jump_assist", static_cast<uint32_t>(modern ? 1u : 0u));
     dual.update_option_value("android_quick_turn", static_cast<uint32_t>(modern ? 1u : 0u));
+    dual.update_option_value("android_smooth_running", static_cast<uint32_t>(modern ? 1u : 0u));
     dual.save_config();
 
     recomp::config::Config &general = recompui::config::get_general_config();

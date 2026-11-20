@@ -38,7 +38,8 @@ namespace dk64::android {
     int gun_button();
     void set_jump_assist(bool enabled);       // Jump Assist (Input): buffered jumps, coyote time
     void set_quick_turn(bool enabled);        // Quick Turn (Input): no skid on sharp turns
-    int game_feel_flags();                    // bit 0 Jump Assist, bit 1 Quick Turn
+    void set_smooth_running(bool enabled);    // Smooth Running (Input): gradual speed up / slow down
+    int game_feel_flags();                    // bit 0 Jump Assist, bit 1 Quick Turn, bit 2 Smooth Running
     bool haptic_feedback_enabled();
     void phone_haptic_pulse(float strength, int ms);   // the phone's vibrator (touch play)
     bool drag_camera_enabled();

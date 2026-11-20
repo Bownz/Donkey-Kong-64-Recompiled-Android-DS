@@ -6,6 +6,7 @@
 //    the Kong is hurt, and a beat while an instrument plays.
 //  * Jump Assist (Input): a jump pressed a moment before landing happens on landing (input
 //    buffering), and one pressed a moment after running off a ledge still jumps (coyote time).
+//  * Smooth Running (Input): speed builds up and runs down over a few frames.
 //  * Quick Turn (Input): reversing direction while running turns round almost at once, with a
 //    short skid, instead of the N64's long slide.
 //
@@ -60,6 +61,7 @@ typedef struct {
 
 #define GF_JUMP_ASSIST 1
 #define GF_QUICK_TURN 2
+#define GF_SMOOTH_RUN 4
 
 // ---- Collectables ---------------------------------------------------------------------------
 
@@ -285,6 +287,27 @@ void game_feel_update(void) {
                 kong->unkB8 *= 0.35f;
             }
         }
+    }
+    // Smooth Running: the speed builds up over about a third of a second from standing (instead
+    // of almost at once) and runs down over a few frames when you let go, so running has a bit
+    // of weight. Only between standing and running (attacks, rolls and jumps set their own speed).
+    if (flags & GF_SMOOTH_RUN) {
+        static f32 lastSpeed = 0.0f;
+        f32 top = D_global_asm_807531FC[D_global_asm_807FD584];
+        f32 up, down;
+        if (top < 50.0f) {
+            top = 150.0f;
+        }
+        up = top * 0.09f;     // ~11 frames to full speed
+        down = top * 0.2f;    // ~5 frames to a stop
+        if (((state == 0x0C) || (state == 0x0D)) && ((gf_last_state == 0x0C) || (gf_last_state == 0x0D)) && onGround) {
+            if (kong->unkB8 > lastSpeed + up) {
+                kong->unkB8 = lastSpeed + up;
+            } else if (kong->unkB8 < lastSpeed - down) {
+                kong->unkB8 = lastSpeed - down;
+            }
+        }
+        lastSpeed = kong->unkB8;
     }
     gf_last_state = state;
 }
