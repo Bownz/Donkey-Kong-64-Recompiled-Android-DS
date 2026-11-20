@@ -495,6 +495,7 @@ static u8 mc_eye_valid = FALSE;
 static f32 mc_vine_offset = 0.0f;     // vines: your turn from the game's vine view
 static f32 mc_vine_hoff = 0.0f;       // vines: your height change from the game's vine view
 static u8 mc_on_vine = FALSE;
+static s32 mc_vine_start_yaw = 0;    // the game's vine view angle when the swing started
 static s32 mc_vine_base_yaw = -1;   // the game's own vine view angle (-1: not on a vine)
 static f32 mc_vine_blend = 0.0f;      // 0 = our usual view, 1 = the game's vine view
 
@@ -1169,25 +1170,46 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
 
     // Vines: the game's own vine view (which it has just placed: the eye and look-at passed in),
     // turned and raised by your remembered vine changes; blended in over ~half a second.
+    // (It's read from the game's own targets for the frame, the camera actor's position and
+    // AAD 0x78-0x80, not from the eye/look-at passed in: those are smoothed from last frame's
+    // output, which is ours, so your vine turn fed back into them and the view spun.)
     if (mc_vine_state(target)) {
-        f32 gx = *eyeX - *atX;
-        f32 gz = *eyeZ - *atZ;
-        f32 gDist = _sqrtf((gx * gx) + (gz * gz));
-        s32 baseYaw = func_global_asm_80665DE0(*atX, *atZ, *eyeX, *eyeZ) & 0xFFF;
-        s32 vineYaw = (baseYaw + (s32)mc_vine_offset) & 0xFFF;
-        f32 vx, vz, b;
+        static f32 gEX, gEY, gEZ, gAX, gAY, gAZ;
+        f32 gx, gz, gDist, vx, vz, b;
+        s32 baseYaw, vineYaw;
+        if (mc_vine_blend < 0.001f) {
+            gEX = camera->position.f[0]; gEY = camera->position.f[1]; gEZ = camera->position.f[2];
+            gAX = AAD->unk78; gAY = AAD->unk7C; gAZ = AAD->unk80;
+        } else {
+            gEX += (camera->position.f[0] - gEX) * 0.2f;
+            gEY += (camera->position.f[1] - gEY) * 0.2f;
+            gEZ += (camera->position.f[2] - gEZ) * 0.2f;
+            gAX += (AAD->unk78 - gAX) * 0.2f;
+            gAY += (AAD->unk7C - gAY) * 0.2f;
+            gAZ += (AAD->unk80 - gAZ) * 0.2f;
+        }
+        gx = gEX - gAX;
+        gz = gEZ - gAZ;
+        gDist = _sqrtf((gx * gx) + (gz * gz));
+        // The angle is the game's as it first placed its vine view, held for the whole swing: it
+        // can't creep (or spin) whatever happens to the game's view afterwards.
+        if (mc_vine_blend < 0.001f) {
+            mc_vine_start_yaw = func_global_asm_80665DE0(gAX, gAZ, gEX, gEZ) & 0xFFF;
+        }
+        baseYaw = mc_vine_start_yaw;
+        vineYaw = (baseYaw + (s32)mc_vine_offset) & 0xFFF;
         mc_direction_with(mc_convention, vineYaw, &vx, &vz);
         mc_vine_blend += (1.0f - mc_vine_blend) * 0.12f;
         b = mc_vine_blend;
-        wantX += ((*atX + (vx * gDist)) - wantX) * b;
-        wantYEye += ((*eyeY + mc_vine_hoff) - wantYEye) * b;
-        wantZ += ((*atZ + (vz * gDist)) - wantZ) * b;
-        mc_focus_x += (*atX - mc_focus_x) * b;
-        mc_focus_y += (*atY - mc_focus_y) * b;
-        mc_focus_z += (*atZ - mc_focus_z) * b;
+        wantX += ((gAX + (vx * gDist)) - wantX) * b;
+        wantYEye += ((gEY + mc_vine_hoff) - wantYEye) * b;
+        wantZ += ((gAZ + (vz * gDist)) - wantZ) * b;
+        mc_focus_x += (gAX - mc_focus_x) * b;
+        mc_focus_y += (gAY - mc_focus_y) * b;
+        mc_focus_z += (gAZ - mc_focus_z) * b;
         distance += (gDist - distance) * b;
         mc_yaw = (f32)vineYaw;   // letting go carries on from the vine view
-        mc_vine_base_yaw = baseYaw;   // the game's own vine angle this frame (given back to it)
+        mc_vine_base_yaw = baseYaw;   // the game's own vine angle (given back to it)
     } else {
         mc_vine_blend = 0.0f;
         mc_vine_base_yaw = -1;
@@ -1368,7 +1390,7 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
     if ((w >= 0.99f) && ((target->control_state == 0x0C) || (target->control_state == 0x0D))) {
         camera->z_rotation = 0;
     }
-    if (w >= 0.99f) {
+    if ((w >= 0.99f) && !mc_vine_state(target)) {   // (on a vine, the game's own state is left alone)
         camera->position.f[0] = *eyeX;
         camera->position.f[1] = *eyeY;
         camera->position.f[2] = *eyeZ;
