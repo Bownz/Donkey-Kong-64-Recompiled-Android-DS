@@ -1173,8 +1173,10 @@ static void fp_update(CameraPaad *CaaD) {
         getStickPosition(&sx, &sy);
         k = func_global_asm_806EA2D8();
         fp_yaw -= ((f32)sx * 0.08f * k * 4096.0f) / 360.0f;
-        fp_look_h = mc_clamp(fp_look_h + ((f32)sy * 0.04f * k), -80.0f, 50.0f);
-        fp_pitch = fp_look_h * 8.0f;
+        // (The game's look height counts the other way round from our tilt: up on the stick, with
+        // the invert settings as the game applies them, looks up.)
+        fp_look_h = mc_clamp(fp_look_h - ((f32)sy * 0.04f * k), -50.0f, 80.0f);
+        fp_pitch = fp_look_h * 8.0f;   // 80 up (about 55 degrees), 50 down (about 35)
         while (fp_yaw < 0.0f) {
             fp_yaw += 4096.0f;
         }
