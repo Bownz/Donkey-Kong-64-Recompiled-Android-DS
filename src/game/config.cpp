@@ -658,6 +658,13 @@ static void add_dual_screen_options(recomp::config::Config &config) {
         { "android_fp_walk", "First Person: Walk",
           "In first person view, walk with the left stick (forward, back and sideways) and look with the "
           "right stick. Walls and ledges stop you.", 2048 },
+        { "android_camera_polish", "Camera Polish",
+          "Modern Camera extras: the camera eases out of the game's fixed-camera areas instead of cutting, "
+          "pulls back out from walls smoothly, widens the view a little at full speed, coasts to a stop when "
+          "you let go of the stick, and the Kong turns see-through when the camera's squeezed right up to it.", 8192 },
+        { "android_fp_polish", "First Person Polish",
+          "First person extras: smoother right-stick looking (the gyro stays direct), a small kick when you "
+          "shoot and a dip in the view when you land.", 16384 },
     };
     for (const auto &opt : game_feel_options) {
         config.add_enum_option(opt.id, opt.name, opt.desc, on_off_options, 1u);
@@ -1003,6 +1010,8 @@ void dk64::init_config() {
             option(d, "android_fast_transitions"),
             option(d, "android_fp_right_stick"),
             option(d, "android_fp_walk"),
+            option(d, "android_camera_polish"),
+            option(d, "android_fp_polish"),
             option(g, keys::swimming_invert_mode),
             option(d, "android_button_icons"),
             header("Touch"),
@@ -1261,7 +1270,8 @@ extern "C" void dk64_android_apply_experience(int modern) {
     dual.update_option_value("android_movement_polish", static_cast<uint32_t>(modern ? 1u : 0u));
     for (const char *id : { "android_ledge_grab", "android_move_chaining", "android_air_control",
                             "android_hit_feel", "android_fast_transitions",
-                            "android_fp_right_stick", "android_fp_walk" }) {
+                            "android_fp_right_stick", "android_fp_walk",
+                            "android_camera_polish", "android_fp_polish" }) {
         dual.update_option_value(id, static_cast<uint32_t>(modern ? 1u : 0u));
     }
     dual.save_config();

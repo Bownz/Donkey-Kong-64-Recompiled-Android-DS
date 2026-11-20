@@ -193,6 +193,7 @@ final class GameState {
 
     /** Game feel option flags (Input): 2048 = Walk in First Person. */
     static final int FEEL_FP_WALK = 2048;
+    static final int FEEL_MOVEMENT_POLISH = 8;
 
     static int gameFeel() {
         try {

@@ -14,6 +14,9 @@ RECOMP_DECLARE_EVENT(recomp_on_dirty_file_start());
 RECOMP_DECLARE_EVENT(recomp_on_flag_check(s16 *flag, u8 *flag_type));
 extern s32 dk64_android_tag_target; // android_hooks.c
 extern s32 dk64_in_every_frame_event; // boot_logos_patches.c
+#define FEEL_CAMERA_POLISH 8192   // Camera Polish (Input)
+#define FEEL_FP_POLISH 16384      // First Person Polish (Input)
+static float fp_kick = 0.0f;     // First Person Polish: the view's kick when you shoot
 extern f32 loading_zone_transition_speed;
 extern u8 is_cutscene_active;
 RECOMP_DECLARE_EVENT(recomp_on_flag_change(s16 *flag, u8 *target_state, u8 *flag_type));
@@ -646,7 +649,9 @@ static void modern_camera_input(Actor *camera, CameraPaad *CaaD, s32 touchMoved,
     blend = mc_clamp(0.3f * dt, 0.0f, 1.0f);
 
     // Turning: ease the speed towards the stick's target speed (a short acceleration).
-    mc_yaw_velocity += ((mc_curve(stickX) * sensitivity * -5.7f) - mc_yaw_velocity) * blend;
+    // Camera Polish: letting go, the turn coasts to a stop over a few more frames.
+    mc_yaw_velocity += ((mc_curve(stickX) * sensitivity * -5.7f) - mc_yaw_velocity) *
+        (((stickX == 0.0f) && (recomp_get_game_feel() & FEEL_CAMERA_POLISH)) ? (blend * 0.5f) : blend);
     if ((stickX == 0.0f) && (mc_abs(mc_yaw_velocity) < 0.05f)) {
         mc_yaw_velocity = 0.0f;
     }
@@ -753,7 +758,8 @@ static void modern_camera_input(Actor *camera, CameraPaad *CaaD, s32 touchMoved,
     }
 
     // Tilting: up/down moves the camera lower/higher around the Kong.
-    mc_tilt_velocity += ((mc_curve(stickY) * sensitivity * 1.0f) - mc_tilt_velocity) * (blend * 0.7f);
+    mc_tilt_velocity += ((mc_curve(stickY) * sensitivity * 1.0f) - mc_tilt_velocity) *
+        (((stickY == 0.0f) && (recomp_get_game_feel() & FEEL_CAMERA_POLISH)) ? (blend * 0.35f) : (blend * 0.7f));
     if ((stickY == 0.0f) && (mc_abs(mc_tilt_velocity) < 0.05f)) {
         mc_tilt_velocity = 0.0f;
     }
@@ -1200,6 +1206,9 @@ static void fp_update(CameraPaad *CaaD) {
         gCurrentActorPointer = kong;
         func_global_asm_806E225C(1, 1);
         gCurrentActorPointer = was;
+        if (recomp_get_game_feel() & FEEL_FP_POLISH) {
+            fp_kick = 5.0f;   // a small kick up (First Person Polish)
+        }
     }
     // Just left: the game's camera goes behind the Kong too (for the other camera types; the
     // Modern Camera takes this angle when it takes over, modern_camera_frame).
@@ -1221,6 +1230,26 @@ static void fp_update(CameraPaad *CaaD) {
         recomp_get_right_analog_inputs(&rx, &ry);
         rx = recomp_apply_per_axis_deadzone(rx);
         ry = recomp_apply_per_axis_deadzone(ry);
+        // First Person Polish: the right stick eased over a couple of frames (no steps at slow
+        // turns); the gyro, added below by getStickPosition, stays direct.
+        {
+            static f32 srx = 0.0f, sry = 0.0f;
+            if (recomp_get_game_feel() & FEEL_FP_POLISH) {
+                srx += (rx - srx) * 0.45f;
+                sry += (ry - sry) * 0.45f;
+                if ((rx == 0.0f) && (mc_abs(srx) < 0.01f)) {
+                    srx = 0.0f;
+                }
+                if ((ry == 0.0f) && (mc_abs(sry) < 0.01f)) {
+                    sry = 0.0f;
+                }
+                rx = srx;
+                ry = sry;
+            } else {
+                srx = rx;
+                sry = ry;
+            }
+        }
         sx = (s32)(rx * 80.0f);
         sy = (s32)(-ry * 80.0f);
         getStickPosition(&sx, &sy);
@@ -1229,7 +1258,8 @@ static void fp_update(CameraPaad *CaaD) {
         // (The game's look height counts the other way round from our tilt: up on the stick, with
         // the invert settings as the game applies them, looks up.)
         fp_look_h = mc_clamp(fp_look_h - ((f32)sy * 0.04f * k), -50.0f, 80.0f);
-        fp_pitch = fp_look_h * 8.0f;   // 80 up (about 55 degrees), 50 down (about 35)
+        fp_kick *= 0.75f;
+        fp_pitch = (fp_look_h + fp_kick) * 8.0f;   // 80 up (about 55 degrees), 50 down (about 35)
         while (fp_yaw < 0.0f) {
             fp_yaw += 4096.0f;
         }
@@ -1302,6 +1332,10 @@ static f32 fp_head = -1.0f;
 #define FP_EYE_FWD (-2.0f)
 #define FP_EYE_UP 6.0f
 static f32 fp_bob_phase = 0.0f, fp_bob = 0.0f;
+// First Person Polish: the view's kick when you shoot (in look-height units, up) and its dip
+// when you land (units down), both settling back quickly.
+static f32 fp_dip = 0.0f;
+static s32 fp_air = 0;
 static f32 fp_prev_x = 0.0f, fp_prev_z = 0.0f;
 
 static u8 fp_camera(Actor *target, f32 *eyeX, f32 *eyeY, f32 *eyeZ, f32 *atX, f32 *atY, f32 *atZ) {
@@ -1326,7 +1360,17 @@ static u8 fp_camera(Actor *target, f32 *eyeX, f32 *eyeY, f32 *eyeZ, f32 *atX, f3
     } else {
         fp_bob += (0.0f - fp_bob) * 0.15f;
     }
-    eyeH = fp_head + FP_EYE_UP + (func_global_asm_80612794((s16)(((s32)fp_bob_phase) & 0xFFF)) * 0.8f * fp_bob);
+    // Landing (First Person Polish): a small dip, deeper after a longer fall.
+    if ((target->y_position - target->floor) > 4.0f) {
+        fp_air++;
+    } else {
+        if ((fp_air >= 6) && (recomp_get_game_feel() & FEEL_FP_POLISH)) {
+            fp_dip = -mc_clamp(2.0f + ((f32)fp_air * 0.12f), 2.0f, 6.0f);
+        }
+        fp_air = 0;
+    }
+    fp_dip *= 0.82f;
+    eyeH = fp_head + FP_EYE_UP + fp_dip + (func_global_asm_80612794((s16)(((s32)fp_bob_phase) & 0xFFF)) * 0.8f * fp_bob);
     mc_direction_with(mc_convention, (((s32)fp_yaw) + 0x800) & 0xFFF, &fx, &fz);   // ahead
     sp = func_global_asm_80612794((s16)(((s32)fp_pitch) & 0xFFF));
     cp = func_global_asm_80612790((s16)(((s32)fp_pitch) & 0xFFF));
@@ -1399,6 +1443,52 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
         e = e * e * (3.0f - (2.0f * e));
         for (i = 0; i < 6; i++) {
             *out[i] = *out[i] + ((fp_head_eye[i] - *out[i]) * e);
+        }
+    }
+    // Camera Polish: taking over from the game's camera (leaving a fixed-camera area, after a
+    // cutscene...), ease from where its camera was to ours over half a second instead of cutting.
+    {
+        static f32 takeT = 1.0f;
+        static f32 takeFrom[6];
+        static u8 wasActive = FALSE;
+        static s32 takeMap = -1;
+        if ((recomp_get_game_feel() & FEEL_CAMERA_POLISH) && mc_active_now && !wasActive && lastValid &&
+            (current_map == takeMap) && !fp_mode && (fp_trans <= 0.0f)) {
+            for (i = 0; i < 6; i++) {
+                takeFrom[i] = last[i];
+            }
+            takeT = 0.0f;
+        }
+        if (!mc_active_now || fp_mode) {
+            takeT = 1.0f;
+        }
+        if (takeT < 1.0f) {
+            takeT += 1.0f / 15.0f;
+            e = mc_clamp(takeT, 0.0f, 1.0f);
+            e = e * e * (3.0f - (2.0f * e));
+            for (i = 0; i < 6; i++) {
+                *out[i] = takeFrom[i] + ((*out[i] - takeFrom[i]) * e);
+            }
+        }
+        wasActive = mc_active_now;
+        takeMap = current_map;
+    }
+    // Camera Polish: at full speed on the ground the view widens a little (up to 4 degrees),
+    // easing in and out, so running feels faster. Only touches the game's normal 45 degree view.
+    {
+        static f32 wide = 0.0f;
+        f32 want = 0.0f;
+        f32 *fov = &character_change_array[cc_player_index].fov_y;
+        if ((recomp_get_game_feel() & FEEL_CAMERA_POLISH) && mc_active_now && !fp_mode && (gCurrentPlayer != NULL) &&
+            (gCurrentPlayer->control_state == 0x0D) && (mc_air_frames == 0)) {
+            want = 4.0f * mc_clamp((gCurrentPlayer->unkB8 - 100.0f) / 80.0f, 0.0f, 1.0f);
+        }
+        wide += (want - wide) * 0.04f;
+        if (wide < 0.01f) {
+            wide = 0.0f;
+        }
+        if ((*fov > 44.9f) && (*fov < 49.5f)) {
+            *fov = 45.0f + wide;
         }
     }
     wasFp = fp_mode;

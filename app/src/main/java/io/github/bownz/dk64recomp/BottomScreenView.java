@@ -564,6 +564,37 @@ public final class BottomScreenView extends View {
         return k < GameState.KONG_COUNT && state.inGame() && !state.isFreed(k);
     }
 
+    // Movement Polish: an action button pressed while another move is running (or the Kong is
+    // busy, e.g. mid-roll) is kept for half a second and done as soon as it can be.
+    private TouchMoves.Move bufferedMove;
+    private long bufferedUntil;
+    private final Runnable bufferTick = new Runnable() {
+        @Override
+        public void run() {
+            if (bufferedMove == null) {
+                return;
+            }
+            if (android.os.SystemClock.uptimeMillis() > bufferedUntil || !state.inGame() || state.paused) {
+                bufferedMove = null;
+                return;
+            }
+            if (moves.running == null && moves.available(bufferedMove)) {
+                TouchMoves.Move m = bufferedMove;
+                bufferedMove = null;
+                doMove(m);
+                return;
+            }
+            handler.postDelayed(this, 30);
+        }
+    };
+
+    private void bufferMove(TouchMoves.Move move) {
+        bufferedMove = move;
+        bufferedUntil = android.os.SystemClock.uptimeMillis() + 500;
+        handler.removeCallbacks(bufferTick);
+        handler.postDelayed(bufferTick, 30);
+    }
+
     /** Performs a move from one of this screen's buttons, with its squash. */
     private void doMove(TouchMoves.Move move) {
         if (moves.running == null) {
@@ -2285,11 +2316,37 @@ public final class BottomScreenView extends View {
                     float grow = 1f + 0.3f * (float) Math.sin(Math.PI * bump);
                     c.scale(grow, grow, countRight - textWidth(counts[i]) / 2f, iconY);
                 }
-                outlined(c, counts[i], countRight, iconY + text.getTextSize() * 0.36f, BANANA);
+                outlined(c, tickedCount("tick" + move, counts[i]), countRight, iconY + text.getTextSize() * 0.36f, BANANA);
                 c.restoreToCount(countSaved);
             }
             c.restoreToCount(saved);
         }
+    }
+
+    // Counts going up tick up a step at a time, like the game's own counters (about 25 steps a
+    // second, quicker for big jumps); going down they change at once.
+    private final java.util.HashMap<String, float[]> ticks = new java.util.HashMap<>();
+
+    private String tickedCount(String key, String count) {
+        int actual = parseCount(count);
+        if (actual < 0) {
+            ticks.remove(key);
+            return count;
+        }
+        long now = android.os.SystemClock.uptimeMillis();
+        float[] t = ticks.get(key);   // { shown, last time }
+        if (t == null || actual < t[0]) {
+            ticks.put(key, new float[] { actual, now });
+            return count;
+        }
+        if (t[0] < actual) {
+            float dt = Math.min(100f, now - t[1]);
+            float rate = Math.max(25f, (actual - t[0]) * 4f) / 1000f;   // steps per ms
+            t[0] = Math.min(actual, t[0] + dt * rate);
+            animating = true;
+        }
+        t[1] = now;
+        return String.valueOf((int) Math.floor(t[0]));
     }
 
     private static int parseCount(String s) {
@@ -2369,8 +2426,11 @@ public final class BottomScreenView extends View {
         }
         for (int i = 0; i < 4; i++) {
             if (actionRects[i].contains(x, y) && (buttonsShown || slideIn[i + 1] > 0.6f)) {
-                if (owned(ACTIONS[i]) && moves.available(ACTIONS[i])) {
+                if (owned(ACTIONS[i]) && moves.available(ACTIONS[i]) && moves.running == null) {
                     doMove(ACTIONS[i]);
+                } else if (owned(ACTIONS[i]) && state.inGame() && !moves.greyed(ACTIONS[i])
+                        && (GameState.gameFeel() & GameState.FEEL_MOVEMENT_POLISH) != 0) {
+                    bufferMove(ACTIONS[i]);   // pressed mid-move: happens as soon as it can
                 }
                 return true;
             }
