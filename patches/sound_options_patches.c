@@ -888,12 +888,13 @@ static void mc_update_tight(Actor *target) {
 }
 
 // The game's own locked-camera spots (where it takes the camera and frames the scene itself):
-// a camera zone in the level (CameraPaad 0xAC bit 8, set from the zone, func_global_asm_8061D1FC;
-// bit 4), or a map whose camera always stays behind the Kong (map flags 0x08000000) or can't be
+// CameraPaad 0xAC bit 4, or a map whose camera always stays behind the Kong (map flags 0x08000000) or can't be
 // turned (0x40). The Modern Camera hands over to the game there. Changes are logged.
 static u8 mc_game_locked(CameraPaad *AAD) {
     static s32 lastLocked = -1;
-    u8 locked = ((AAD->unkAC & 0xC) != 0) || ((D_global_asm_807FBB64 & 0x08000040) != 0);
+    // (Bit 8, the game's "camera zone", isn't used: DK Isles' tunnels are such zones, and the
+    // camera should stay free there.)
+    u8 locked = ((AAD->unkAC & 0x4) != 0) || ((D_global_asm_807FBB64 & 0x08000040) != 0);
     if (locked != lastLocked) {
         if ((lastLocked != -1) || locked) {
             recomp_printf("Modern Camera: game camera %s (map 0x%02X, zone %d, camera flags 0x%08X, map flags 0x%08X)\n",
