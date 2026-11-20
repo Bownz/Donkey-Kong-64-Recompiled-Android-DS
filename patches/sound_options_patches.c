@@ -468,6 +468,7 @@ f32 func_global_asm_80612794(s16 arg0);
 s16 func_global_asm_80665DE0(f32 arg0, f32 arg1, f32 arg2, f32 arg3);
 u8 func_global_asm_80671E00(f32 arg0, f32 arg1, f32 arg2, f32 arg3, s16 *arg4, s16 *arg5, u8 arg6, u16 arg7);
 s32 func_global_asm_80667110(f32 arg0, f32 arg1, f32 *arg2);
+f32 game_feel_camera_kick(void);   // game_feel_patches.c (Hit Feel)
 extern u8 is_cutscene_active;
 
 #define MC_LOWEST 6.0f              // the lowest the camera goes: just above the ground
@@ -1150,6 +1151,8 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
         pull += (wantPull - pull) * 0.03f;
         tilt += (wantTilt - tilt) * 0.03f;
         distance *= 1.0f + pull;
+        // Hit Feel (game_feel_patches.c): a short punch-in of the camera when a hit lands.
+        distance *= 1.0f - (0.06f * game_feel_camera_kick());
         mc_run_tilt = tilt;
     }
     {

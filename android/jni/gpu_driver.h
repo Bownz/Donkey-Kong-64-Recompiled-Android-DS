@@ -40,6 +40,7 @@ namespace dk64::android {
     void set_quick_turn(bool enabled);        // Quick Turn (Input): no skid on sharp turns
     void set_movement_polish(bool enabled);   // Movement Polish (Input): lean, landing squash, momentum jumps
     void set_smooth_running(bool enabled);    // Smooth Running (Input): gradual speed up / slow down
+    void set_game_feel_bit(int bit, bool enabled);   // the other Game Feel options (bits 16+)
     int game_feel_flags();                    // bit 0 Jump Assist, bit 1 Quick Turn, bit 2 Smooth Running
     bool haptic_feedback_enabled();
     void phone_haptic_pulse(float strength, int ms);   // the phone's vibrator (touch play)

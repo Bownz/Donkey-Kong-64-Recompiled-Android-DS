@@ -21,6 +21,7 @@
 extern int gameIsInAdventureMode(void);
 extern int gameIsInDKTVMode(void);
 extern Actor *gCurrentPlayer;
+s32 func_global_asm_80667110(f32 x, f32 z, f32 *y);   // the floor below a point
 u8 modern_camera_free_state(Actor *kong);   // trees, vines (sound_options_patches.c)
 extern s32 D_global_asm_80767CC0;          // the game's frame counter (jump buffer timestamps)
 extern f32 D_global_asm_807531FC[];        // per Kong: walking top speed
@@ -62,6 +63,11 @@ typedef struct {
 #define GF_QUICK_TURN 2
 #define GF_SMOOTH_RUN 4
 #define GF_POLISH 8
+#define GF_LEDGE_GRAB 16
+#define GF_MOVE_CHAIN 32
+#define GF_AIR_CONTROL 64
+#define GF_HIT_FEEL 128
+#define GF_FAST_TRANSITIONS 256
 
 // ---- Collectables ---------------------------------------------------------------------------
 
@@ -408,6 +414,262 @@ static void gf_wall_bump(Actor *kong, s32 state, u8 onGround) {
     }
 }
 
+// ---- Ledge Grab ------------------------------------------------------------------------------
+// A jump that falls just short of a ledge (the Kong's feet up to ~38 units below its top, the
+// ledge just ahead in the direction it's moving) is caught: the Kong is lifted up level with the
+// top over a few frames, then stepped onto it, and lands there as usual.
+static s32 gf_ledge_frames = 0;      // >0: climbing
+static s32 gf_ledge_cooldown = 0;
+static f32 gf_ledge_from[3], gf_ledge_to[3];
+static f32 gf_prev_x = 0.0f, gf_prev_z = 0.0f;
+
+static u8 gf_air_state(s32 state) {
+    switch (state) {
+        case 0x17:   // jump
+        case 0x18:
+        case 0x1D:   // backflip
+        case 0x1E:   // falling
+        case 0x3D:
+        case 0x3E:   // high jump
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static void gf_ledge_grab(Actor *kong, s32 state, u8 onGround, f32 mvx, f32 mvz) {
+    f32 len, fx, fz, px, pz, top, t, e;
+    if (gf_ledge_cooldown > 0) {
+        gf_ledge_cooldown--;
+    }
+    if (gf_ledge_frames > 0) {
+        // Climbing: first up (frames 1-5, clear of the ledge's face), then on (6-8).
+        gf_ledge_frames++;
+        if (gf_ledge_frames <= 5) {
+            t = (f32)(gf_ledge_frames - 1) / 4.0f;
+            e = t * t * (3.0f - (2.0f * t));
+            kong->y_position = gf_ledge_from[1] + ((gf_ledge_to[1] - gf_ledge_from[1]) * e);
+            kong->x_position = gf_ledge_from[0];
+            kong->z_position = gf_ledge_from[2];
+        } else {
+            t = (f32)(gf_ledge_frames - 5) / 3.0f;
+            kong->y_position = gf_ledge_to[1];
+            kong->x_position = gf_ledge_from[0] + ((gf_ledge_to[0] - gf_ledge_from[0]) * t);
+            kong->z_position = gf_ledge_from[2] + ((gf_ledge_to[2] - gf_ledge_from[2]) * t);
+        }
+        kong->y_velocity = 0.0f;
+        if (gf_ledge_frames >= 8) {
+            gf_ledge_frames = 0;
+            gf_ledge_cooldown = 20;
+        }
+        return;
+    }
+    if (onGround || !gf_air_state(state) || (kong->y_velocity >= 0.0f) || (gf_ledge_cooldown > 0) ||
+        modern_camera_free_state(kong) || (((kong->unk6A & 2) != 0) && (kong->y_position < kong->unkAC))) {
+        return;
+    }
+    len = _sqrtf((mvx * mvx) + (mvz * mvz));
+    if ((len < 0.5f) || (len > 40.0f)) {
+        return;   // falling straight down, or a warp
+    }
+    fx = mvx / len;
+    fz = mvz / len;
+    px = kong->x_position + (fx * 24.0f);
+    pz = kong->z_position + (fz * 24.0f);
+    top = kong->y_position + 40.0f;
+    if (!func_global_asm_80667110(px, pz, &top) || (top > kong->y_position + 40.0f)) {
+        return;
+    }
+    // The ledge's top is above the feet but within reach, and well above the floor under the
+    // Kong (a real ledge, not a slope).
+    if ((top <= kong->y_position + 2.0f) || (top > kong->y_position + 38.0f) || (kong->floor > top - 20.0f)) {
+        return;
+    }
+    gf_ledge_from[0] = kong->x_position;
+    gf_ledge_from[1] = kong->y_position;
+    gf_ledge_from[2] = kong->z_position;
+    gf_ledge_to[0] = kong->x_position + (fx * 26.0f);
+    gf_ledge_to[1] = top + 2.0f;
+    gf_ledge_to[2] = kong->z_position + (fz * 26.0f);
+    gf_ledge_frames = 1;
+    recomp_haptic_pulse(0.15f, 40);
+}
+
+// ---- Move Chaining -------------------------------------------------------------------------
+// A jump can cut short a punch or a running attack/roll on the ground, and keeps its speed
+// (so a roll into a jump carries you further), like chaining moves in Odyssey.
+static void gf_move_chain(Actor *kong, PlayerAdditionalActorData *paad, s32 state, u8 onGround, u16 pressed) {
+    static s32 attackFrames = 0;
+    f32 speed;
+    if ((state == 0x26) || (state == 0x29) || (state == 0x2A)) {
+        attackFrames++;
+    } else {
+        attackFrames = 0;
+        return;
+    }
+    if (!(pressed & A_BUTTON) || !onGround || (attackFrames < 3)) {
+        return;
+    }
+    speed = kong->unkB8;
+    gf_start_jump(kong, paad);
+    if (speed > paad->unk38) {
+        paad->unk38 = speed;   // the jump's top speed: keep the attack's
+    }
+    kong->unkB8 = speed;
+    attackFrames = 0;
+}
+
+// ---- Air Control ---------------------------------------------------------------------------
+// In the air the Kong turns towards the stick much more readily (the N64 mostly commits you to
+// the direction you jumped in); pulling back brakes instead of flipping round.
+static void gf_air_control(Actor *kong, PlayerAdditionalActorData *paad, s32 state, u8 onGround) {
+    s32 diff;
+    if (onGround || !gf_air_state(state) || (gf_ledge_frames > 0) || (paad->unk4 < 5.0f)) {
+        return;
+    }
+    diff = ((((kong->unkEE & 0xFFF) - (kong->y_rotation & 0xFFF)) + 0x800) & 0xFFF) - 0x800;
+    if ((diff > 0x500) || (diff < -0x500)) {
+        kong->unkB8 *= 0.94f;   // pulling back: brake
+        kong->y_rotation = (kong->y_rotation + (diff / 24)) & 0xFFF;
+    } else {
+        kong->y_rotation = (kong->y_rotation + (diff / 8)) & 0xFFF;
+    }
+}
+
+// ---- Hit Feel -------------------------------------------------------------------------------
+// When something near the Kong loses health (a punch, a slam, a shot landing), a moment of
+// hit-stop (the Kong and what it hit freeze for 3 frames), a short kick of the camera
+// (game_feel_camera_kick, used by the Modern Camera) and a rumble.
+extern u16 D_global_asm_807FBB34;
+typedef struct {
+    Actor *actor;
+    s32 unk4;
+} GFLoadedActor;
+extern GFLoadedActor D_global_asm_807FB930[];
+
+#define GF_TRACKED 64
+static Actor *gf_tracked[GF_TRACKED];
+static s16 gf_tracked_health[GF_TRACKED];
+static s32 gf_stop_frames = 0;
+static Actor *gf_stop_target = NULL;
+static f32 gf_stop_kong[3], gf_stop_enemy[3];
+static f32 gf_stop_kong_anim = 1.0f, gf_stop_enemy_anim = 1.0f;
+static f32 gf_kick = 0.0f;
+
+f32 game_feel_camera_kick(void) {
+    return gf_kick;
+}
+
+static void gf_hit_feel(Actor *kong) {
+    s32 i, j, n, count;
+    Actor *a;
+    gf_kick *= 0.75f;
+    if (gf_kick < 0.01f) {
+        gf_kick = 0.0f;
+    }
+    if (gf_stop_frames > 0) {
+        gf_stop_frames--;
+        kong->x_position = gf_stop_kong[0];
+        kong->y_position = gf_stop_kong[1];
+        kong->z_position = gf_stop_kong[2];
+        if (gf_stop_target != NULL) {
+            gf_stop_target->x_position = gf_stop_enemy[0];
+            gf_stop_target->y_position = gf_stop_enemy[1];
+            gf_stop_target->z_position = gf_stop_enemy[2];
+        }
+        if (gf_stop_frames == 0) {
+            if (kong->animation_state != NULL) {
+                kong->animation_state->unk48 = gf_stop_kong_anim;
+            }
+            if ((gf_stop_target != NULL) && (gf_stop_target->animation_state != NULL)) {
+                gf_stop_target->animation_state->unk48 = gf_stop_enemy_anim;
+            }
+            gf_stop_target = NULL;
+        }
+        return;
+    }
+    count = D_global_asm_807FBB34;
+    if (count > 255) {
+        count = 255;
+    }
+    n = 0;
+    for (i = 0; i < count; i++) {
+        f32 dx, dz, dy;
+        s16 hp;
+        a = D_global_asm_807FB930[i].actor;
+        if ((a == NULL) || (a == kong)) {
+            continue;
+        }
+        dx = a->x_position - kong->x_position;
+        dz = a->z_position - kong->z_position;
+        dy = a->y_position - kong->y_position;
+        if (((dx * dx) + (dz * dz)) > (150.0f * 150.0f) || (dy > 120.0f) || (dy < -120.0f)) {
+            continue;
+        }
+        hp = a->health;
+        for (j = 0; j < GF_TRACKED; j++) {
+            if (gf_tracked[j] == a) {
+                break;
+            }
+        }
+        if ((j < GF_TRACKED) && (hp < gf_tracked_health[j]) && (gf_tracked_health[j] > 0) &&
+            (gf_tracked_health[j] - hp) < 100) {
+            // A hit: freeze both for 3 frames.
+            gf_stop_frames = 3;
+            gf_stop_target = a;
+            gf_stop_kong[0] = kong->x_position;
+            gf_stop_kong[1] = kong->y_position;
+            gf_stop_kong[2] = kong->z_position;
+            gf_stop_enemy[0] = a->x_position;
+            gf_stop_enemy[1] = a->y_position;
+            gf_stop_enemy[2] = a->z_position;
+            if (kong->animation_state != NULL) {
+                gf_stop_kong_anim = kong->animation_state->unk48;
+                kong->animation_state->unk48 = 0.0f;
+            }
+            if (a->animation_state != NULL) {
+                gf_stop_enemy_anim = a->animation_state->unk48;
+                a->animation_state->unk48 = 0.0f;
+            }
+            gf_kick = 1.0f;
+            recomp_haptic_pulse(0.45f, 70);
+        }
+        if (n < GF_TRACKED) {
+            gf_tracked[n] = a;
+            gf_tracked_health[n] = hp;
+            n++;
+        }
+    }
+    for (; n < GF_TRACKED; n++) {
+        gf_tracked[n] = NULL;
+    }
+}
+
+static void gf_hit_feel_off(Actor *kong) {
+    if (gf_stop_frames > 0) {
+        gf_stop_frames = 1;   // finish (restores the animation speeds)
+        gf_hit_feel(kong);
+    }
+    gf_kick = 0.0f;
+}
+
+// ---- Fast Transitions ------------------------------------------------------------------------
+// The fade to and from black when going through a loading zone (and other scripted fades) runs
+// at 1.8x speed.
+extern f32 loading_zone_transition_speed;
+
+static void gf_fast_transitions(void) {
+    static f32 lastSet = 0.0f;
+    f32 v = loading_zone_transition_speed;
+    if (v == 0.0f) {
+        lastSet = 0.0f;
+        return;
+    }
+    if ((v != lastSet) && (v > -1.6f) && (v < 1.6f)) {
+        loading_zone_transition_speed = v * 1.8f;
+        lastSet = loading_zone_transition_speed;
+    }
+}
+
 void game_feel_update(void) {
     Actor *kong = gCurrentPlayer;
     PlayerAdditionalActorData *paad;
@@ -416,9 +678,13 @@ void game_feel_update(void) {
     u8 onGround;
     s32 landedAfter;
 
+    if (gameIsInAdventureMode() && !gameIsInDKTVMode() && (recomp_get_game_feel() & GF_FAST_TRANSITIONS)) {
+        gf_fast_transitions();
+    }
     if ((kong == NULL) || (is_cutscene_active != 0) || gameIsInDKTVMode() || !gameIsInAdventureMode()) {
         if (kong != NULL) {
             gf_polish_off(kong);
+            gf_hit_feel_off(kong);
         }
         gf_last_health = -1000;
         gf_last_state = -1;
@@ -507,5 +773,27 @@ void game_feel_update(void) {
         gf_polish_off(kong);
     }
     gf_wall_bump(kong, state, onGround);
+    {
+        f32 mvx = kong->x_position - gf_prev_x;
+        f32 mvz = kong->z_position - gf_prev_z;
+        if (flags & GF_LEDGE_GRAB) {
+            gf_ledge_grab(kong, state, onGround, mvx, mvz);
+        } else {
+            gf_ledge_frames = 0;
+        }
+        gf_prev_x = kong->x_position;
+        gf_prev_z = kong->z_position;
+    }
+    if (flags & GF_MOVE_CHAIN) {
+        gf_move_chain(kong, paad, state, onGround, pressed);
+    }
+    if (flags & GF_AIR_CONTROL) {
+        gf_air_control(kong, paad, state, onGround);
+    }
+    if (flags & GF_HIT_FEEL) {
+        gf_hit_feel(kong);
+    } else {
+        gf_hit_feel_off(kong);
+    }
     gf_last_state = state;
 }

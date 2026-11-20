@@ -196,8 +196,18 @@ void dk64::android::set_quick_turn(bool enabled) {
     quick_turn.store(enabled, std::memory_order_relaxed);
 }
 
+static std::atomic<int> game_feel_extra{16 | 32 | 64 | 128 | 256};
+
+void dk64::android::set_game_feel_bit(int bit, bool enabled) {
+    if (enabled) {
+        game_feel_extra.fetch_or(bit, std::memory_order_relaxed);
+    } else {
+        game_feel_extra.fetch_and(~bit, std::memory_order_relaxed);
+    }
+}
+
 int dk64::android::game_feel_flags() {
-    return (jump_assist.load(std::memory_order_relaxed) ? 1 : 0) | (quick_turn.load(std::memory_order_relaxed) ? 2 : 0) |
+    return game_feel_extra.load(std::memory_order_relaxed) | (jump_assist.load(std::memory_order_relaxed) ? 1 : 0) | (quick_turn.load(std::memory_order_relaxed) ? 2 : 0) |
         (smooth_running.load(std::memory_order_relaxed) ? 4 : 0) |
         (movement_polish.load(std::memory_order_relaxed) ? 8 : 0);
 }

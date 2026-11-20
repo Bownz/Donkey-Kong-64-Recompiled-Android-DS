@@ -639,6 +639,33 @@ static void add_dual_screen_options(recomp::config::Config &config) {
             }
         });
 
+    // More modern-platformer options (patches/game_feel_patches.c), each a bit of the game feel flags.
+    struct GameFeelOption { const char *id; const char *name; const char *desc; int bit; };
+    static const GameFeelOption game_feel_options[] = {
+        { "android_ledge_grab", "Ledge Grab",
+          "A jump that falls just short of a ledge is caught and the Kong pulls itself up onto it.", 16 },
+        { "android_move_chaining", "Move Chaining",
+          "Jump straight out of a punch or a running attack, keeping its speed (a roll into a jump goes further).", 32 },
+        { "android_air_control", "Air Control",
+          "Steer much more in mid-air; pulling back brakes the jump instead of flipping round.", 64 },
+        { "android_hit_feel", "Hit Feel",
+          "Hits land with weight: a split-second freeze of the Kong and what it hit, a small camera punch "
+          "(Modern Camera) and a rumble.", 128 },
+        { "android_fast_transitions", "Fast Transitions",
+          "Fades to and from black through loading zones and doors are almost twice as fast.", 256 },
+    };
+    for (const auto &opt : game_feel_options) {
+        config.add_enum_option(opt.id, opt.name, opt.desc, on_off_options, 1u);
+        const int bit = opt.bit;
+        config.add_option_change_callback(opt.id,
+            [bit](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
+                dk64::android::set_game_feel_bit(bit, std::get<uint32_t>(cur) == 1u);
+                if (context == recomp::config::OptionChangeContext::Permanent) {
+                    recompui::config::get_config("dual_screen").save_config();
+                }
+            });
+    }
+
     // Small rumbles for game feel, like Odyssey: landings (stronger the longer the fall, and for
     // the Simian Slam) and skidding round. On the controller, or the phone with touch controls.
     static const std::string haptic_feedback_option = "android_haptic_feedback";
@@ -964,6 +991,11 @@ void dk64::init_config() {
             option(d, "android_quick_turn"),
             option(d, "android_smooth_running"),
             option(d, "android_movement_polish"),
+            option(d, "android_ledge_grab"),
+            option(d, "android_move_chaining"),
+            option(d, "android_air_control"),
+            option(d, "android_hit_feel"),
+            option(d, "android_fast_transitions"),
             option(g, keys::swimming_invert_mode),
             option(d, "android_button_icons"),
             header("Touch"),
@@ -1219,6 +1251,10 @@ extern "C" void dk64_android_apply_experience(int modern) {
     dual.update_option_value("android_quick_turn", static_cast<uint32_t>(modern ? 1u : 0u));
     dual.update_option_value("android_smooth_running", static_cast<uint32_t>(modern ? 1u : 0u));
     dual.update_option_value("android_movement_polish", static_cast<uint32_t>(modern ? 1u : 0u));
+    for (const char *id : { "android_ledge_grab", "android_move_chaining", "android_air_control",
+                            "android_hit_feel", "android_fast_transitions" }) {
+        dual.update_option_value(id, static_cast<uint32_t>(modern ? 1u : 0u));
+    }
     dual.save_config();
 
     recomp::config::Config &general = recompui::config::get_general_config();
