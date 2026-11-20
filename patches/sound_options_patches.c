@@ -3019,21 +3019,24 @@ RECOMP_PATCH u8 isFlagSet(s16 flagIndex, u8 flagType) { // TODO: Can we use the 
         // Diagnostics (a freed Kong seen in its cage): each change in what a Kong's freed flag
         // reads as, per map, goes to the session log.
         if (flagType == FLAG_TYPE_PERMANENT) {
-            static const s16 freed[5] = { 0x181, 0x006, 0x046, 0x042, 0x075 };
-            static s8 last[5] = { -1, -1, -1, -1, -1 };
+            // The five Kongs' freed flags, then the Shockwave / camera (dirt patches show with
+            // it) and Jungle Japes' Rainbow Coin.
+            static const s16 freed[7] = { 0x181, 0x006, 0x046, 0x042, 0x075, 0x179, 0x2A6 };
+            static s8 last[7] = { -1, -1, -1, -1, -1, -1, -1 };
             static s32 lastMap = -1;
             s32 k;
             if (current_map != lastMap) {
                 lastMap = current_map;
-                for (k = 0; k < 5; k++) {
+                for (k = 0; k < 7; k++) {
                     last[k] = -1;
                 }
             }
-            for (k = 0; k < 5; k++) {
+            for (k = 0; k < 7; k++) {
                 if ((flagIndex == freed[k]) && (last[k] != (s8)value)) {
                     last[k] = (s8)value;
-                    recomp_printf("Flags: Kong %d freed flag reads %d (map 0x%02X, tag target %d)\n",
-                        k, value, current_map, dk64_android_tag_target);
+                    recomp_printf("Flags: flag 0x%03X (%s) reads %d (map 0x%02X, tag target %d)\n",
+                        flagIndex, (k < 5) ? "Kong freed" : ((k == 5) ? "Shockwave" : "Japes Rainbow Coin"),
+                        value, current_map, dk64_android_tag_target);
                 }
             }
         }
