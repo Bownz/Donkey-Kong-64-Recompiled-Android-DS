@@ -483,6 +483,8 @@ static f32 mc_distance = 0.0f;      // the usual distance (0: not set yet)
 static f32 mc_tight = 0.0f;        // 0..1: in a camera zone (tunnels...), see mc_update_tight
 static f32 mc_run_tilt = 0.0f;    // height change running up or down slopes
 static f32 mc_zone_height = 30.0f, mc_zone_distance = 110.0f;   // the game's close preset
+static f32 mc_height_before_zone = -1.0f;   // the camera height when the zone began (-1: none)
+static f32 mc_height_restore = -1.0f;       // easing back to this after a zone (-1: none)
 static f32 mc_reach = 1.0f;         // how far out along the line the camera is (1 = all the way)
 static f32 mc_idle = 0.0f;
 static u8 mc_recentering = FALSE;
@@ -782,6 +784,13 @@ static void modern_camera_input(Actor *camera, CameraPaad *CaaD, s32 touchMoved,
         if ((mc_tight > 0.5f) && (mc_height > mc_zone_height)) {
             mc_height = mc_zone_height;
         }
+        if (mc_height_restore >= 0.0f) {
+            if ((tilt != 0.0f) || (mc_height_restore <= mc_height + 0.5f)) {
+                mc_height_restore = -1.0f;   // you've taken over, or it's back
+            } else {
+                mc_height += (mc_height_restore - mc_height) * 0.08f * dt;
+            }
+        }
     }
 
     // The game's own camera state follows ours (the Kong's movement is relative to it, and the
@@ -903,7 +912,7 @@ static void mc_zone_preset(CameraPaad *AAD) {
 // The game decides the zone from where its camera is, and the camera is ours: turned so it
 // pokes out of the tunnel, it would leave the zone, the limits would let go, and it would rise
 // through the ceiling. So a zone is held while the Kong stays near where it was last in one
-// (within 80 units); it ends when the Kong walks out.
+// (within 30 units); it ends when the Kong walks out.
 static f32 mc_zone_x = 0.0f, mc_zone_z = 0.0f;
 static f32 camera_y_for_log = 0.0f;   // the camera's height last frame, for the log
 static u8 mc_zone_held = FALSE;
@@ -952,7 +961,7 @@ static void mc_update_tight(CameraPaad *AAD, Actor *target) {
     }
     if (zone) {
         mc_near_zone_point(target, 40.0f, TRUE);
-    } else if (mc_near_zone_point(target, 30.0f, FALSE)) {
+    } else if (mc_near_zone_point(target, 15.0f, FALSE)) {
         zone = TRUE;   // a remembered zone spot
     }
     if (zone) {
@@ -963,14 +972,22 @@ static void mc_update_tight(CameraPaad *AAD, Actor *target) {
     } else if (mc_zone_held) {
         f32 dx = target->x_position - mc_zone_x;
         f32 dz = target->z_position - mc_zone_z;
-        if (((dx * dx) + (dz * dz)) > (80.0f * 80.0f)) {
+        if (((dx * dx) + (dz * dz)) > (30.0f * 30.0f)) {
             mc_zone_held = FALSE;
         } else {
             zone = TRUE;
         }
     }
     // Eases in quickly (it has to get under the ceiling), out gently.
-    mc_tight += ((zone ? 1.0f : 0.0f) - mc_tight) * (zone ? 0.2f : 0.08f);
+    mc_tight += ((zone ? 1.0f : 0.0f) - mc_tight) * (zone ? 0.2f : 0.12f);
+    // Leaving, the camera goes back up to the height it had before the zone (if it was higher),
+    // unless you've moved it yourself since.
+    if (zone && (mc_height_before_zone < 0.0f)) {
+        mc_height_before_zone = mc_height;
+    } else if (!zone && (mc_height_before_zone >= 0.0f)) {
+        mc_height_restore = mc_height_before_zone;
+        mc_height_before_zone = -1.0f;
+    }
     if ((s32)zone != mc_zone_logged) {
         mc_zone_logged = zone;
         recomp_printf("Modern Camera: camera zone %s (map 0x%02X, zone %d%s, close preset height %d distance %d)\n",
