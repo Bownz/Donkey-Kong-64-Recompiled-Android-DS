@@ -215,6 +215,16 @@ int dk64::android::game_feel_flags() {
         ((direct_n64_buttons.load(std::memory_order_relaxed) & 0x000F) != 0 ? 4096 : 0);
 }
 
+static std::atomic<int> fp_status_value{0};
+
+void dk64::android::set_fp_status(int status) {
+    fp_status_value.store(status, std::memory_order_relaxed);
+}
+
+int dk64::android::fp_status() {
+    return fp_status_value.load(std::memory_order_relaxed);
+}
+
 static std::atomic<bool> haptic_feedback{true};
 
 void dk64::android::set_haptic_feedback(bool enabled) {

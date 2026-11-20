@@ -180,6 +180,16 @@ final class GameState {
 
     private static native int nativeGameFeel();
     private static native String nativeButtonGlyphs();
+    private static native int nativeFpStatus();
+
+    /** Walk in First Person: 1 = on, 2 = the gun's out. */
+    static int fpStatus() {
+        try {
+            return nativeFpStatus();
+        } catch (UnsatisfiedLinkError e) {
+            return 0;
+        }
+    }
 
     /** Game feel option flags (Input): 2048 = Walk in First Person. */
     static final int FEEL_FP_WALK = 2048;

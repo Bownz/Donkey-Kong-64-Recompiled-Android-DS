@@ -3,47 +3,48 @@ package io.github.bownz.dk64recomp;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Paint;
-import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.View;
 
 /**
- * Walk in First Person (Input): button prompts in the bottom right of the game screen while in
- * first person: "Exit" with the controller button that presses N64 B, and "Shoot" above it (the
- * button that presses N64 R) while the gun is out. The buttons are drawn as the controller's own
- * glyphs (PromptFont, as in the controls menu), so they follow your controller and mapping.
+ * Walk in First Person (Input): the controller's buttons beside the game's own "EXIT" and
+ * "SHOOT" text in the bottom right (the game patch draws the text: fp_draw_prompts in
+ * sound_options_patches.c). The buttons are your controller's glyphs (PromptFont, as in the
+ * controls menu) for whatever presses N64 B (exit) and N64 R (shoot, with the gun out), so they
+ * follow your controller and mapping.
+ *
+ * Placement follows the game's: its HUD is 320 x 240 units filling the screen's height, the
+ * prompts right-aligned to the screen's right edge, the text starting at TEXT_X on rows
+ * ROW_SHOOT / ROW_EXIT (keep in step with FP_TEXT_X / FP_ROW_* in the patch).
  */
 final class FirstPersonPromptView extends View {
-    private final Handler handler = new Handler(Looper.getMainLooper());
-    private final GameState state = TouchMoves.get().state;
-    private final Paint glyphPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint labelPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint pillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final RectF pill = new RectF();
-    private final float density;
+    private static final float TEXT_X = 252f, ROW_SHOOT = 200f, ROW_EXIT = 214f;
+    private static final float ROW_HEIGHT = 10f;   // the text's height, game units
 
-    private boolean shown, gun;
+    private final Handler handler = new Handler(Looper.getMainLooper());
+    private final Paint glyphPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private boolean fontOk;
+    private Typeface promptFont;
+
+    private int status;
     private String[] glyphs = { "", "" };
     private long glyphsAt;
 
     FirstPersonPromptView(Context context) {
         super(context);
-        density = context.getResources().getDisplayMetrics().density;
         Typeface prompt = null;
         try {
             prompt = Typeface.createFromAsset(context.getAssets(), "game/assets/promptfont/promptfont.ttf");
         } catch (RuntimeException e) {
-            // Falls back to the button's letter in the default font.
+            // No glyph font: the N64 button letters instead.
         }
-        glyphPaint.setTypeface(prompt != null ? prompt : Typeface.DEFAULT_BOLD);
+        fontOk = prompt != null;
+        promptFont = prompt;
+        glyphPaint.setTypeface(fontOk ? prompt : Typeface.DEFAULT_BOLD);
         glyphPaint.setColor(0xFFFFFFFF);
-        glyphPaint.setTextSize(22 * density);
-        labelPaint.setTypeface(Typeface.DEFAULT_BOLD);
-        labelPaint.setColor(0xFFFFFFFF);
-        labelPaint.setTextSize(14 * density);
-        pillPaint.setColor(0x99000000);
+        glyphPaint.setShadowLayer(3f, 0f, 1f, 0xFF000000);
         setWillNotDraw(false);
         setFocusable(false);
         setClickable(false);
@@ -53,21 +54,15 @@ final class FirstPersonPromptView extends View {
     private final Runnable tick = new Runnable() {
         @Override
         public void run() {
-            boolean nowShown = false, nowGun = false;
-            if ((GameState.gameFeel() & GameState.FEEL_FP_WALK) != 0 && state.refresh() && state.inGame() && !state.paused) {
-                int cs = state.controlState;
-                nowShown = (cs >= 2 && cs <= 5) || cs == 0x62;
-                nowGun = nowShown && (state.gunOut || cs == 0x62);
-            }
-            long now = android.os.SystemClock.uptimeMillis();
-            if (nowShown && (now - glyphsAt > 2000)) {   // the mapping can change in the menu
+            int now = GameState.fpStatus();
+            long t = android.os.SystemClock.uptimeMillis();
+            if ((now & 1) != 0 && t - glyphsAt > 2000) {   // the mapping can change in the menu
                 glyphs = GameState.buttonGlyphs();
-                glyphsAt = now;
+                glyphsAt = t;
                 invalidate();
             }
-            if (nowShown != shown || nowGun != gun) {
-                shown = nowShown;
-                gun = nowGun;
+            if (now != status) {
+                status = now;
                 invalidate();
             }
             handler.postDelayed(this, 100);
@@ -76,32 +71,27 @@ final class FirstPersonPromptView extends View {
 
     @Override
     protected void onDraw(Canvas canvas) {
-        if (!shown) {
+        if ((status & 1) == 0) {
             return;
         }
-        float margin = 16 * density;
-        float rowH = 34 * density;
-        float y = getHeight() - margin;
-        drawRow(canvas, y, glyphs[0].isEmpty() ? "B" : glyphs[0], !glyphs[0].isEmpty(), "Exit");
-        if (gun) {
-            drawRow(canvas, y - rowH - (6 * density), glyphs[1].isEmpty() ? "R" : glyphs[1], !glyphs[1].isEmpty(), "Shoot");
+        float s = getHeight() / 240f;   // pixels per game unit
+        drawGlyph(canvas, s, ROW_EXIT, glyphs[0], "B");
+        if ((status & 2) != 0) {
+            drawGlyph(canvas, s, ROW_SHOOT, glyphs[1], "R");
         }
     }
 
-    // One prompt, right-aligned, its bottom at y: [glyph] Label on a dark pill.
-    private void drawRow(Canvas canvas, float bottom, String glyph, boolean isGlyph, String label) {
-        Paint gp = isGlyph ? glyphPaint : labelPaint;
-        float pad = 10 * density, gap = 8 * density, h = 34 * density;
-        float gw = gp.measureText(glyph);
-        float lw = labelPaint.measureText(label);
-        float w = pad + gw + gap + lw + pad;
-        float right = getWidth() - (16 * density);
-        pill.set(right - w, bottom - h, right, bottom);
-        canvas.drawRoundRect(pill, h / 2, h / 2, pillPaint);
-        Paint.FontMetrics gm = gp.getFontMetrics();
-        Paint.FontMetrics lm = labelPaint.getFontMetrics();
-        float mid = bottom - (h / 2);
-        canvas.drawText(glyph, pill.left + pad, mid - ((gm.ascent + gm.descent) / 2), gp);
-        canvas.drawText(label, pill.left + pad + gw + gap, mid - ((lm.ascent + lm.descent) / 2), labelPaint);
+    // The glyph ending just left of the text, centred on its row.
+    private void drawGlyph(Canvas canvas, float s, float row, String glyph, String fallback) {
+        boolean useGlyph = fontOk && !glyph.isEmpty();
+        String text = useGlyph ? glyph : fallback;
+        glyphPaint.setTypeface(useGlyph ? promptFont : Typeface.DEFAULT_BOLD);
+        glyphPaint.setTextSize(ROW_HEIGHT * 1.5f * s);
+        float textLeft = getWidth() - ((320f - TEXT_X) * s);
+        float w = glyphPaint.measureText(text);
+        float x = textLeft - (3f * s) - w;
+        float mid = (row + (ROW_HEIGHT / 2f)) * s;
+        Paint.FontMetrics fm = glyphPaint.getFontMetrics();
+        canvas.drawText(text, x, mid - ((fm.ascent + fm.descent) / 2f), glyphPaint);
     }
 }

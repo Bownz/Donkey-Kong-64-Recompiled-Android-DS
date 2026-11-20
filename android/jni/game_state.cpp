@@ -766,6 +766,12 @@ Java_io_github_bownz_dk64recomp_GameState_nativeGameFeel(JNIEnv*, jclass) {
     return dk64::android::game_feel_flags();
 }
 
+// Walk in First Person's state (1 on, 2 gun out), for the app's button prompts.
+extern "C" JNIEXPORT jint JNICALL
+Java_io_github_bownz_dk64recomp_GameState_nativeFpStatus(JNIEnv*, jclass) {
+    return dk64::android::fp_status();
+}
+
 #include "recompinput/profiles.h"
 
 // The controller buttons (PromptFont glyphs, as the controls menu shows them) that press N64 B

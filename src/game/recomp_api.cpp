@@ -629,6 +629,14 @@ extern "C" void recomp_get_game_feel(uint8_t* rdram, recomp_context* ctx) {
 #endif
 }
 
+// Walk in First Person: whether it's on (1) and the gun's out (2), each frame, for the app's
+// button prompts (patches/sound_options_patches.c, fp_update).
+extern "C" void recomp_set_fp_status(uint8_t* rdram, recomp_context* ctx) {
+#if defined(__ANDROID__)
+    dk64::android::set_fp_status(_arg<0, int32_t>(rdram, ctx));
+#endif
+}
+
 // Shoot Gun With (Input): 0 B, 1 ZR, 2 B and ZR (patches/sound_options_patches.c).
 extern "C" void recomp_get_gun_button(uint8_t* rdram, recomp_context* ctx) {
 #if defined(__ANDROID__)

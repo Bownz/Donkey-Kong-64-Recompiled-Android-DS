@@ -1020,104 +1020,161 @@ static u8 mc_game_locked(CameraPaad *AAD) {
 #define FP_RIGHT_STICK_LOOK 1024
 #define FP_WALK 2048
 
-static f32 fp_walk_phase = 0.0f;   // the step cycle, in angle units (a step per 28 units walked)
-static f32 fp_walk_bob = 0.0f;     // 0..1: how much bob (eases in while walking, out when stopped)
-static u8 fp_walked = FALSE;       // walked this frame
+// ---- Walk in First Person (Input) ----------------------------------------------------------
+// Instead of the game's own first person view (which can't move), the Kong carries on as
+// normal (walking, running, jumping, the gun... all the game's own moves, animations and
+// sounds), unseen, with the camera at its head: the right stick looks, the left stick moves
+// relative to where you look. Entered the usual way (C-Up, or the touch first person button:
+// the game's first person view is left again straight away and this takes over), left with B
+// (or C-Up / the touch button again). ZR shoots with the gun out. The game draws "EXIT" and
+// "SHOOT" bottom right; the app puts your controller's buttons beside them (recomp_set_fp_status).
+u8 getBonePosition(Actor *actor, s32 boneIndex, f32 *x, f32 *y, f32 *z);
+void func_global_asm_806EAB44(Actor *arg0, u8 arg1);
+Gfx *alignHUD(Gfx *dl, u8 alignment);
+Gfx *popHUD(Gfx *dl, u8 alignment);
+Gfx *printStyledText(Gfx *dl, s16 style, s16 x, s16 y, u8 *string, u32 extraBitfield);
+void addActorToTextOverlayRenderArray(void *arg0, void *arg1, u8 arg2);
+extern Gfx **D_1000118;
+extern Mtx D_2000180;
+extern Mtx D_20000C0;
+extern OSContPad D_global_asm_807ECD58;   // controller 1 as read this frame
 
-static f32 fp_vy = 0.0f;     // jumping in first person: the Kong's upward speed
-static s32 fp_anim_before = 0;   // the Kong's animation before a first person jump
-void playActorAnimation(Actor *arg0, s32 arg1);
-void playAnimation(Actor *arg0, s32 arg1);
-static u8 fp_air = FALSE;
+static u8 fp_mode = FALSE;
+static f32 fp_yaw = 0.0f;      // where you're looking: facing (like the Kong's y_rotation)
+static f32 fp_pitch = 0.0f;    // up (+) / down (-), angle units
+static s32 fp_last_state = -1;
+static u16 fp_last_raw = 0;
 
-// First person states: 2-5 (looking), 0x62 (aiming the gun).
-static u8 fp_state(s32 state) {
-    return ((state >= 2) && (state <= 5)) || (state == 0x62);
-}
-
-// The height of the Kong's own jump (from its normal jumps, Kong state 0x17: the highest point
-// above where it took off), per Kong, so a jump in first person goes as high. 45 until seen.
-static f32 fp_jump_height[8] = { 45.0f, 45.0f, 45.0f, 45.0f, 45.0f, 45.0f, 45.0f, 45.0f };
-
-static void fp_track_jump_height_any(Actor *kong) {
-    static s32 lastState = -1;
-    static f32 takeoff = 0.0f, top = 0.0f;
-    s32 k = current_character_index[0] & 7;
-    if ((kong->control_state == 0x17) && (lastState != 0x17)) {
-        takeoff = kong->y_position;
-        top = kong->y_position;
-    } else if (kong->control_state == 0x17) {
-        if (kong->y_position > top) {
-            top = kong->y_position;
-        }
-    } else if (lastState == 0x17) {
-        f32 h = top - takeoff;
-        if ((h > 15.0f) && (h < 150.0f)) {
-            fp_jump_height[k] = h;
-        }
-    }
-    lastState = kong->control_state;
-}
+// Where the prompts are drawn (game units, 320 x 240, right-aligned): the text's left edge and
+// rows; the app draws the button glyphs just left of FP_TEXT_X (keep in step with
+// FirstPersonPromptView.java).
+#define FP_TEXT_X 252
+#define FP_ROW_SHOOT 200
+#define FP_ROW_EXIT 214
 
 static u8 fp_gun_out(void) {
     return (gCurrentPlayer != NULL) && ((gCurrentPlayer->control_state == 0x62) ||
         ((gCurrentPlayer->PaaD != NULL) && (gCurrentPlayer->PaaD->unk8C != 0)));
 }
 
-// Walk in First Person: the game's first person view stays where it was entered, so as the Kong
-// walks, the view is moved with it: the eye stays at the same place on the Kong as when first
-// person began (so the Kong stays out of sight), looking the way the game says, with a slight
-// step bob (0.8 units up and down per step, easing in and out).
-static u8 fp_view_valid = FALSE;
-static u8 fp_was_fp = FALSE;
-static f32 fp_eye_off[3];
+static Gfx *fp_draw_prompts(Gfx *dl, Actor *unused) {
+    gSPDisplayList(dl++, &D_1000118);
+    gDPSetCombineMode(dl++, G_CC_MODULATEIA_PRIM, G_CC_MODULATEIA_PRIM);
+    gSPMatrix(dl++, &D_2000180, G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_MODELVIEW);
+    gSPMatrix(dl++, &D_20000C0, G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION);
+    gDPPipeSync(dl++);
+    dl = alignHUD(dl, ALIGN_RIGHT);
+    gDPSetPrimColor(dl++, 0, 0, 0xFF, 0xFF, 0xFF, 0xE0);
+    if (fp_gun_out()) {
+        dl = printStyledText(dl, 6, FP_TEXT_X * 4, FP_ROW_SHOOT * 4, (u8 *)"SHOOT", 1);
+    }
+    dl = printStyledText(dl, 6, FP_TEXT_X * 4, FP_ROW_EXIT * 4, (u8 *)"EXIT", 1);
+    dl = popHUD(dl, ALIGN_RIGHT);
+    return dl;
+}
 
-static void first_person_view(Actor *target, f32 *eyeX, f32 *eyeY, f32 *eyeZ, f32 *atX, f32 *atY, f32 *atZ) {
-    f32 lx, ly, lz, bob;
-    u8 fp;
-    if ((target != NULL) && (target == gCurrentPlayer)) {
-        fp_track_jump_height_any(target);
-    }
-    fp = (target != NULL) && (target == gCurrentPlayer) && fp_state(target->control_state) &&
-        (recomp_get_game_feel() & FP_WALK);
-    if (fp && !fp_was_fp) {
-        target->unkB8 = 0.0f;   // stepping into first person while moving: stop, so the view
-                                // settles in the Kong's head instead of the Kong sliding on
-    }
-    fp_was_fp = fp;
-    if (!fp) {
-        fp_view_valid = FALSE;
-        fp_walk_bob = 0.0f;
-        fp_air = FALSE;
-        fp_vy = 0.0f;
+static void fp_set_mode(Actor *kong, u8 on) {
+    if (on == fp_mode) {
         return;
     }
-    // Until the Kong first moves, the game's own view is used (it zooms in to the Kong's head
-    // as first person starts), and where its eye sits on the Kong is kept up to date.
-    if (!fp_view_valid) {
-        fp_eye_off[0] = *eyeX - target->x_position;
-        fp_eye_off[1] = *eyeY - target->y_position;
-        fp_eye_off[2] = *eyeZ - target->z_position;
-        if (fp_walked) {
-            fp_view_valid = TRUE;
-        } else {
-            return;
+    fp_mode = on;
+    if (on) {
+        fp_yaw = (f32)(kong->y_rotation & 0xFFF);
+        fp_pitch = 0.0f;
+    } else {
+        kong->shadow_opacity = 0xFF;
+    }
+    recomp_printf("Walk in First Person: %s\n", on ? "on" : "off");
+}
+
+u8 fp_mode_active(void) {
+    return fp_mode;
+}
+
+// Once per frame, at the end of the camera's input stage (func_global_asm_8061D1FC).
+static void fp_update(CameraPaad *CaaD) {
+    Actor *kong = gCurrentPlayer;
+    u16 raw = D_global_asm_807ECD58.button;
+    u16 rawNew = raw & ~fp_last_raw;
+    s32 state;
+    fp_last_raw = raw;
+    if ((kong == NULL) || !(recomp_get_game_feel() & FP_WALK) || !gameIsInAdventureMode() ||
+        (is_cutscene_active != 0) || gameIsInDKTVMode()) {
+        if (fp_mode && (kong != NULL)) {
+            fp_set_mode(kong, FALSE);
         }
+        fp_mode = FALSE;
+        fp_last_state = -1;
+        recomp_set_fp_status(0);
+        return;
     }
-    if (!fp_walked) {
-        fp_walk_bob += (0.0f - fp_walk_bob) * 0.15f;
+    state = kong->control_state;
+    // The game's own first person view (C-Up, the touch button): left again at once, and ours
+    // switches on (or, if it's already on, off).
+    if ((state >= 2) && (state <= 5) && !((fp_last_state >= 2) && (fp_last_state <= 5))) {
+        func_global_asm_806EAB44(kong, state != 2);   // (2: on land; 3-5: in the water)
+        fp_set_mode(kong, !fp_mode);
     }
-    fp_walked = FALSE;
-    lx = *atX - *eyeX;
-    ly = *atY - *eyeY;
-    lz = *atZ - *eyeZ;
-    bob = func_global_asm_80612794((s16)(((s32)fp_walk_phase) & 0xFFF)) * 0.8f * fp_walk_bob;
-    *eyeX = target->x_position + fp_eye_off[0];
-    *eyeY = target->y_position + fp_eye_off[1] + bob;
-    *eyeZ = target->z_position + fp_eye_off[2];
-    *atX = *eyeX + lx;
-    *atY = *eyeY + ly;
-    *atZ = *eyeZ + lz;
+    fp_last_state = kong->control_state;
+    if (fp_mode && ((rawNew & B_BUTTON) || mc_vine_state(kong) || (kong->control_state == 0x63))) {
+        fp_set_mode(kong, FALSE);   // B leaves; so do vines and the Rocketbarrel
+    }
+    if (fp_mode) {
+        f32 rx, ry;
+        s32 invX = 0, invY = 0;
+        recomp_get_right_analog_inputs(&rx, &ry);
+        rx = recomp_apply_per_axis_deadzone(rx);
+        ry = recomp_apply_per_axis_deadzone(ry);
+        recomp_get_first_person_inverted_axes(&invX, &invY);
+        if (invX) {
+            rx = -rx;
+        }
+        if (invY) {
+            ry = -ry;
+        }
+        fp_yaw -= rx * 70.0f * getFrameDelta();
+        fp_pitch -= ry * 45.0f * getFrameDelta();
+        fp_pitch = mc_clamp(fp_pitch, -0x380, 0x380);
+        while (fp_yaw < 0.0f) {
+            fp_yaw += 4096.0f;
+        }
+        while (fp_yaw >= 4096.0f) {
+            fp_yaw -= 4096.0f;
+        }
+        // The Kong's movement is relative to the camera: put the game's camera behind your view.
+        CaaD->unkB2 = (((s32)fp_yaw) + 0x800) & 0xFFF;
+        CaaD->unkB0 = 0;
+        kong->shadow_opacity = 0;   // unseen (still animated, so its head can be followed)
+        addActorToTextOverlayRenderArray(fp_draw_prompts, NULL, 5);
+    }
+    recomp_set_fp_status((fp_mode ? 1 : 0) | ((fp_mode && fp_gun_out()) ? 2 : 0));
+}
+
+// The view from the Kong's head (its head bone, 6, as the game itself follows it), looking where
+// you're looking. Returns TRUE when it placed the camera.
+static u8 fp_camera(Actor *target, f32 *eyeX, f32 *eyeY, f32 *eyeZ, f32 *atX, f32 *atY, f32 *atZ) {
+    f32 hx, hy, hz, fx, fz, cp, sp;
+    if (!fp_mode || (target == NULL) || (target != gCurrentPlayer) || !mc_ready()) {
+        return FALSE;
+    }
+    if (!getBonePosition(target, 6, &hx, &hy, &hz) || (mc_abs(hx - target->x_position) > 60.0f) ||
+        (mc_abs(hz - target->z_position) > 60.0f) || (hy < target->y_position) || (hy > target->y_position + 90.0f)) {
+        hx = target->x_position;
+        hy = target->y_position + 30.0f;
+        hz = target->z_position;
+    }
+    mc_direction_with(mc_convention, (((s32)fp_yaw) + 0x800) & 0xFFF, &fx, &fz);   // ahead
+    sp = func_global_asm_80612794((s16)(((s32)fp_pitch) & 0xFFF));
+    cp = func_global_asm_80612790((s16)(((s32)fp_pitch) & 0xFFF));
+    // A little in front of the face, so nothing of the Kong is in the way.
+    *eyeX = hx + (fx * 6.0f);
+    *eyeY = hy + 2.0f;
+    *eyeZ = hz + (fz * 6.0f);
+    *atX = *eyeX + (fx * cp * 100.0f);
+    *atY = *eyeY + (sp * 100.0f);
+    *atZ = *eyeZ + (fz * cp * 100.0f);
+    camera_y_for_log = *eyeY;
+    return TRUE;
 }
 
 void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f32 *eyeZ, f32 *atX, f32 *atY, f32 *atZ) {
@@ -1127,7 +1184,10 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
     s32 i;
     u8 active;
 
-    first_person_view(target, eyeX, eyeY, eyeZ, atX, atY, atZ);
+    if (fp_camera(target, eyeX, eyeY, eyeZ, atX, atY, atZ)) {
+        mc_active_now = FALSE;   // (the Modern Camera takes over again from here when it ends)
+        return;
+    }
 
     active = (is_cutscene_active == 0) && mc_allowed() && (target != NULL) &&
         (target == gCurrentPlayer) && !(AAD->unkAC & 0x2000) && !mc_game_locked(AAD) &&
@@ -1633,27 +1693,21 @@ RECOMP_PATCH u16 func_global_asm_806DFF34(u16 arg0, u16 *arg1) {
             gunWas = gunNow;
         }
     }
-    // Walk in First Person: in first person (looking, or aiming the gun) the C buttons don't
-    // leave it; B does (it presses C-Up, which leaves first person); with the gun out, ZR
-    // shoots (it presses B). The bottom screen's buttons (which press C themselves: bit 4096 of
-    // the game feel flags while they do) still work, so the gun can be pulled out from here.
-    {
+    // Walk in First Person: B leaves it (fp_update; so it isn't an attack here); the controller's
+    // C buttons do nothing (the touch buttons' still work: bit 4096 of the game feel flags while
+    // they press one); ZR shoots with the gun out (it presses B), facing where you look.
+    if (fp_mode && (gCurrentPlayer != NULL)) {
         s32 feel = recomp_get_game_feel();
-        if ((gCurrentPlayer != NULL) && fp_state(gCurrentPlayer->control_state) && (feel & FP_WALK)) {
-            u16 b = result & B_BUTTON;
-            u16 r = result & R_TRIG;
-            result &= ~B_BUTTON;
-            if (!(feel & 4096)) {
-                result &= ~(U_CBUTTONS | D_CBUTTONS | L_CBUTTONS | R_CBUTTONS);
-            }
-            if (b) {
-                result |= U_CBUTTONS;
-            }
-            if (r && fp_gun_out()) {
-                result |= B_BUTTON;
-            }
-            return result;   // (instead of Shoot Gun With, below)
+        u16 r = result & R_TRIG;
+        result &= ~B_BUTTON;
+        if (!(feel & 4096)) {
+            result &= ~(U_CBUTTONS | D_CBUTTONS | L_CBUTTONS | R_CBUTTONS);
         }
+        if (r && fp_gun_out()) {
+            result |= B_BUTTON;
+            gCurrentPlayer->y_rotation = ((s32)fp_yaw) & 0xFFF;
+        }
+        return result;   // (instead of Shoot Gun With, below)
     }
     // The gun is out: the Kong's "holding the gun" flag (PlayerAdditionalActorData 0x8C, what
     // the game checks to pull the gun out or put it away), or one of the gun states (aiming...).
@@ -1800,6 +1854,11 @@ RECOMP_PATCH void func_global_asm_8061D1FC(Actor* arg0) {
             lastState = gCurrentPlayer->control_state;
             recomp_printf("Camera: mode %d, Kong state 0x%02X, map 0x%02X\n", lastMode, lastState, current_map);
         }
+    }
+    // Walk in First Person (fp_update): your view, nothing else turns the camera.
+    fp_update(CaaD);
+    if (fp_mode) {
+        return;
     }
     if (mc_allowed() && mc_active_now) {
         modern_camera_input(arg0, CaaD, touchCamMoved, touchCamX, touchCamY);
@@ -2105,97 +2164,6 @@ void getStickPosition(s32 *x, s32 *y) {
     *y = invertAxis(*y, dGyroY, dMouseY, !invY, !invGyroY, !invMouseY);
 }
 
-// @recomp (Android): Walk in First Person: the left stick moves the Kong (forward/back along
-// the view, sideways to strafe) at a walk, with the level's walls and floors respected: it
-// won't walk into a wall, or step up or down more than a small step (no walking off ledges).
-
-
-static void first_person_walk(s32 lx, s32 ly, u8 jump) {
-    Actor *kong = gCurrentActorPointer;
-    f32 mx, my, mag, fx, fz, rxv, rzv, nx, nz, floorY, under;
-    s16 hitA = 0, hitB = 0xFFF;
-    s32 facing;
-    if ((kong == NULL) || !mc_ready()) {
-        return;
-    }
-    // A jumps: a short hop (up about 45 units, like a normal jump), landing on whatever's below,
-    // including a ledge you've hopped up onto.
-    if (jump && !fp_air) {
-        // As high as the Kong's own jump (v = sqrt(2 g h)), with its jump sound: the jump
-        // animation (which plays it) on the hidden Kong, the first person one back on landing.
-        fp_vy = _sqrtf(2.0f * 0.65f * fp_jump_height[current_character_index[0] & 7]);
-        fp_air = TRUE;
-        if (kong->animation_state != NULL) {
-            fp_anim_before = kong->animation_state->unk64;
-            playAnimation(kong, 0x10);
-        }
-    }
-    if (fp_air) {
-        kong->y_position += fp_vy;
-        fp_vy -= 0.65f;
-        under = kong->y_position + 5.0f;
-        if (func_global_asm_80667110(kong->x_position, kong->z_position, &under) &&
-            (under <= kong->y_position + 5.0f) && (kong->y_position <= under) && (fp_vy <= 0.0f)) {
-            kong->y_position = under;
-            fp_air = FALSE;
-            fp_vy = 0.0f;
-            recomp_haptic_pulse(0.12f, 35);
-            if ((fp_anim_before != 0) && (kong->animation_state != NULL)) {
-                playActorAnimation(kong, fp_anim_before);
-            }
-            fp_anim_before = 0;
-        }
-        fp_walked = TRUE;   // keep the view with the Kong
-    }
-    mx = (f32)lx / 80.0f;
-    my = (f32)ly / 80.0f;
-    if ((mx < 0.15f) && (mx > -0.15f)) {
-        mx = 0.0f;
-    }
-    if ((my < 0.15f) && (my > -0.15f)) {
-        my = 0.0f;
-    }
-    mag = _sqrtf((mx * mx) + (my * my));
-    if (mag < 0.01f) {
-        return;
-    }
-    if (mag > 1.0f) {
-        mx /= mag;
-        my /= mag;
-    }
-    facing = kong->y_rotation & 0xFFF;
-    mc_direction_with(mc_convention, (facing + 0x800) & 0xFFF, &fx, &fz);    // ahead
-    mc_direction_with(mc_convention, (facing + 0x400) & 0xFFF, &rxv, &rzv);  // to the right
-    nx = kong->x_position + (((fx * my) + (rxv * mx)) * 3.5f);
-    nz = kong->z_position + (((fz * my) + (rzv * mx)) * 3.5f);
-    if (func_global_asm_80671E00(nx, kong->y_position + 12.0f, nz, 8.0f, &hitA, &hitB, 1U, 0xBCU) != 0) {
-        return;   // a wall
-    }
-    floorY = kong->y_position + 18.0f;
-    if (!func_global_asm_80667110(nx, nz, &floorY) || (floorY > kong->y_position + 18.0f)) {
-        return;   // no floor there, or too high a step
-    }
-    if (fp_air) {
-        // In the air: carry on over (landing is worked out above).
-        kong->x_position = nx;
-        kong->z_position = nz;
-        return;
-    }
-    if (floorY < kong->y_position - 18.0f) {
-        return;   // walking, don't step off a ledge
-    }
-    fp_walk_phase += _sqrtf(((nx - kong->x_position) * (nx - kong->x_position)) +
-                             ((nz - kong->z_position) * (nz - kong->z_position))) * (4096.0f / 28.0f);
-    fp_walk_bob += (1.0f - fp_walk_bob) * 0.25f;
-    fp_walked = TRUE;
-    kong->x_position = nx;
-    kong->z_position = nz;
-    kong->y_position = floorY;
-}
-
-void func_global_asm_806DF44C(Actor *arg0, PlayerAdditionalActorData *arg1, u8 arg2);
-void func_global_asm_806E225C(u8 arg0, u8 arg1);
-
 // @recomp: First person controls
 RECOMP_PATCH void func_global_asm_806EA628(void) {
     PlayerAdditionalActorData *temp_a0;
@@ -2206,16 +2174,14 @@ RECOMP_PATCH void func_global_asm_806EA628(void) {
 
     if (!(extra_player_info_pointer->unk1F0 & 0x8000)) {
         s32 feel = recomp_get_game_feel();
-        u8 walk = (feel & FP_WALK) != 0;
         stick_x = D_global_asm_807FD610[cc_player_index].unk2E;
         stick_y = D_global_asm_807FD610[cc_player_index].unk2F;
-        // @recomp (Android): First Person Right Stick Looks (and Walk in First Person, which
-        // needs the left stick for walking): look with the right stick, scaled to the N64
-        // stick's range. Without walking, the left stick still looks too.
-        if ((feel & FP_RIGHT_STICK_LOOK) || walk) {
+        // @recomp (Android): First Person Right Stick Looks: look with the right stick too,
+        // scaled to the N64 stick's range (the left stick still looks when it's left alone).
+        if (feel & FP_RIGHT_STICK_LOOK) {
             f32 rx, ry;
-            s32 lx = walk ? 0 : stick_x;
-            s32 ly = walk ? 0 : stick_y;
+            s32 lx = stick_x;
+            s32 ly = stick_y;
             recomp_get_right_analog_inputs(&rx, &ry);
             rx = recomp_apply_per_axis_deadzone(rx);
             ry = recomp_apply_per_axis_deadzone(ry);
@@ -2225,20 +2191,6 @@ RECOMP_PATCH void func_global_asm_806EA628(void) {
                 stick_x = lx;
                 stick_y = ly;
             }
-        }
-        if (walk) {
-            // The gun, without leaving first person: the bottom screen's gun button (C-Left,
-            // let through while it's pressing it) takes it out or puts it away, as the game does
-            // (func_global_asm_806DF44C: the animation, on the hidden Kong); with it out, ZR
-            // (B by now) shoots, as aiming does (func_global_asm_806E225C).
-            u16 pressed = D_global_asm_807FD610[cc_player_index].unk2C;
-            if ((pressed & L_CBUTTONS) && (feel & 4096)) {
-                func_global_asm_806DF44C(gCurrentActorPointer, extra_player_info_pointer, 0);
-            } else if ((pressed & B_BUTTON) && fp_gun_out()) {
-                func_global_asm_806E225C(1, 0);
-            }
-            first_person_walk(D_global_asm_807FD610[cc_player_index].unk2E, D_global_asm_807FD610[cc_player_index].unk2F,
-                (D_global_asm_807FD610[cc_player_index].unk2C & A_BUTTON) != 0);
         }
         getStickPosition(&stick_x, &stick_y);
         temp_a0 = extra_player_info_pointer->unk104->additional_actor_data;
