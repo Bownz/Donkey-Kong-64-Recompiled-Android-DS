@@ -3040,8 +3040,15 @@ RECOMP_PATCH u8 isFlagSet(s16 flagIndex, u8 flagType) { // TODO: Can we use the 
                 }
             }
         }
-        // Rainbow Coins (0x2A6-0x2B5): which map checks which, to match the bottom screen's
-        // per-level list to the game (once per flag per map).
+        // Rainbow Coins: the dirt patch (ACTOR_RAINBOW_COIN_PATCH) checks its coin's flag as it
+        // spawns; which map checks which, to match the bottom screen's per-level list to the
+        // game (once per flag per map).
+        if ((flagType == FLAG_TYPE_PERMANENT) && (gCurrentActorPointer != NULL) &&
+            (gCurrentActorPointer->unk58 == ACTOR_RAINBOW_COIN_PATCH)) {
+            recomp_printf("Flags: dirt patch in map 0x%02X at (%d, %d, %d) checks flag 0x%03X: %d\n", current_map,
+                (s32)gCurrentActorPointer->x_position, (s32)gCurrentActorPointer->y_position,
+                (s32)gCurrentActorPointer->z_position, flagIndex, value);
+        }
         if ((flagType == FLAG_TYPE_PERMANENT) && (flagIndex >= 0x2A6) && (flagIndex <= 0x2B5)) {
             static u16 seen[16];
             static s32 seenMap = -1;
