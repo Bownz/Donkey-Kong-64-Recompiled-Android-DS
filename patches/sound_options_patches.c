@@ -1029,6 +1029,8 @@ static u8 mc_game_locked(CameraPaad *AAD) {
 // (or C-Up / the touch button again). ZR shoots with the gun out. The game draws "EXIT" and
 // "SHOOT" bottom right; the app puts your controller's buttons beside them (recomp_set_fp_status).
 u8 getBonePosition(Actor *actor, s32 boneIndex, f32 *x, f32 *y, f32 *z);
+void func_global_asm_806E225C(u8 arg0, u8 arg1);
+extern Actor *gCurrentActorPointer;
 void func_global_asm_806EAB44(Actor *arg0, u8 arg1);
 Gfx *alignHUD(Gfx *dl, u8 alignment);
 Gfx *popHUD(Gfx *dl, u8 alignment);
@@ -1070,6 +1072,12 @@ static Gfx *fp_draw_prompts(Gfx *dl, Actor *unused) {
     }
     dl = printStyledText(dl, 6, FP_TEXT_X * 4, FP_ROW_EXIT * 4, (u8 *)"EXIT", 1);
     dl = popHUD(dl, ALIGN_RIGHT);
+    // The crosshair, in the middle of the view (the 4:3 picture's middle is the screen's), with
+    // the gun out: where the first person shot goes.
+    if (fp_gun_out()) {
+        gDPSetPrimColor(dl++, 0, 0, 0xFF, 0xFF, 0xFF, 0xF0);
+        dl = printStyledText(dl, 6, (160 - 3) * 4, (120 - 5) * 4, (u8 *)"+", 1);
+    }
     return dl;
 }
 
@@ -1119,6 +1127,14 @@ static void fp_update(CameraPaad *CaaD) {
     if (fp_mode && ((rawNew & B_BUTTON) || mc_vine_state(kong) || (kong->control_state == 0x63))) {
         fp_set_mode(kong, FALSE);   // B leaves; so do vines and the Rocketbarrel
     }
+    // ZR with the gun out: the game's own first person shot (func_global_asm_806E225C with its
+    // first person flag: from the view, where it points, up and down too), as the Kong.
+    if (fp_mode && (rawNew & R_TRIG) && fp_gun_out()) {
+        Actor *was = gCurrentActorPointer;
+        gCurrentActorPointer = kong;
+        func_global_asm_806E225C(1, 1);
+        gCurrentActorPointer = was;
+    }
     if (fp_mode) {
         f32 rx, ry;
         s32 invX = 0, invY = 0;
@@ -1152,24 +1168,45 @@ static void fp_update(CameraPaad *CaaD) {
 
 // The view from the Kong's head (its head bone, 6, as the game itself follows it), looking where
 // you're looking. Returns TRUE when it placed the camera.
+// The view from the Kong's head, steady: the Kong's position (not its head bone's, which sways
+// with the idle animation), at its head's height (the head bone's height above the Kong,
+// smoothed right out: it only follows real changes such as crouching), with a gentle step bob
+// of our own (0.8 up and down a step, per 28 units walked on the ground). It rises and falls
+// with the Kong's real jumps. Returns TRUE when it placed the camera.
+static f32 fp_head = -1.0f;
+static f32 fp_bob_phase = 0.0f, fp_bob = 0.0f;
+static f32 fp_prev_x = 0.0f, fp_prev_z = 0.0f;
+
 static u8 fp_camera(Actor *target, f32 *eyeX, f32 *eyeY, f32 *eyeZ, f32 *atX, f32 *atY, f32 *atZ) {
-    f32 hx, hy, hz, fx, fz, cp, sp;
+    f32 hx, hy, hz, fx, fz, cp, sp, h, dx, dz, moved, eyeH;
     if (!fp_mode || (target == NULL) || (target != gCurrentPlayer) || !mc_ready()) {
+        fp_head = -1.0f;
         return FALSE;
     }
-    if (!getBonePosition(target, 6, &hx, &hy, &hz) || (mc_abs(hx - target->x_position) > 60.0f) ||
-        (mc_abs(hz - target->z_position) > 60.0f) || (hy < target->y_position) || (hy > target->y_position + 90.0f)) {
-        hx = target->x_position;
-        hy = target->y_position + 30.0f;
-        hz = target->z_position;
+    h = 30.0f;
+    if (getBonePosition(target, 6, &hx, &hy, &hz) && (hy > target->y_position + 5.0f) && (hy < target->y_position + 90.0f)) {
+        h = hy - target->y_position;
     }
+    fp_head = (fp_head < 0.0f) ? h : (fp_head + ((h - fp_head) * 0.03f));
+    dx = target->x_position - fp_prev_x;
+    dz = target->z_position - fp_prev_z;
+    fp_prev_x = target->x_position;
+    fp_prev_z = target->z_position;
+    moved = _sqrtf((dx * dx) + (dz * dz));
+    if (((target->y_position - target->floor) < 4.0f) && (moved > 0.3f) && (moved < 40.0f)) {
+        fp_bob_phase += moved * (4096.0f / 28.0f);
+        fp_bob += (1.0f - fp_bob) * 0.25f;
+    } else {
+        fp_bob += (0.0f - fp_bob) * 0.15f;
+    }
+    eyeH = fp_head + 2.0f + (func_global_asm_80612794((s16)(((s32)fp_bob_phase) & 0xFFF)) * 0.8f * fp_bob);
     mc_direction_with(mc_convention, (((s32)fp_yaw) + 0x800) & 0xFFF, &fx, &fz);   // ahead
     sp = func_global_asm_80612794((s16)(((s32)fp_pitch) & 0xFFF));
     cp = func_global_asm_80612790((s16)(((s32)fp_pitch) & 0xFFF));
     // A little in front of the face, so nothing of the Kong is in the way.
-    *eyeX = hx + (fx * 6.0f);
-    *eyeY = hy + 2.0f;
-    *eyeZ = hz + (fz * 6.0f);
+    *eyeX = target->x_position + (fx * 6.0f);
+    *eyeY = target->y_position + eyeH;
+    *eyeZ = target->z_position + (fz * 6.0f);
     *atX = *eyeX + (fx * cp * 100.0f);
     *atY = *eyeY + (sp * 100.0f);
     *atZ = *eyeZ + (fz * cp * 100.0f);
@@ -1703,10 +1740,7 @@ RECOMP_PATCH u16 func_global_asm_806DFF34(u16 arg0, u16 *arg1) {
         if (!(feel & 4096)) {
             result &= ~(U_CBUTTONS | D_CBUTTONS | L_CBUTTONS | R_CBUTTONS);
         }
-        if (r && fp_gun_out()) {
-            result |= B_BUTTON;
-            gCurrentPlayer->y_rotation = ((s32)fp_yaw) & 0xFFF;
-        }
+        (void)r;   // (ZR shoots: fp_update)
         return result;   // (instead of Shoot Gun With, below)
     }
     // The gun is out: the Kong's "holding the gun" flag (PlayerAdditionalActorData 0x8C, what
