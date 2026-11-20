@@ -927,7 +927,7 @@ static bool ask_for_experience() {
         "Modern: Analog Camera on the right stick, gyro aiming, sharp full-resolution graphics "
         "with anti-aliasing, and quick Kong swapping. "
         "Classic: the N64 as it was, with the original controls, camera and resolution. "
-        "You can change this, or any single option, in Settings > General.",
+        "You can change this later in Settings > Gameplay > Choose Experience, or any single option on its own.",
         "Modern",
         "Classic",
         []() { dk64_android_apply_experience(1); },

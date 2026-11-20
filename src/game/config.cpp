@@ -357,6 +357,7 @@ static void add_gpu_driver_option(recomp::config::Config &config) {
 #if defined(__ANDROID__)
 // Android: the "Dual Screen" tab (the bottom screen on handhelds with two screens).
 extern "C" void dk64_android_set_touch_controls_mode(int mode);
+void dk64_android_choose_experience();   // (below)
 extern "C" void dk64_android_set_button_icons(int enabled);
 extern "C" int dk64_android_has_second_screen();
 extern "C" void dk64_android_edit_touch_layout();
@@ -1159,8 +1160,15 @@ void dk64::init_config() {
             dk64::android::change_storage_location();
         };
 
+        // Experience: a button rather than a list, so changing it is a deliberate choice:
+        // pick Modern or Classic, then confirm, and the app restarts with it applied.
+        Entry experience; experience.kind = Kind::Button; experience.text = "Choose Experience";
+        experience.description = "Set up the whole game at once, the modern way or as it was on the N64. "
+            "You pick one, confirm, and the app restarts with it applied. Any single option can still be changed afterwards.";
+        experience.on_press = []() { dk64_android_choose_experience(); };
+
         recompui::config::create_layout_tab("Gameplay", "gameplay", {
-            option(g, "android_experience"),
+            experience,
             header("Game Feel"),
             option(d, "android_movement"),
             option(d, "android_jump_help"),
@@ -1408,6 +1416,50 @@ extern "C" void dk64_android_apply_experience(int modern) {
     std::ofstream out{ experience_marker() };
     out << (modern ? "modern" : "classic") << "\n";
     applying_experience = false;
+}
+
+extern "C" void dk64_android_restart_to_launcher();
+
+// Settings > Gameplay > Choose Experience: which one, then a confirmation; applied, then the
+// app restarts (to the main menu) so everything starts fresh with it.
+static void confirm_experience(int modern) {
+    const std::string name = modern ? "Modern" : "Classic";
+    const std::string what = modern
+        ? "Modern Camera, walking in first person, Odyssey-style movement and jump help, feel rumbles, "
+          "full-resolution widescreen graphics with anti-aliasing, quick Kong swapping and button icons that match your controller."
+        : "The N64 as it was: the original camera, controls, moves, 4:3 picture and resolution, cutscene borders and draw distance.";
+    const std::string unsaved = ultramodern::is_game_started()
+        ? " Anything since your last save will be lost." : "";
+    recompui::open_choice_prompt(
+        "Switch to " + name + "?",
+        what + "<br /><br />The app restarts to apply it." + unsaved,
+        "Restart Now",
+        "Cancel",
+        [modern]() {
+            dk64_android_apply_experience(modern);
+            dk64_android_restart_to_launcher();
+        },
+        []() {},
+        recompui::ButtonStyle::Primary,
+        recompui::ButtonStyle::Secondary,
+        true
+    );
+}
+
+void dk64_android_choose_experience() {
+    recompui::open_choice_prompt(
+        "Choose Your Experience",
+        "<recomp-color primary>Modern</recomp-color>: the Modern Camera, walking in first person, smoother movement, "
+        "jump help and feel rumbles, sharp widescreen graphics and quick Kong swapping.<br /><br />"
+        "<recomp-color primary>Classic</recomp-color>: as close to the original N64 game as possible.",
+        "Modern",
+        "Classic",
+        []() { confirm_experience(1); },
+        []() { confirm_experience(0); },
+        recompui::ButtonStyle::Primary,
+        recompui::ButtonStyle::Secondary,
+        false
+    );
 }
 
 namespace recompui::config {
