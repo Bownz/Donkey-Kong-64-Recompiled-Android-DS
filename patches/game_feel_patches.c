@@ -219,7 +219,7 @@ static void gf_start_jump(Actor *kong, PlayerAdditionalActorData *paad) {
 
 // ---- Quick Turn ------------------------------------------------------------------------------
 // The game's skid (Kong state 0x0E: the dust and its rumble when you reverse while running) is
-// kept, but cut short: after 6 frames (~0.2 s) the Kong faces the way the stick points, keeps a
+// kept, but shorter: the Kong turns round during it, and after 9 frames (~0.3 s) it keeps a
 // little speed, and the game's own "back on the ground" step (func_global_asm_806CFF9C, which
 // also picks the right animation) puts it back into running.
 void func_global_asm_806CFF9C(Actor *arg0);
@@ -228,6 +228,7 @@ static u8 gf_pivoted = FALSE;   // a Quick Turn happened (Smooth Running lets th
 
 static s32 gf_quick_turn(Actor *kong, PlayerAdditionalActorData *paad, s32 state, s32 lastState) {
     f32 top;
+    s32 diff;
     if (state != 0x0E) {
         gf_skid_frames = 0;
         return state;
@@ -236,15 +237,26 @@ static s32 gf_quick_turn(Actor *kong, PlayerAdditionalActorData *paad, s32 state
         gf_skid_frames = 0;
     }
     gf_skid_frames++;
-    if (gf_skid_frames < 6) {
+    // During the skid the Kong turns round towards the stick, a little more each frame (eased),
+    // so it's already facing the new way when the skid ends, and its speed bleeds off.
+    diff = ((((kong->unkEE & 0xFFF) - (kong->y_rotation & 0xFFF)) + 0x800) & 0xFFF) - 0x800;
+    kong->y_rotation = (kong->y_rotation + (s32)((f32)diff * 0.3f)) & 0xFFF;
+    kong->unkB8 *= 0.85f;
+    if (gf_skid_frames < 9) {
         return state;
     }
+    // ~0.3 s in: off the new way, from the speed the skid has left.
     top = D_global_asm_807531FC[D_global_asm_807FD584];
+    if (top < 50.0f) {
+        top = 150.0f;
+    }
     kong->y_rotation = kong->unkEE & 0xFFF;
     paad->unkA = kong->y_rotation;
     paad->unkC = -1;
     paad->unkE = -1;
-    kong->unkB8 = ((top > 50.0f) ? top : 150.0f) * 0.4f;
+    if (kong->unkB8 < top * 0.25f) {
+        kong->unkB8 = top * 0.25f;
+    }
     func_global_asm_806CFF9C(kong);
     gf_pivoted = TRUE;
     gf_skid_frames = 0;
