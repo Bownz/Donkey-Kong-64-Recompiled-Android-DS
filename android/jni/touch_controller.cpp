@@ -197,7 +197,8 @@ void dk64::android::set_quick_turn(bool enabled) {
 }
 
 int dk64::android::game_feel_flags() {
-    return (jump_assist.load(std::memory_order_relaxed) ? 1 : 0) | (quick_turn.load(std::memory_order_relaxed) ? 2 : 0) |
+    return (jump_assist.load(std::memory_order_relaxed) ? 1 : 0) | 0 |   // Quick Turn: off for now (the skid and its dust are kept)
+       
         (smooth_running.load(std::memory_order_relaxed) ? 4 : 0) |
         (movement_polish.load(std::memory_order_relaxed) ? 8 : 0);
 }

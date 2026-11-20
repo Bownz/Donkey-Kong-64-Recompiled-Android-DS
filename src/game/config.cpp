@@ -585,24 +585,6 @@ static void add_dual_screen_options(recomp::config::Config &config) {
             }
         });
 
-    // Quick Turn: no long skid when reversing direction while running.
-    static const std::string quick_turn_option = "android_quick_turn";
-    config.add_enum_option(
-        quick_turn_option,
-        "Quick Turn",
-        "Reversing direction while running turns the Kong round almost at once (with a short skid), "
-        "instead of the long slide of the N64.",
-        on_off_options,
-        1u
-    );
-    config.add_option_change_callback(quick_turn_option,
-        [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
-            dk64::android::set_quick_turn(std::get<uint32_t>(cur) == 1u);
-            if (context == recomp::config::OptionChangeContext::Permanent) {
-                recompui::config::get_config("dual_screen").save_config();
-            }
-        });
-
     // Smooth Running: speed builds up and runs down over a few frames (patches/game_feel_patches.c).
     static const std::string smooth_running_option = "android_smooth_running";
     config.add_enum_option(
@@ -961,7 +943,6 @@ void dk64::init_config() {
             option(d, "android_haptic_feedback"),
             option(d, "android_gun_button"),
             option(d, "android_jump_assist"),
-            option(d, "android_quick_turn"),
             option(d, "android_smooth_running"),
             option(d, "android_movement_polish"),
             option(g, keys::swimming_invert_mode),
@@ -1216,7 +1197,6 @@ extern "C" void dk64_android_apply_experience(int modern) {
     dual.update_option_value("android_button_icons", static_cast<uint32_t>(modern ? 1u : 0u));
     dual.update_option_value("android_haptic_feedback", static_cast<uint32_t>(modern ? 1u : 0u));
     dual.update_option_value("android_jump_assist", static_cast<uint32_t>(modern ? 1u : 0u));
-    dual.update_option_value("android_quick_turn", static_cast<uint32_t>(modern ? 1u : 0u));
     dual.update_option_value("android_smooth_running", static_cast<uint32_t>(modern ? 1u : 0u));
     dual.update_option_value("android_movement_polish", static_cast<uint32_t>(modern ? 1u : 0u));
     dual.save_config();
