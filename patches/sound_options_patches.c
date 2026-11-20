@@ -1162,6 +1162,8 @@ static void fp_update(CameraPaad *CaaD) {
     // Taking a photo (the camera, Kong states 0x64/0x65): the game's own camera view, then back
     // into ours once the camera's put away.
     if (fp_mode && fp_photo_state(state)) {
+        kong->y_rotation = ((s32)fp_yaw) & 0xFFF;   // facing where you were looking
+        kong->unkEE = kong->y_rotation;
         fp_set_mode(kong, FALSE);
         fp_trans = 0.0f;          // (no move back out: straight to the photo view)
         fp_behind_yaw = -1;
@@ -1236,7 +1238,11 @@ static void fp_update(CameraPaad *CaaD) {
         // Throwing an orange (Kong state 0x2C): the Kong turns to where you're looking, so it
         // flies that way (the throw goes the way the Kong faces, func_global_asm_80618104; it's
         // thrown level, as in the game's own first person view).
-        if (kong->control_state == 0x2C) {
+        // Standing still (or in the water, where the Kong stays put), the Kong turns with your
+        // view too, so the camera (C-Down), which looks the way the Kong faces, starts out
+        // looking where you were. (Walking, the Kong turns to where it's going, as usual.)
+        if ((kong->control_state == 0x2C) || fp_water ||
+            ((ABS(D_global_asm_807ECD58.stick_x) < 8) && (ABS(D_global_asm_807ECD58.stick_y) < 8))) {
             kong->y_rotation = ((s32)fp_yaw) & 0xFFF;
             kong->unkEE = kong->y_rotation;
         }
