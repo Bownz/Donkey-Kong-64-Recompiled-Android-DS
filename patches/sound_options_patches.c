@@ -1739,8 +1739,8 @@ static void modern_camera_frame_inner(Actor *camera, CameraPaad *AAD, f32 *eyeX,
         pull += (wantPull - pull) * 0.03f;
         tilt += (wantTilt - tilt) * 0.03f;
         distance *= 1.0f + pull;
-        // Hit Feel (game_feel_patches.c): a short punch-in of the camera when a hit lands.
-        distance *= 1.0f - (0.06f * game_feel_camera_kick());
+        // (Hit Feel used to punch the camera in when a hit landed: it read as a skipped frame,
+        // so hits only rumble now.)
         mc_run_tilt = tilt;
     }
     {

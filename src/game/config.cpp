@@ -389,8 +389,7 @@ static const std::vector<CombinedOption> &combined_options() {
           { {0u, 2u}, {1u, 1u}, {1u, 2u}, {1u, 3u} }, false },
         { "android_feel_rumbles", "Feel Rumbles",
           "Small rumbles for game feel, like recent 3D platformers: landings, skids, each banana and coin, a Golden Banana, "
-          "shots and oranges, getting hurt, running into walls, playing an instrument, and hits that land with a small "
-          "camera punch. On your controller, or the phone with touch controls; as strong as Rumble Strength.",
+          "shots and oranges, getting hurt, running into walls, playing an instrument, and your hits landing. On your controller, or the phone with touch controls; as strong as Rumble Strength.",
           { {0u, "Off", "Off"}, {1u, "On", "On"}, {2u, "Custom", "Custom"} },
           { "android_haptic_feedback", "android_hit_feel" },
           { {0u, 0u}, {1u, 1u} }, false },
