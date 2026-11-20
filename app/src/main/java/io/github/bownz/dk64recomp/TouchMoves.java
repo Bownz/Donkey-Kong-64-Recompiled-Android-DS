@@ -191,10 +191,8 @@ final class TouchMoves {
             return;
         }
 
-        if (move == Move.FIRST_PERSON || (move == Move.CAMERA && (state.swimming || state.camera))) {
+        if (move == Move.FIRST_PERSON) {
             // C-Up on its own enters first-person view, and pressing it again leaves it.
-            // The camera: in the water C-Down on its own takes it out (Z there would dive), and
-            // C-Down on its own puts it away again (func_global_asm_806E9804 / 806E9ACC).
             TouchInput.setN64Buttons(c);
             handler.postDelayed(() -> {
                 TouchInput.setN64Buttons(0);
