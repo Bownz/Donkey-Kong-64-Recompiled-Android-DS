@@ -564,11 +564,10 @@ public final class BottomScreenView extends View {
         return k < GameState.KONG_COUNT && state.inGame() && !state.isFreed(k);
     }
 
-    /** Performs a move from one of this screen's buttons, with its squash and wiggle. */
+    /** Performs a move from one of this screen's buttons, with its squash. */
     private void doMove(TouchMoves.Move move) {
         if (moves.running == null) {
             startAnim("squash" + move);
-            startAnim("wiggle" + move);
         }
         moves.perform(move, this);
         invalidate();
@@ -2215,18 +2214,13 @@ public final class BottomScreenView extends View {
             float iconR = Math.min(r.height() * 0.36f, r.width() * (hasCount ? 0.22f : 0.3f));
             float iconX = hasCount ? r.left + r.width() * 0.1f + iconR : r.centerX();
             float iconY = r.centerY();
-            // The icon sways for a moment when it's used (pressed, or its count changes).
+            // Picking more up (the count going up): the item spins once, like the collectibles
+            // (the game's own spin frames where it has them, otherwise a turn round).
             if (hasCount) {
-                watch("wigglecount" + move, parseCount(counts[i]), "wiggle" + move);
+                watchUp("spincount" + move, parseCount(counts[i]), "spin" + move);
             }
             int iconSaved = c.save();
-            float wiggle = animProgress("wiggle" + move, WIGGLE_MS);
-            if (wiggle >= 0) {
-                float fade = 1f - wiggle;
-                double t = 2 * Math.PI * wiggle * 2.5;
-                c.translate(0, -(float) Math.abs(Math.sin(t)) * iconR * 0.12f * fade);
-                c.rotate((float) Math.sin(t) * 10f * fade, iconX, iconY);
-            }
+            float spinMove = animProgress("spin" + move, SPIN_MS);
             int iconKong = kong;
             if (flip >= 0 && (move == TouchMoves.Move.WEAPON || move == TouchMoves.Move.INSTRUMENT)) {
                 // Turns edge-on, then the other Kong's side comes round.
@@ -2234,24 +2228,45 @@ public final class BottomScreenView extends View {
                 iconKong = flip < 0.5f ? flipFromKong : kong;
                 c.scale(Math.max(Math.abs(sx), 0.04f), 1f + 0.12f * (float) Math.sin(Math.PI * flip), iconX, iconY);
             }
+            Bitmap still;
+            switch (move) {
+                case WEAPON: still = RomIcons.of(RomIcons.weapon, iconKong); break;
+                case ORANGE: still = RomIcons.orange; break;
+                case INSTRUMENT: still = RomIcons.of(RomIcons.instrument, iconKong); break;
+                default: still = RomIcons.film; break;
+            }
+            Bitmap shown = still;
+            if (spinMove >= 0) {
+                float pop = 1f + 0.18f * (float) Math.sin(Math.PI * spinMove);
+                if (state.inGame()) {
+                    RomIcons.ensureAnimations();
+                }
+                if (RomIcons.hasAnimation(still)) {
+                    shown = RomIcons.spin(still, spinMove);
+                    c.scale(pop, pop, iconX, iconY);
+                } else {
+                    float sx = (float) Math.cos(2 * Math.PI * spinMove);
+                    c.scale(Math.abs(sx) < 0.08f ? 0.08f : sx * pop, pop, iconX, iconY);
+                }
+            }
             switch (move) {
                 case WEAPON:
-                    if (!RomIcons.draw(c, RomIcons.of(RomIcons.weapon, iconKong), iconX, iconY, iconR)) {
+                    if (!RomIcons.draw(c, shown, iconX, iconY, iconR)) {
                         DkIcons.weapon(c, iconKong, iconX, iconY, iconR);
                     }
                     break;
                 case ORANGE:
-                    if (!RomIcons.draw(c, RomIcons.orange, iconX, iconY, iconR)) {
+                    if (!RomIcons.draw(c, shown, iconX, iconY, iconR)) {
                         DkIcons.orange(c, iconX, iconY, iconR);
                     }
                     break;
                 case INSTRUMENT:
-                    if (!RomIcons.draw(c, RomIcons.of(RomIcons.instrument, iconKong), iconX, iconY, iconR)) {
+                    if (!RomIcons.draw(c, shown, iconX, iconY, iconR)) {
                         DkIcons.instrument(c, iconKong, iconX, iconY, iconR);
                     }
                     break;
                 default:
-                    if (!RomIcons.draw(c, RomIcons.film, iconX, iconY, iconR)) {
+                    if (!RomIcons.draw(c, shown, iconX, iconY, iconR)) {
                         DkIcons.camera(c, iconX, iconY, iconR);
                     }
                     break;
