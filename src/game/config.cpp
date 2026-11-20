@@ -652,8 +652,6 @@ static void add_dual_screen_options(recomp::config::Config &config) {
           "Hits land with weight: a small camera punch (Modern Camera) and a rumble.", 128 },
         { "android_fast_transitions", "Fast Transitions",
           "Fades to and from black through loading zones and doors are almost twice as fast.", 256 },
-        { "android_cutscene_fast_forward", "Fast-Forward Cutscenes",
-          "Hold B during a cutscene to play it at double speed.", 512 },
     };
     for (const auto &opt : game_feel_options) {
         config.add_enum_option(opt.id, opt.name, opt.desc, on_off_options, 1u);
@@ -997,7 +995,6 @@ void dk64::init_config() {
             option(d, "android_air_control"),
             option(d, "android_hit_feel"),
             option(d, "android_fast_transitions"),
-            option(d, "android_cutscene_fast_forward"),
             option(g, keys::swimming_invert_mode),
             option(d, "android_button_icons"),
             header("Touch"),
@@ -1254,7 +1251,7 @@ extern "C" void dk64_android_apply_experience(int modern) {
     dual.update_option_value("android_smooth_running", static_cast<uint32_t>(modern ? 1u : 0u));
     dual.update_option_value("android_movement_polish", static_cast<uint32_t>(modern ? 1u : 0u));
     for (const char *id : { "android_ledge_grab", "android_move_chaining", "android_air_control",
-                            "android_hit_feel", "android_fast_transitions", "android_cutscene_fast_forward" }) {
+                            "android_hit_feel", "android_fast_transitions" }) {
         dual.update_option_value(id, static_cast<uint32_t>(modern ? 1u : 0u));
     }
     dual.save_config();
