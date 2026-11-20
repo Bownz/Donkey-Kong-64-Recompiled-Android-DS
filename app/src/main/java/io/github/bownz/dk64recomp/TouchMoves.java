@@ -202,12 +202,24 @@ final class TouchMoves {
             return;
         }
 
+        if (move == Move.WEAPON && state.firstPerson && (GameState.gameFeel() & GameState.FEEL_FP_WALK) != 0) {
+            // Walk in First Person: the gun comes out (or goes away) without leaving first person:
+            // C-Left on its own, which the game patch turns into the gun's draw / put away there.
+            TouchInput.setN64Buttons(TouchInput.N64_C_LEFT);
+            handler.postDelayed(() -> {
+                TouchInput.setN64Buttons(0);
+                running = null;
+                notifyListeners();
+            }, C_HOLD_MS);
+            return;
+        }
+
         final int z = TouchInput.N64_Z;
         // From first person (either way round with the gun): leave first person first (C-Up),
         // then Z + C-Left as usual, so the view doesn't stay in first person without the gun.
         // Pulling the gun out from first person goes back into first person (aiming) after.
         final long lead = (move == Move.WEAPON && state.firstPerson) ? C_HOLD_MS + 250 : 0;
-        final boolean backToFirstPerson = move == Move.WEAPON && state.firstPerson && !state.gunOut;
+        final boolean backToFirstPerson = false;
         if (lead > 0) {
             TouchInput.setN64Buttons(TouchInput.N64_C_UP);
             handler.postDelayed(() -> TouchInput.setN64Buttons(0), C_HOLD_MS);

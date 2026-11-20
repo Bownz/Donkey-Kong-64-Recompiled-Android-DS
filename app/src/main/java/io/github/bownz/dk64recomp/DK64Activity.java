@@ -114,6 +114,9 @@ public class DK64Activity extends SDLActivity
             mLayout.addView(overlay, new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
             addFpsCounter();
+            // Walk in First Person's button prompts (bottom right, over the game).
+            mLayout.addView(new FirstPersonPromptView(this), new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         }
     }
 

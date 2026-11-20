@@ -178,6 +178,34 @@ final class GameState {
         }
     }
 
+    private static native int nativeGameFeel();
+    private static native String nativeButtonGlyphs();
+
+    /** Game feel option flags (Input): 2048 = Walk in First Person. */
+    static final int FEEL_FP_WALK = 2048;
+
+    static int gameFeel() {
+        try {
+            return nativeGameFeel();
+        } catch (UnsatisfiedLinkError e) {
+            return 0;
+        }
+    }
+
+    /**
+     * The controller buttons that press N64 B and N64 R (PromptFont glyphs; "" when not bound),
+     * as {B, R}.
+     */
+    static String[] buttonGlyphs() {
+        try {
+            String s = nativeButtonGlyphs();
+            String[] parts = (s == null ? "\n" : s).split("\n", -1);
+            return new String[] { parts.length > 0 ? parts[0] : "", parts.length > 1 ? parts[1] : "" };
+        } catch (UnsatisfiedLinkError e) {
+            return new String[] { "", "" };
+        }
+    }
+
     static int bottomButtonsMode() {
         try {
             return nativeBottomButtonsMode();

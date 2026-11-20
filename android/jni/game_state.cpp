@@ -758,3 +758,31 @@ Java_io_github_bownz_dk64recomp_GameState_nativeFontMetrics(JNIEnv* env, jclass,
     env->SetByteArrayRegion(out, 0, kCount, bytes);
     return JNI_TRUE;
 }
+
+// ---- Walk in First Person: button prompts -------------------------------------------------
+// The game feel option flags (touch_controller.cpp), for the app's first person prompts.
+extern "C" JNIEXPORT jint JNICALL
+Java_io_github_bownz_dk64recomp_GameState_nativeGameFeel(JNIEnv*, jclass) {
+    return dk64::android::game_feel_flags();
+}
+
+#include "recompinput/profiles.h"
+
+// The controller buttons (PromptFont glyphs, as the controls menu shows them) that press N64 B
+// and N64 R for player 1, "B-glyph\nR-glyph"; an empty line for one that isn't bound.
+extern "C" JNIEXPORT jstring JNICALL
+Java_io_github_bownz_dk64recomp_GameState_nativeButtonGlyphs(JNIEnv* env, jclass) {
+    std::string out;
+    const int profile = recompinput::profiles::get_input_profile_for_player(0, recompinput::InputDevice::Controller);
+    for (recompinput::GameInput input : { recompinput::GameInput::B, recompinput::GameInput::R }) {
+        std::string glyph;
+        if (profile >= 0) {
+            for (size_t i = 0; i < recompinput::num_bindings_per_input && glyph.empty(); i++) {
+                glyph = recompinput::profiles::get_input_binding(profile, input, i).to_string();
+            }
+        }
+        out += glyph;
+        out += '\n';
+    }
+    return env->NewStringUTF(out.c_str());
+}

@@ -1025,6 +1025,9 @@ static f32 fp_walk_bob = 0.0f;     // 0..1: how much bob (eases in while walking
 static u8 fp_walked = FALSE;       // walked this frame
 
 static f32 fp_vy = 0.0f;     // jumping in first person: the Kong's upward speed
+static s32 fp_anim_before = 0;   // the Kong's animation before a first person jump
+void playActorAnimation(Actor *arg0, s32 arg1);
+void playAnimation(Actor *arg0, s32 arg1);
 static u8 fp_air = FALSE;
 
 // First person states: 2-5 (looking), 0x62 (aiming the gun).
@@ -1032,39 +1035,33 @@ static u8 fp_state(s32 state) {
     return ((state >= 2) && (state <= 5)) || (state == 0x62);
 }
 
-// Walk in First Person: button prompts in the bottom right ("B Exit", and "ZR Shoot" above it
-// with the gun out), drawn with the game's own small text.
-Gfx *alignHUD(Gfx *dl, u8 alignment);
-Gfx *popHUD(Gfx *dl, u8 alignment);
-Gfx *printStyledText(Gfx *dl, s16 style, s16 x, s16 y, u8 *string, u32 extraBitfield);
-void addActorToTextOverlayRenderArray(void *arg0, void *arg1, u8 arg2);
-extern Gfx **D_1000118;
-extern Mtx D_2000180;
-extern Mtx D_20000C0;
+// The height of the Kong's own jump (from its normal jumps, Kong state 0x17: the highest point
+// above where it took off), per Kong, so a jump in first person goes as high. 45 until seen.
+static f32 fp_jump_height[8] = { 45.0f, 45.0f, 45.0f, 45.0f, 45.0f, 45.0f, 45.0f, 45.0f };
+
+static void fp_track_jump_height_any(Actor *kong) {
+    static s32 lastState = -1;
+    static f32 takeoff = 0.0f, top = 0.0f;
+    s32 k = current_character_index[0] & 7;
+    if ((kong->control_state == 0x17) && (lastState != 0x17)) {
+        takeoff = kong->y_position;
+        top = kong->y_position;
+    } else if (kong->control_state == 0x17) {
+        if (kong->y_position > top) {
+            top = kong->y_position;
+        }
+    } else if (lastState == 0x17) {
+        f32 h = top - takeoff;
+        if ((h > 15.0f) && (h < 150.0f)) {
+            fp_jump_height[k] = h;
+        }
+    }
+    lastState = kong->control_state;
+}
 
 static u8 fp_gun_out(void) {
     return (gCurrentPlayer != NULL) && ((gCurrentPlayer->control_state == 0x62) ||
         ((gCurrentPlayer->PaaD != NULL) && (gCurrentPlayer->PaaD->unk8C != 0)));
-}
-
-static Gfx *fp_draw_prompts(Gfx *dl, Actor *unused) {
-    gSPDisplayList(dl++, &D_1000118);
-    gDPSetCombineMode(dl++, G_CC_MODULATEIA_PRIM, G_CC_MODULATEIA_PRIM);
-    gSPMatrix(dl++, &D_2000180, G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_MODELVIEW);
-    gSPMatrix(dl++, &D_20000C0, G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION);
-    gDPPipeSync(dl++);
-    dl = alignHUD(dl, ALIGN_RIGHT);
-    gDPSetPrimColor(dl++, 0, 0, 0xFF, 0xFF, 0xFF, 0xD0);
-    if (fp_gun_out()) {
-        dl = printStyledText(dl, 6, (320 - 12 - (8 * 8)) * 4, 204 * 4, (u8 *)"ZR SHOOT", 1);
-    }
-    dl = printStyledText(dl, 6, (320 - 12 - (6 * 8)) * 4, 218 * 4, (u8 *)"B EXIT", 1);
-    dl = popHUD(dl, ALIGN_RIGHT);
-    return dl;
-}
-
-static void fp_prompts(void) {
-    addActorToTextOverlayRenderArray(fp_draw_prompts, NULL, 5);
 }
 
 // Walk in First Person: the game's first person view stays where it was entered, so as the Kong
@@ -1072,12 +1069,22 @@ static void fp_prompts(void) {
 // person began (so the Kong stays out of sight), looking the way the game says, with a slight
 // step bob (0.8 units up and down per step, easing in and out).
 static u8 fp_view_valid = FALSE;
+static u8 fp_was_fp = FALSE;
 static f32 fp_eye_off[3];
 
 static void first_person_view(Actor *target, f32 *eyeX, f32 *eyeY, f32 *eyeZ, f32 *atX, f32 *atY, f32 *atZ) {
     f32 lx, ly, lz, bob;
-    u8 fp = (target != NULL) && (target == gCurrentPlayer) && fp_state(target->control_state) &&
+    u8 fp;
+    if ((target != NULL) && (target == gCurrentPlayer)) {
+        fp_track_jump_height_any(target);
+    }
+    fp = (target != NULL) && (target == gCurrentPlayer) && fp_state(target->control_state) &&
         (recomp_get_game_feel() & FP_WALK);
+    if (fp && !fp_was_fp) {
+        target->unkB8 = 0.0f;   // stepping into first person while moving: stop, so the view
+                                // settles in the Kong's head instead of the Kong sliding on
+    }
+    fp_was_fp = fp;
     if (!fp) {
         fp_view_valid = FALSE;
         fp_walk_bob = 0.0f;
@@ -1085,7 +1092,6 @@ static void first_person_view(Actor *target, f32 *eyeX, f32 *eyeY, f32 *eyeZ, f3
         fp_vy = 0.0f;
         return;
     }
-    fp_prompts();
     // Until the Kong first moves, the game's own view is used (it zooms in to the Kong's head
     // as first person starts), and where its eye sits on the Kong is kept up to date.
     if (!fp_view_valid) {
@@ -2115,8 +2121,14 @@ static void first_person_walk(s32 lx, s32 ly, u8 jump) {
     // A jumps: a short hop (up about 45 units, like a normal jump), landing on whatever's below,
     // including a ledge you've hopped up onto.
     if (jump && !fp_air) {
-        fp_vy = 7.5f;
+        // As high as the Kong's own jump (v = sqrt(2 g h)), with its jump sound: the jump
+        // animation (which plays it) on the hidden Kong, the first person one back on landing.
+        fp_vy = _sqrtf(2.0f * 0.65f * fp_jump_height[current_character_index[0] & 7]);
         fp_air = TRUE;
+        if (kong->animation_state != NULL) {
+            fp_anim_before = kong->animation_state->unk64;
+            playAnimation(kong, 0x10);
+        }
     }
     if (fp_air) {
         kong->y_position += fp_vy;
@@ -2128,6 +2140,10 @@ static void first_person_walk(s32 lx, s32 ly, u8 jump) {
             fp_air = FALSE;
             fp_vy = 0.0f;
             recomp_haptic_pulse(0.12f, 35);
+            if ((fp_anim_before != 0) && (kong->animation_state != NULL)) {
+                playActorAnimation(kong, fp_anim_before);
+            }
+            fp_anim_before = 0;
         }
         fp_walked = TRUE;   // keep the view with the Kong
     }
@@ -2177,6 +2193,9 @@ static void first_person_walk(s32 lx, s32 ly, u8 jump) {
     kong->y_position = floorY;
 }
 
+void func_global_asm_806DF44C(Actor *arg0, PlayerAdditionalActorData *arg1, u8 arg2);
+void func_global_asm_806E225C(u8 arg0, u8 arg1);
+
 // @recomp: First person controls
 RECOMP_PATCH void func_global_asm_806EA628(void) {
     PlayerAdditionalActorData *temp_a0;
@@ -2208,6 +2227,16 @@ RECOMP_PATCH void func_global_asm_806EA628(void) {
             }
         }
         if (walk) {
+            // The gun, without leaving first person: the bottom screen's gun button (C-Left,
+            // let through while it's pressing it) takes it out or puts it away, as the game does
+            // (func_global_asm_806DF44C: the animation, on the hidden Kong); with it out, ZR
+            // (B by now) shoots, as aiming does (func_global_asm_806E225C).
+            u16 pressed = D_global_asm_807FD610[cc_player_index].unk2C;
+            if ((pressed & L_CBUTTONS) && (feel & 4096)) {
+                func_global_asm_806DF44C(gCurrentActorPointer, extra_player_info_pointer, 0);
+            } else if ((pressed & B_BUTTON) && fp_gun_out()) {
+                func_global_asm_806E225C(1, 0);
+            }
             first_person_walk(D_global_asm_807FD610[cc_player_index].unk2E, D_global_asm_807FD610[cc_player_index].unk2F,
                 (D_global_asm_807FD610[cc_player_index].unk2C & A_BUTTON) != 0);
         }
