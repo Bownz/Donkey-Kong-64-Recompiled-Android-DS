@@ -495,6 +495,7 @@ static u8 mc_eye_valid = FALSE;
 static f32 mc_vine_offset = 0.0f;     // vines: your turn from the game's vine view
 static f32 mc_vine_hoff = 0.0f;       // vines: your height change from the game's vine view
 static u8 mc_on_vine = FALSE;
+static s32 mc_vine_base_yaw = -1;   // the game's own vine view angle (-1: not on a vine)
 static f32 mc_vine_blend = 0.0f;      // 0 = our usual view, 1 = the game's vine view
 
 static f32 mc_weight = 0.0f;        // 0 = the game's camera, 1 = the Modern Camera
@@ -754,7 +755,14 @@ static void modern_camera_input(Actor *camera, CameraPaad *CaaD, s32 touchMoved,
 
     // The game's own camera state follows ours (the Kong's movement is relative to it, and the
     // game starts from it again when it takes over).
-    CaaD->unkB2 = ((s32)mc_yaw) & 0xFFF;
+    // On a vine the game places its own vine view from this angle, so it gets the game's own
+    // vine angle back (without your vine turn, which is added on top in modern_camera_frame):
+    // giving it the turned angle made the turn add up every frame, and the view spun.
+    if (mc_on_vine && (mc_vine_base_yaw >= 0)) {
+        CaaD->unkB2 = mc_vine_base_yaw & 0xFFF;
+    } else {
+        CaaD->unkB2 = ((s32)mc_yaw) & 0xFFF;
+    }
     CaaD->unkB0 = 0;
 }
 
@@ -1161,7 +1169,8 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
         f32 gx = *eyeX - *atX;
         f32 gz = *eyeZ - *atZ;
         f32 gDist = _sqrtf((gx * gx) + (gz * gz));
-        s32 vineYaw = (func_global_asm_80665DE0(*atX, *atZ, *eyeX, *eyeZ) + (s32)mc_vine_offset) & 0xFFF;
+        s32 baseYaw = func_global_asm_80665DE0(*atX, *atZ, *eyeX, *eyeZ) & 0xFFF;
+        s32 vineYaw = (baseYaw + (s32)mc_vine_offset) & 0xFFF;
         f32 vx, vz, b;
         mc_direction_with(mc_convention, vineYaw, &vx, &vz);
         mc_vine_blend += (1.0f - mc_vine_blend) * 0.12f;
@@ -1174,8 +1183,10 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
         mc_focus_z += (*atZ - mc_focus_z) * b;
         distance += (gDist - distance) * b;
         mc_yaw = (f32)vineYaw;   // letting go carries on from the vine view
+        mc_vine_base_yaw = baseYaw;   // the game's own vine angle this frame (given back to it)
     } else {
         mc_vine_blend = 0.0f;
+        mc_vine_base_yaw = -1;
     }
 
     // Traced from the Kong's head out (not from the focus, which can trail inside a ledge just
