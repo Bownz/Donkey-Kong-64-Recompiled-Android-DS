@@ -625,7 +625,7 @@ extern "C" void recomp_get_game_feel(uint8_t* rdram, recomp_context* ctx) {
 #if defined(__ANDROID__)
     _return<int32_t>(ctx, dk64::android::game_feel_flags());
 #else
-    _return<int32_t>(ctx, 15 | 16 | 32 | 64 | 128 | 256);
+    _return<int32_t>(ctx, 15 | 16 | 32 | 64 | 128 | 256 | 1024 | 2048);
 #endif
 }
 

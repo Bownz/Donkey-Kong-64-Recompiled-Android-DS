@@ -1978,6 +1978,54 @@ void getStickPosition(s32 *x, s32 *y) {
     *y = invertAxis(*y, dGyroY, dMouseY, !invY, !invGyroY, !invMouseY);
 }
 
+// @recomp (Android): Walk in First Person: the left stick moves the Kong (forward/back along
+// the view, sideways to strafe) at a walk, with the level's walls and floors respected: it
+// won't walk into a wall, or step up or down more than a small step (no walking off ledges).
+#define FP_RIGHT_STICK_LOOK 1024
+#define FP_WALK 2048
+
+static void first_person_walk(s32 lx, s32 ly) {
+    Actor *kong = gCurrentActorPointer;
+    f32 mx, my, mag, fx, fz, rxv, rzv, nx, nz, floorY;
+    s16 hitA = 0, hitB = 0xFFF;
+    s32 facing;
+    if ((kong == NULL) || !mc_ready()) {
+        return;
+    }
+    mx = (f32)lx / 80.0f;
+    my = (f32)ly / 80.0f;
+    if ((mx < 0.15f) && (mx > -0.15f)) {
+        mx = 0.0f;
+    }
+    if ((my < 0.15f) && (my > -0.15f)) {
+        my = 0.0f;
+    }
+    mag = _sqrtf((mx * mx) + (my * my));
+    if (mag < 0.01f) {
+        return;
+    }
+    if (mag > 1.0f) {
+        mx /= mag;
+        my /= mag;
+    }
+    facing = kong->y_rotation & 0xFFF;
+    mc_direction_with(mc_convention, (facing + 0x800) & 0xFFF, &fx, &fz);    // ahead
+    mc_direction_with(mc_convention, (facing + 0x400) & 0xFFF, &rxv, &rzv);  // to the right
+    nx = kong->x_position + (((fx * my) + (rxv * mx)) * 3.5f);
+    nz = kong->z_position + (((fz * my) + (rzv * mx)) * 3.5f);
+    if (func_global_asm_80671E00(nx, kong->y_position + 12.0f, nz, 8.0f, &hitA, &hitB, 1U, 0xBCU) != 0) {
+        return;   // a wall
+    }
+    floorY = kong->y_position + 18.0f;
+    if (!func_global_asm_80667110(nx, nz, &floorY) || (floorY > kong->y_position + 18.0f) ||
+        (floorY < kong->y_position - 18.0f)) {
+        return;   // no floor there, or too big a step
+    }
+    kong->x_position = nx;
+    kong->z_position = nz;
+    kong->y_position = floorY;
+}
+
 // @recomp: First person controls
 RECOMP_PATCH void func_global_asm_806EA628(void) {
     PlayerAdditionalActorData *temp_a0;
@@ -1987,8 +2035,30 @@ RECOMP_PATCH void func_global_asm_806EA628(void) {
     s32 stick_x, stick_y;
 
     if (!(extra_player_info_pointer->unk1F0 & 0x8000)) {
+        s32 feel = recomp_get_game_feel();
+        u8 walk = (feel & FP_WALK) != 0;
         stick_x = D_global_asm_807FD610[cc_player_index].unk2E;
         stick_y = D_global_asm_807FD610[cc_player_index].unk2F;
+        // @recomp (Android): First Person Right Stick Looks (and Walk in First Person, which
+        // needs the left stick for walking): look with the right stick, scaled to the N64
+        // stick's range. Without walking, the left stick still looks too.
+        if ((feel & FP_RIGHT_STICK_LOOK) || walk) {
+            f32 rx, ry;
+            s32 lx = walk ? 0 : stick_x;
+            s32 ly = walk ? 0 : stick_y;
+            recomp_get_right_analog_inputs(&rx, &ry);
+            rx = recomp_apply_per_axis_deadzone(rx);
+            ry = recomp_apply_per_axis_deadzone(ry);
+            stick_x = (s32)(rx * 80.0f);
+            stick_y = (s32)(-ry * 80.0f);
+            if ((stick_x == 0) && (stick_y == 0)) {
+                stick_x = lx;
+                stick_y = ly;
+            }
+        }
+        if (walk) {
+            first_person_walk(D_global_asm_807FD610[cc_player_index].unk2E, D_global_asm_807FD610[cc_player_index].unk2F);
+        }
         getStickPosition(&stick_x, &stick_y);
         temp_a0 = extra_player_info_pointer->unk104->additional_actor_data;
         temp_v1 = &temp_a0->unkB2;

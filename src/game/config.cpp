@@ -652,6 +652,12 @@ static void add_dual_screen_options(recomp::config::Config &config) {
           "Hits land with weight: a small camera punch (Modern Camera) and a rumble.", 128 },
         { "android_fast_transitions", "Fast Transitions",
           "Fades to and from black through loading zones and doors are almost twice as fast.", 256 },
+        { "android_fp_right_stick", "First Person: Right Stick Looks",
+          "In first person view (C-Up), look around with the right stick (the left stick still looks too, "
+          "unless Walk in First Person is on).", 1024 },
+        { "android_fp_walk", "First Person: Walk",
+          "In first person view, walk with the left stick (forward, back and sideways) and look with the "
+          "right stick. Walls and ledges stop you.", 2048 },
     };
     for (const auto &opt : game_feel_options) {
         config.add_enum_option(opt.id, opt.name, opt.desc, on_off_options, 1u);
@@ -995,6 +1001,8 @@ void dk64::init_config() {
             option(d, "android_air_control"),
             option(d, "android_hit_feel"),
             option(d, "android_fast_transitions"),
+            option(d, "android_fp_right_stick"),
+            option(d, "android_fp_walk"),
             option(g, keys::swimming_invert_mode),
             option(d, "android_button_icons"),
             header("Touch"),
@@ -1251,7 +1259,8 @@ extern "C" void dk64_android_apply_experience(int modern) {
     dual.update_option_value("android_smooth_running", static_cast<uint32_t>(modern ? 1u : 0u));
     dual.update_option_value("android_movement_polish", static_cast<uint32_t>(modern ? 1u : 0u));
     for (const char *id : { "android_ledge_grab", "android_move_chaining", "android_air_control",
-                            "android_hit_feel", "android_fast_transitions" }) {
+                            "android_hit_feel", "android_fast_transitions",
+                            "android_fp_right_stick", "android_fp_walk" }) {
         dual.update_option_value(id, static_cast<uint32_t>(modern ? 1u : 0u));
     }
     dual.save_config();
