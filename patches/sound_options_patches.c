@@ -1245,10 +1245,23 @@ static u8 fp_camera(Actor *target, f32 *eyeX, f32 *eyeY, f32 *eyeZ, f32 *atX, f3
     mc_direction_with(mc_convention, (((s32)fp_yaw) + 0x800) & 0xFFF, &fx, &fz);   // ahead
     sp = func_global_asm_80612794((s16)(((s32)fp_pitch) & 0xFFF));
     cp = func_global_asm_80612790((s16)(((s32)fp_pitch) & 0xFFF));
-    // A little in front of the face, so nothing of the Kong is in the way.
-    *eyeX = target->x_position + (fx * 6.0f);
-    *eyeY = target->y_position + eyeH;
-    *eyeZ = target->z_position + (fz * 6.0f);
+    // A little in front of the face, so nothing of the Kong is in the way; up close to a wall,
+    // back into (and behind) the Kong as far as needed so the view doesn't poke through it (the
+    // wall test round the eye, as wide as the view's near edge, smoothed so it doesn't jump).
+    {
+        static f32 fwd = 6.0f;
+        f32 want = 6.0f;
+        s16 hitA = 0, hitB = 0xFFF;
+        while ((want > -14.0f) &&
+            (func_global_asm_80671E00(target->x_position + (fx * want), target->y_position + eyeH,
+                target->z_position + (fz * want), 10.0f, &hitA, &hitB, 1U, 0xBCU) != 0)) {
+            want -= 4.0f;
+        }
+        fwd += (want - fwd) * ((want < fwd) ? 0.6f : 0.2f);
+        *eyeX = target->x_position + (fx * fwd);
+        *eyeY = target->y_position + eyeH;
+        *eyeZ = target->z_position + (fz * fwd);
+    }
     *atX = *eyeX + (fx * cp * 100.0f);
     *atY = *eyeY + (sp * 100.0f);
     *atZ = *eyeZ + (fz * cp * 100.0f);
