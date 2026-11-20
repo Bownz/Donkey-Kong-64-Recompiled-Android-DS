@@ -777,6 +777,11 @@ static void modern_camera_input(Actor *camera, CameraPaad *CaaD, s32 touchMoved,
         } else {
             mc_height = mc_clamp(mc_height + tilt, -150.0f, 200.0f);
         }
+        // In a camera zone (a tunnel...), the height itself can't build up past the zone's limit
+        // (otherwise, holding up, it would jump up as soon as the limit let go).
+        if ((mc_tight > 0.5f) && (mc_height > mc_zone_height)) {
+            mc_height = mc_zone_height;
+        }
     }
 
     // The game's own camera state follows ours (the Kong's movement is relative to it, and the
@@ -895,16 +900,82 @@ static void mc_zone_preset(CameraPaad *AAD) {
     mc_zone_distance = mc_clamp((f32)D_global_asm_80747B60[mode][1].distance, 50.0f, 160.0f);
 }
 
-static void mc_update_tight(CameraPaad *AAD) {
+// The game decides the zone from where its camera is, and the camera is ours: turned so it
+// pokes out of the tunnel, it would leave the zone, the limits would let go, and it would rise
+// through the ceiling. So a zone is held while the Kong stays near where it was last in one
+// (within 80 units); it ends when the Kong walks out.
+static f32 mc_zone_x = 0.0f, mc_zone_z = 0.0f;
+static f32 camera_y_for_log = 0.0f;   // the camera's height last frame, for the log
+static u8 mc_zone_held = FALSE;
+
+// Where on this map the game has had its camera in a zone (the Kong's position then, one point
+// per 40 units): coming back to a tunnel, the zone's limits apply as soon as the Kong walks in,
+// even if the camera is still up above the tunnel and hasn't entered the zone itself.
+#define MC_ZONE_POINTS 160
+static f32 mc_zone_pts[MC_ZONE_POINTS][3];
+static s32 mc_zone_pt_count = 0, mc_zone_pt_next = 0, mc_zone_pt_map = -1;
+
+static u8 mc_near_zone_point(Actor *target, f32 radius, u8 add) {
+    s32 i;
+    if (mc_zone_pt_map != current_map) {
+        mc_zone_pt_map = current_map;
+        mc_zone_pt_count = 0;
+        mc_zone_pt_next = 0;
+    }
+    for (i = 0; i < mc_zone_pt_count; i++) {
+        f32 dx = target->x_position - mc_zone_pts[i][0];
+        f32 dy = target->y_position - mc_zone_pts[i][1];
+        f32 dz = target->z_position - mc_zone_pts[i][2];
+        if ((((dx * dx) + (dz * dz)) < (radius * radius)) && (dy < 30.0f) && (dy > -30.0f)) {
+            return TRUE;
+        }
+    }
+    if (add) {
+        mc_zone_pts[mc_zone_pt_next][0] = target->x_position;
+        mc_zone_pts[mc_zone_pt_next][1] = target->y_position;
+        mc_zone_pts[mc_zone_pt_next][2] = target->z_position;
+        mc_zone_pt_next = (mc_zone_pt_next + 1) % MC_ZONE_POINTS;
+        if (mc_zone_pt_count < MC_ZONE_POINTS) {
+            mc_zone_pt_count++;
+        }
+    }
+    return FALSE;
+}
+
+static void mc_update_tight(CameraPaad *AAD, Actor *target) {
+    static s32 rawLogged = -1;
     u8 zone = mc_in_zone(AAD);
+    if ((s32)zone != rawLogged) {
+        rawLogged = zone;
+        recomp_printf("Modern Camera: game zone flag %s (zone %d, camera %d above the Kong)\n", zone ? "on" : "off",
+            AAD->unk8, (s32)(camera_y_for_log - target->y_position));
+    }
+    if (zone) {
+        mc_near_zone_point(target, 40.0f, TRUE);
+    } else if (mc_near_zone_point(target, 30.0f, FALSE)) {
+        zone = TRUE;   // a remembered zone spot
+    }
     if (zone) {
         mc_zone_preset(AAD);
+        mc_zone_x = target->x_position;
+        mc_zone_z = target->z_position;
+        mc_zone_held = TRUE;
+    } else if (mc_zone_held) {
+        f32 dx = target->x_position - mc_zone_x;
+        f32 dz = target->z_position - mc_zone_z;
+        if (((dx * dx) + (dz * dz)) > (80.0f * 80.0f)) {
+            mc_zone_held = FALSE;
+        } else {
+            zone = TRUE;
+        }
     }
-    mc_tight += ((zone ? 1.0f : 0.0f) - mc_tight) * 0.08f;
+    // Eases in quickly (it has to get under the ceiling), out gently.
+    mc_tight += ((zone ? 1.0f : 0.0f) - mc_tight) * (zone ? 0.2f : 0.08f);
     if ((s32)zone != mc_zone_logged) {
         mc_zone_logged = zone;
-        recomp_printf("Modern Camera: camera zone %s (map 0x%02X, zone %d, close preset height %d distance %d)\n",
-            zone ? "on" : "off", current_map, AAD->unk8, (s32)mc_zone_height, (s32)mc_zone_distance);
+        recomp_printf("Modern Camera: camera zone %s (map 0x%02X, zone %d%s, close preset height %d distance %d)\n",
+            zone ? "on" : "off", current_map, AAD->unk8, (zone && !mc_in_zone(AAD)) ? ", held" : "",
+            (s32)mc_zone_height, (s32)mc_zone_distance);
     }
 }
 
@@ -1126,7 +1197,7 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
     if (mc_on_vine) {
         mc_tight += (0.0f - mc_tight) * 0.08f;
     } else {
-        mc_update_tight(AAD);
+        mc_update_tight(AAD, target);
     }
     // Running feel (Odyssey-like, all eased):
     //  - at speed the camera pulls out a little (up to 8%) and comes back in as you slow;
@@ -1396,6 +1467,7 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
     if ((w >= 0.99f) && ((target->control_state == 0x0C) || (target->control_state == 0x0D))) {
         camera->z_rotation = 0;
     }
+    camera_y_for_log = *eyeY;
     if ((w >= 0.99f) && !mc_vine_state(target)) {   // (on a vine, the game's own state is left alone)
         camera->position.f[0] = *eyeX;
         camera->position.f[1] = *eyeY;
