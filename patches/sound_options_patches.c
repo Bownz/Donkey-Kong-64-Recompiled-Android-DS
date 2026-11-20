@@ -821,7 +821,6 @@ static void mc_fade(f32 distance) {
 // game's own camera there; it eases in and out (mc_tight).
 static f32 mc_tight = 0.0f;
 static f32 mc_run_tilt = 0.0f;    // height change running up or down slopes
-static f32 mc_water_dip = 0.0f;   // the view's dip on diving in
 static u8 mc_tight_pairs = 0;     // bit per direction: walls both ways
 static u8 mc_tight_dir = 0;
 static u8 mc_tight_logged = FALSE;
@@ -1102,8 +1101,7 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
     // Running feel (Odyssey-like, all eased):
     //  - at speed the camera pulls out a little (up to 8%) and comes back in as you slow;
     //  - running downhill it rises a little (up to 25) to show the way down; uphill it drops a
-    //    little (up to 12) to look up the slope;
-    //  - diving into water, the view dips briefly and settles (mc_water_dip, below).
+    //    little (up to 12) to look up the slope.
     {
         static f32 pull = 0.0f, tilt = 0.0f, slope = 0.0f, lastFloor = 0.0f, lastX = 0.0f, lastZ = 0.0f;
         f32 wantPull = 0.0f, wantTilt = 0.0f;
@@ -1329,18 +1327,6 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
     camY = mc_eye_y;
     camZ = mc_eye_z;
 
-    // Diving into water: a short dip of the view (eye and focus) that settles over ~half a second.
-    {
-        static u8 wasInWater = FALSE;
-        u8 inWater = ((target->unk6A & 2) != 0) && (kongY < target->unkAC);
-        if (inWater && !wasInWater && mc_eye_valid) {
-            mc_water_dip = -22.0f;
-        }
-        wasInWater = inWater;
-        mc_water_dip *= 0.88f;
-        camY += mc_water_dip;
-    }
-
     // Blended with the game's camera while handing over.
     w = mc_weight;
     *eyeX += (camX - *eyeX) * w;
@@ -1349,7 +1335,6 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
     *atX += (mc_focus_x - *atX) * w;
     *atY += (mc_focus_y - *atY) * w;
     *atZ += (mc_focus_z - *atZ) * w;
-    *atY += mc_water_dip * 0.6f * w;
     // The game rolls its camera with the Kong; the Kong's lean into turns (game_feel_patches.c)
     // shouldn't roll the view.
     if ((w >= 0.99f) && ((target->control_state == 0x0C) || (target->control_state == 0x0D))) {
