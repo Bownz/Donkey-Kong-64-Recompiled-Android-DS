@@ -1538,8 +1538,10 @@ static void modern_camera_frame_inner(Actor *camera, CameraPaad *AAD, f32 *eyeX,
         mc_frame_y = mc_ground_y;
         mc_frame_speed = 0.0f;
     } else if ((target->control_state == 0x59) || (target->control_state == 0x5A)) {
-        // Climbing a tree or pole: follow the climb gently, not each pull up the trunk.
-        mc_frame_y += (mc_ground_y - mc_frame_y) * 0.06f;
+        // Climbing a tree or pole: follow the climb smoothly (not each pull up the trunk), but
+        // never more than 20 units behind, so a fast climb doesn't leave the view.
+        mc_frame_y += (mc_ground_y - mc_frame_y) * 0.2f;
+        mc_frame_y = mc_clamp(mc_frame_y, mc_ground_y - 20.0f, mc_ground_y + 20.0f);
         mc_frame_speed = 0.0f;
     } else if (modern_camera_free_state(target) || (mc_air_frames > 45)) {
         mc_frame_y += (mc_ground_y - mc_frame_y) * 0.3f;
@@ -1575,8 +1577,9 @@ static void modern_camera_frame_inner(Actor *camera, CameraPaad *AAD, f32 *eyeX,
     } else if ((target->control_state == 0x59) || (target->control_state == 0x5A)) {
         // Climbing: the Kong shifts round the trunk and bobs as it climbs; the view stays put
         // and only drifts after it, so it doesn't sway with every move.
+        // (Up and down it keeps up with the climb; round the trunk it drifts after the Kong.)
         mc_focus_x += (target->x_position - mc_focus_x) * 0.03f;
-        mc_focus_y += (wantY - mc_focus_y) * 0.06f;
+        mc_focus_y = wantY;   // already eased (mc_frame_y)
         mc_focus_z += (target->z_position - mc_focus_z) * 0.03f;
     } else if (mc_vine_state(target)) {
         mc_focus_x += (target->x_position - mc_focus_x) * 0.04f;
