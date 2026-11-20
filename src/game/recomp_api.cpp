@@ -639,6 +639,15 @@ extern "C" void recomp_report_rainbow_coin(uint8_t* rdram, recomp_context* ctx) 
 #endif
 }
 
+// The DK64 shortcut inputs held (1 Instrument, 2 Fairy Camera; Configure Inputs, Modern).
+extern "C" void recomp_get_extra_actions(uint8_t* rdram, recomp_context* ctx) {
+#if defined(__ANDROID__)
+    _return<int32_t>(ctx, dk64::android::extra_actions());
+#else
+    _return<int32_t>(ctx, 0);
+#endif
+}
+
 extern "C" void recomp_set_fp_status(uint8_t* rdram, recomp_context* ctx) {
 #if defined(__ANDROID__)
     dk64::android::set_fp_status(_arg<0, int32_t>(rdram, ctx));

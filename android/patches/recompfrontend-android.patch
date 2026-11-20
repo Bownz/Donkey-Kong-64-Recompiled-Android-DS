@@ -13,10 +13,29 @@ index 1961e29..8193aae 100644
      float get_input_analog(int controller_num, const InputField& field);
      float get_input_analog(int controller_num, const std::span<const InputField> fields);
 diff --git a/recompinput/include/recompinput/input_types.h b/recompinput/include/recompinput/input_types.h
-index f5ed6c0..1bff207 100644
+index f5ed6c0..b697ca0 100644
 --- a/recompinput/include/recompinput/input_types.h
 +++ b/recompinput/include/recompinput/input_types.h
-@@ -68,6 +68,13 @@ namespace recompinput {
+@@ -37,10 +37,17 @@ namespace recompinput {
+         DEFINE_INPUT(TAB_LEFT_MENU, 0, "Tab Left (Menu)") \
+         DEFINE_INPUT(TAB_RIGHT_MENU, 0, "Tab Right (Menu)")
+ 
++    // Android (DK64): single-button shortcuts for Z + C moves, bound in the Modern layout; the
++    // game turns them into Z, then Z + C (see dk64_android_report_extra_actions).
++    #define DEFINE_DK64_ACTION_INPUTS() \
++        DEFINE_INPUT(INSTRUMENT, 0, "Instrument") \
++        DEFINE_INPUT(FAIRY_CAMERA, 0, "Fairy Camera")
++
+     #define DEFINE_ALL_INPUTS() \
+         DEFINE_N64_AXIS_INPUTS() \
+         DEFINE_N64_BUTTON_INPUTS() \
+-        DEFINE_RECOMP_UI_INPUTS()
++        DEFINE_RECOMP_UI_INPUTS() \
++        DEFINE_DK64_ACTION_INPUTS()
+ 
+     #define DEFINE_INPUT(name, value, readable) name,
+     // - Enum containing every recomp input.
+@@ -68,6 +75,13 @@ namespace recompinput {
  
      
      // A single input. Combines the source of the input (see InputType) and a specific key/button/axis.
@@ -319,10 +338,10 @@ index c6786e6..73eda2e 100644
      default:
          return recompinput::unknown_device_input;
 diff --git a/recompinput/src/profiles.cpp b/recompinput/src/profiles.cpp
-index c89956e..75f2a3e 100644
+index c89956e..16dd4c9 100644
 --- a/recompinput/src/profiles.cpp
 +++ b/recompinput/src/profiles.cpp
-@@ -371,6 +371,18 @@ namespace recompinput {
+@@ -371,6 +371,20 @@ namespace recompinput {
          return "SERIAL_" + guid.serial + "_VID_" + std::to_string(guid.vendor) + "_PID_" + std::to_string(guid.product) +"_VERSION_" + std::to_string(guid.version) +"_CRC16_" + std::to_string(guid.crc16);
      }
  
@@ -333,6 +352,8 @@ index c89956e..75f2a3e 100644
 +    // Told player 1's own N64 buttons (from the controller/keyboard, before the on-screen
 +    // ones are added), e.g. so a toggle that holds Z can hand over to a real Z press.
 +    extern "C" void dk64_android_report_physical_n64_buttons(uint16_t buttons) __attribute__((weak));
++    // Told which of the DK64 shortcut inputs are held (1 Instrument, 2 Fairy Camera).
++    extern "C" void dk64_android_report_extra_actions(uint32_t actions) __attribute__((weak));
 +#endif
 +
 +    static bool menu_was_open[4] = {};
@@ -341,10 +362,25 @@ index c89956e..75f2a3e 100644
      bool profiles::get_n64_input(int player_index, uint16_t* buttons_out, float* x_out, float* y_out) {
          uint16_t cur_buttons = 0;
          float cur_x = 0.0f;
-@@ -402,9 +414,32 @@ namespace recompinput {
+@@ -401,10 +415,47 @@ namespace recompinput {
+             int profile_index_kb = players::is_single_player_mode() ? profiles::get_sp_keyboard_profile_index() : players_input_profile_indices[player_index].second;
              check_buttons(profile_index_cont);
              check_buttons(profile_index_kb);
- 
++#ifdef __ANDROID__
++            if (player_index == 0 && dk64_android_report_extra_actions != nullptr) {
++                uint32_t actions = 0;
++                for (int profile_index : { profile_index_cont, profile_index_kb }) {
++                    if (profile_index < 0) {
++                        continue;
++                    }
++                    const input_mapping_array &mappings = input_profiles[profile_index].mappings;
++                    actions |= recompinput::get_input_digital(player_index, mappings[(size_t)GameInput::INSTRUMENT]) ? 1u : 0u;
++                    actions |= recompinput::get_input_digital(player_index, mappings[(size_t)GameInput::FAIRY_CAMERA]) ? 2u : 0u;
++                }
++                dk64_android_report_extra_actions(actions);
++            }
++#endif
++
 +            // Buttons still held from a menu (e.g. A pressed on the menu bar's X to close it)
 +            // don't reach the game until they're let go, so it doesn't see a fresh press.
 +            if (player_index >= 0 && player_index < 4) {
@@ -355,7 +391,7 @@ index c89956e..75f2a3e 100644
 +                held_from_menu[player_index] &= cur_buttons;
 +                cur_buttons &= ~held_from_menu[player_index];
 +            }
-+
+ 
              check_joystick(profile_index_cont);
              recompinput::apply_joystick_deadzone(cur_x, cur_y, &cur_x, &cur_y);
              check_joystick(profile_index_kb);
@@ -1781,7 +1817,7 @@ index 0561657..06088b1 100644
  
      std::string_view get_type_name() override { return "ConfigOptionEnum"; }
 diff --git a/recompui/src/config/ui_config_page_controls.cpp b/recompui/src/config/ui_config_page_controls.cpp
-index f379a6f..8f856ce 100644
+index f379a6f..924d53d 100644
 --- a/recompui/src/config/ui_config_page_controls.cpp
 +++ b/recompui/src/config/ui_config_page_controls.cpp
 @@ -1,4 +1,5 @@
@@ -1836,7 +1872,7 @@ index f379a6f..8f856ce 100644
  void ConfigPageControls::create_game_input_contexts() {
      game_input_sections.n64.contexts.clear();
      game_input_sections.menu.contexts.clear();
-@@ -204,6 +230,37 @@ void ConfigPageControls::create_game_input_contexts() {
+@@ -204,6 +230,42 @@ void ConfigPageControls::create_game_input_contexts() {
              recompinput::get_game_input_clearable(input)
          };
  
@@ -1853,7 +1889,12 @@ index f379a6f..8f856ce 100644
 +                }
 +            }
 +            int group;
-+            if (recompinput::get_game_input_is_menu(input)) {
++            if (input == GI::INSTRUMENT || input == GI::FAIRY_CAMERA) {
++                if (!controls_show_actions()) {
++                    continue;   // Classic: the N64's own buttons only
++                }
++                group = 1;
++            } else if (recompinput::get_game_input_is_menu(input)) {
 +                group = 4;
 +            } else if (input == GI::C_UP || input == GI::C_DOWN || input == GI::C_LEFT || input == GI::C_RIGHT) {
 +                group = 1;
@@ -1874,7 +1915,7 @@ index f379a6f..8f856ce 100644
          if (recompinput::get_game_input_is_menu(input)) {
              game_input_sections.menu.contexts.push_back(input_ctx);
          } else {
-@@ -229,6 +286,9 @@ void ConfigPageControls::process_event(const Event &e) {
+@@ -229,6 +291,9 @@ void ConfigPageControls::process_event(const Event &e) {
              last_update_index = update_index;
              render_all();
          }
@@ -1884,7 +1925,7 @@ index f379a6f..8f856ce 100644
          queue_update();
          break;
      default:
-@@ -357,6 +417,17 @@ void ConfigPageControls::render_body_mappings() {
+@@ -357,6 +422,17 @@ void ConfigPageControls::render_body_mappings() {
          body->get_right()->clear_children();
          description_container = context.create_element<Element>(body->get_right(), 0, "p", true);
          description_container->set_text("");
@@ -1902,7 +1943,7 @@ index f379a6f..8f856ce 100644
      }
  }
  
-@@ -460,6 +531,12 @@ void ConfigPageControls::on_edit_player_profile(int player_index) {
+@@ -460,6 +536,12 @@ void ConfigPageControls::on_edit_player_profile(int player_index) {
      }
  }
  
@@ -1915,7 +1956,7 @@ index f379a6f..8f856ce 100644
  void ConfigPageControls::render_footer() {
      if (multiplayer_enabled && !multiplayer_view_mappings) {
          hide_footer();
-@@ -473,7 +550,17 @@ void ConfigPageControls::render_footer() {
+@@ -473,7 +555,17 @@ void ConfigPageControls::render_footer() {
      {
          auto footer_left = footer->get_left();
          footer_left->clear_children();
@@ -1933,7 +1974,7 @@ index f379a6f..8f856ce 100644
              keyboard_toggle = context.create_element<IconToggle>(footer_left, "icons/Cont.svg", "icons/Keyboard.svg", ToggleSize::Large);
              keyboard_toggle->set_checked(single_player_show_keyboard_mappings);
              keyboard_toggle->add_checked_callback([this](bool checked) {
-@@ -520,6 +607,59 @@ void ConfigPageControls::render_control_mappings() {
+@@ -520,6 +612,59 @@ void ConfigPageControls::render_control_mappings() {
  
          game_input_rows.clear();
  
@@ -1993,7 +2034,7 @@ index f379a6f..8f856ce 100644
          create_game_input_contexts();
          set_current_profile_index();
  
-@@ -669,7 +809,330 @@ void ConfigPageControls::on_option_hover(recompinput::GameInput input_id) {
+@@ -669,7 +814,330 @@ void ConfigPageControls::on_option_hover(recompinput::GameInput input_id) {
              description_container->set_text("");
          }
      }

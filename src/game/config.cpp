@@ -1043,6 +1043,8 @@ static void set_control_defaults() {
 }
 
 static void set_control_descriptions() {
+    recompinput::set_game_input_description(recompinput::GameInput::INSTRUMENT, "Plays your Kong's instrument in one press (the same as Z + C Up).");
+    recompinput::set_game_input_description(recompinput::GameInput::FAIRY_CAMERA, "Takes out the fairy camera in one press (the same as Z + C Down). Press it again, or B, to put it away.");
     recompinput::set_game_input_description(recompinput::GameInput::Y_AXIS_POS, "Used to move and for steering while swimming. Axis inversion for swimming can be configured in the General tab.");
     recompinput::set_game_input_description(recompinput::GameInput::Y_AXIS_NEG, "Used to move and for steering while swimming. Axis inversion for swimming can be configured in the General tab.");
     recompinput::set_game_input_description(recompinput::GameInput::X_AXIS_NEG, "Used to move and for steering while swimming. Axis inversion for swimming can be configured in the General tab.");
@@ -1277,8 +1279,10 @@ extern "C" const char *dk64_android_control_action_name(int input) {
         case GI::L: return "Camera Behind";
         case GI::R: return "Shoot / Take Photo";
         case GI::START: return "Pause";
-        case GI::C_UP: return "First Person / Instrument (Z)";
-        case GI::C_DOWN: return "Zoom / Fairy Camera (Z)";
+        case GI::C_UP: return "First Person";
+        case GI::C_DOWN: return "Camera Zoom";
+        case GI::INSTRUMENT: return "Instrument";
+        case GI::FAIRY_CAMERA: return "Fairy Camera";
         case GI::C_LEFT: return "Gun (Z)";
         case GI::C_RIGHT: return "Orange (Z)";
         case GI::DPAD_UP: return "Arcade Up";
@@ -1326,6 +1330,15 @@ extern "C" void dk64_android_apply_control_preset(int modern) {
                         profiles::set_input_binding(profile, input, b, InputField{});
                     }
                 }
+            }
+            // ...which the instrument (Y) and the fairy camera (X) take: one press each instead
+            // of Z + C Up / Z + C Down.
+            profiles::set_input_binding(profile, GameInput::INSTRUMENT, 0, y);
+            profiles::set_input_binding(profile, GameInput::FAIRY_CAMERA, 0, x);
+        } else {
+            for (size_t b = 0; b < num_bindings_per_input; b++) {
+                profiles::set_input_binding(profile, GameInput::INSTRUMENT, b, InputField{});
+                profiles::set_input_binding(profile, GameInput::FAIRY_CAMERA, b, InputField{});
             }
         }
         profiles::save_controls_config(recomp::get_config_path() / (recompui::config::controls::id + ".json"));

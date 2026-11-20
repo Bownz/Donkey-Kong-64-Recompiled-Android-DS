@@ -1161,6 +1161,7 @@ int main(int argc, char** argv) {
     REGISTER_FUNC(recomp_get_game_feel);
     REGISTER_FUNC(recomp_set_fp_status);
     REGISTER_FUNC(recomp_report_rainbow_coin);
+    REGISTER_FUNC(recomp_get_extra_actions);
     REGISTER_FUNC(recomp_get_mouse_deltas);
     REGISTER_FUNC(recomp_get_inverted_axes);
     REGISTER_FUNC(recomp_get_analog_inverted_axes);

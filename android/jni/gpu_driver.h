@@ -43,7 +43,8 @@ namespace dk64::android {
     void set_game_feel_bit(int bit, bool enabled);   // the other Game Feel options (bits 16+)
     int game_feel_flags();
     void report_rainbow_coin(int level, int flag);   // at boot (recomp_report_rainbow_coin)
-    void set_fp_status(int status);   // Walk in First Person: 1 on, 2 gun out (recomp_set_fp_status)
+    void set_fp_status(int status);
+    int extra_actions();   // the shortcut inputs held: 1 Instrument, 2 Fairy Camera   // Walk in First Person: 1 on, 2 gun out (recomp_set_fp_status)
     int fp_status();                    // bit 0 Jump Assist, bit 1 Quick Turn, bit 2 Smooth Running
     bool haptic_feedback_enabled();
     void phone_haptic_pulse(float strength, int ms);   // the phone's vibrator (touch play)

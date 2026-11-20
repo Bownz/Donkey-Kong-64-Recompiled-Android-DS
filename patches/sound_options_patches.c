@@ -1311,7 +1311,6 @@ static void fp_update(CameraPaad *CaaD) {
 // (the input mapping, 806DFF34), with the same "SHOOT" / "EXIT" prompts and glyphs.
 extern s32 D_global_asm_80767CC0;   // the game's frame counter
 static u8 gun_tp_prompts = FALSE;
-static s32 putAwayAt = -100;              // B pressed to put the gun away (game frame)
 static u8 gun_b_was = FALSE, gun_b_new = FALSE;
 
 static u8 gun_tp_active(void) {
@@ -2007,7 +2006,29 @@ static void modern_camera_frame_inner(Actor *camera, CameraPaad *AAD, f32 *eyeX,
 // The game turns the controller's buttons into what the Kong reads (both held and newly
 // pressed) with this function, once per frame. While the gun is out (in hand, or aiming), ZR (the N64's R) can fire too, or
 // instead of B: 0 B (as the N64), 1 ZR only, 2 both.
-RECOMP_PATCH u16 func_global_asm_806DFF34(u16 arg0, u16 *arg1) {
+// Z + C moves from one press (the gun put away with B, the Instrument and Fairy Camera
+// shortcuts): Z for two frames, then Z + C for four, the way the game expects a person to press
+// them. The game reads the buttons twice a frame (func_global_asm_806E0050: held, then newly
+// pressed); the newly pressed pass sees Z and the C button once each.
+static s32 combo_at = -100;
+static u16 combo_c = 0;
+static u8 fp_photo_exit_c = FALSE;   // this combo is the C button alone (leaving the camera)
+static void combo_start(u16 c) {
+    combo_at = D_global_asm_80767CC0;
+    combo_c = c;
+}
+static u16 combo_bits(u8 newly) {
+    s32 t = D_global_asm_80767CC0 - combo_at;
+    if ((t < 0) || (t >= 6)) {
+        return 0;
+    }
+    if (newly) {
+        return ((t == 0) ? Z_TRIG : 0) | ((t == 2) ? combo_c : 0);
+    }
+    return Z_TRIG | ((t >= 2) ? combo_c : 0);
+}
+
+static u16 dk_map_buttons(u16 arg0, u16 *arg1) {
     u16 i;
     u16 j;
     u16 result;
@@ -2086,18 +2107,10 @@ RECOMP_PATCH u16 func_global_asm_806DFF34(u16 arg0, u16 *arg1) {
             u8 r = (result & R_TRIG) != 0;
             if (mode == 1) {
                 // B puts the gun away: Z held, then Z + C-Left (the game's own combo for it).
-                s32 t;
                 if (gun_b_new && !fp_mode && (gCurrentPlayer->PaaD != NULL) && (gCurrentPlayer->PaaD->unk8C != 0)) {
-                    putAwayAt = D_global_asm_80767CC0;
+                    combo_start(L_CBUTTONS);
                 }
                 result &= ~B_BUTTON;
-                t = D_global_asm_80767CC0 - putAwayAt;
-                if ((t >= 0) && (t < 6)) {
-                    result |= Z_TRIG;
-                    if (t >= 2) {
-                        result |= L_CBUTTONS;
-                    }
-                }
             }
             if (r) {
                 result |= B_BUTTON;
@@ -2105,6 +2118,45 @@ RECOMP_PATCH u16 func_global_asm_806DFF34(u16 arg0, u16 *arg1) {
         }
     }
     return result;
+}
+
+RECOMP_PATCH u16 func_global_asm_806DFF34(u16 arg0, u16 *arg1) {
+    static s32 frame = -1;
+    static s32 call = 0;
+    static s32 lastActions = 0;
+    u16 result = dk_map_buttons(arg0, arg1);
+    if (D_global_asm_80767CC0 != frame) {
+        frame = D_global_asm_80767CC0;
+        call = 0;
+    } else {
+        call++;
+    }
+    if (call == 0) {
+        // The Instrument and Fairy Camera shortcuts (Configure Inputs, Modern): a fresh press
+        // plays Z + C-Up / Z + C-Down. With the camera out, Fairy Camera puts it away again
+        // (C-Down on its own).
+        s32 actions = recomp_get_extra_actions();
+        s32 pressed = actions & ~lastActions;
+        lastActions = actions;
+        if ((pressed & 2) && (gCurrentPlayer != NULL) && fp_photo_state(gCurrentPlayer->control_state)) {
+            combo_at = D_global_asm_80767CC0 - 2;   // straight to the C part...
+            combo_c = D_CBUTTONS;
+            fp_photo_exit_c = TRUE;                 // ...without Z
+        } else if (pressed & 1) {
+            combo_start(U_CBUTTONS);
+            fp_photo_exit_c = FALSE;
+        } else if (pressed & 2) {
+            combo_start(D_CBUTTONS);
+            fp_photo_exit_c = FALSE;
+        }
+    }
+    {
+        u16 bits = combo_bits(call != 0);
+        if (fp_photo_exit_c) {
+            bits &= ~Z_TRIG;
+        }
+        return result | bits;
+    }
 }
 
 // ---- Haptic Feedback -----------------------------------------------------------------------

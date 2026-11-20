@@ -218,6 +218,15 @@ int dk64::android::game_feel_flags() {
 
 static std::atomic<int> fp_status_value{0};
 
+// The DK64 shortcut inputs held (1 Instrument, 2 Fairy Camera), from recompinput each poll.
+static std::atomic<uint32_t> extra_actions_value{0};
+extern "C" void dk64_android_report_extra_actions(uint32_t actions) {
+    extra_actions_value.store(actions, std::memory_order_relaxed);
+}
+int dk64::android::extra_actions() {
+    return static_cast<int>(extra_actions_value.load(std::memory_order_relaxed));
+}
+
 void dk64::android::set_fp_status(int status) {
     fp_status_value.store(status, std::memory_order_relaxed);
 }
