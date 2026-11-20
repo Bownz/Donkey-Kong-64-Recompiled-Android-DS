@@ -408,39 +408,6 @@ static void gf_wall_bump(Actor *kong, s32 state, u8 onGround) {
     }
 }
 
-// ---- Footsteps (Haptic Feedback) -----------------------------------------------------------
-// A light tap for each step while walking or running on the ground, by stride (distance covered),
-// with each Kong's own weight: Chunky heaviest, then DK, Lanky, Diddy, Tiny lightest.
-static f32 gf_step_x = 0.0f, gf_step_z = 0.0f, gf_step_dist = 0.0f;
-
-static void gf_footsteps(Actor *kong, s32 state, u8 onGround) {
-    // Per Kong (DK, Diddy, Lanky, Tiny, Chunky): stride length, strength, length in ms.
-    static const f32 stride[5] = { 34.0f, 26.0f, 38.0f, 24.0f, 40.0f };
-    static const f32 strength[5] = { 0.13f, 0.07f, 0.08f, 0.05f, 0.22f };
-    static const s32 ms[5] = { 32, 22, 26, 18, 45 };
-    f32 dx = kong->x_position - gf_step_x;
-    f32 dz = kong->z_position - gf_step_z;
-    f32 moved = _sqrtf((dx * dx) + (dz * dz));
-    s32 k = current_character_index[0];
-    gf_step_x = kong->x_position;
-    gf_step_z = kong->z_position;
-    if ((k < 0) || (k > 4)) {
-        return;   // Krusha and others
-    }
-    if ((state != 0x0D) || !onGround || (moved > 60.0f)) {
-        gf_step_dist = stride[k] * 0.6f;   // the first step comes soon after starting off
-        return;
-    }
-    gf_step_dist += moved;
-    if (gf_step_dist >= stride[k]) {
-        gf_step_dist -= stride[k];
-        if (gf_step_dist > stride[k]) {
-            gf_step_dist = 0.0f;
-        }
-        recomp_haptic_pulse(strength[k], ms[k]);
-    }
-}
-
 void game_feel_update(void) {
     Actor *kong = gCurrentPlayer;
     PlayerAdditionalActorData *paad;
@@ -540,6 +507,5 @@ void game_feel_update(void) {
         gf_polish_off(kong);
     }
     gf_wall_bump(kong, state, onGround);
-    gf_footsteps(kong, state, onGround);
     gf_last_state = state;
 }
