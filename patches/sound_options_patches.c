@@ -2990,7 +2990,11 @@ RECOMP_PATCH u8 isFlagSet(s16 flagIndex, u8 flagType) { // TODO: Can we use the 
     // freed for the moment it takes Tag Anywhere to swap to them. Never while a map is loading
     // or a cutscene runs: the map would be built as if the other Kongs were still caged (they
     // would stand at their rescue spots for the rest of the visit).
+    // Only while the swap's D-Pad press is actually held (a few frames): any other check during
+    // the swap (e.g. a caged Kong's spawner as you walk near the cage) sees the real flags, or
+    // that Kong would stand in its opened cage for the rest of the visit.
     if ((dk64_android_tag_target >= 0) && (flagType == FLAG_TYPE_PERMANENT) &&
+        (D_global_asm_807ECD58.button & (L_JPAD | R_JPAD)) &&
         (loading_zone_transition_speed <= 0.0f) && (is_cutscene_active == 0)) {
         static const s16 kong_freed_flags[5] = { 0x181, 0x006, 0x046, 0x042, 0x075 };
         s32 k;
