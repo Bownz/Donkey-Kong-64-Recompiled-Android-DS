@@ -1017,12 +1017,65 @@ static u8 mc_game_locked(CameraPaad *AAD) {
 }
 
 // Places the camera: called from the camera update with its eye and look-at outputs.
+#define FP_RIGHT_STICK_LOOK 1024
+#define FP_WALK 2048
+
+static f32 fp_walk_phase = 0.0f;   // the step cycle, in angle units (a step per 28 units walked)
+static f32 fp_walk_bob = 0.0f;     // 0..1: how much bob (eases in while walking, out when stopped)
+static u8 fp_walked = FALSE;       // walked this frame
+
+// Walk in First Person: the game's first person view stays where it was entered, so as the Kong
+// walks, the view is moved with it: the eye stays at the same place on the Kong as when first
+// person began (so the Kong stays out of sight), looking the way the game says, with a slight
+// step bob (1.5 units up and down per step, easing in and out).
+static u8 fp_view_valid = FALSE;
+static f32 fp_eye_off[3];
+
+static void first_person_view(Actor *target, f32 *eyeX, f32 *eyeY, f32 *eyeZ, f32 *atX, f32 *atY, f32 *atZ) {
+    f32 lx, ly, lz, bob;
+    u8 fp = (target != NULL) && (target == gCurrentPlayer) && (target->control_state >= 2) &&
+        (target->control_state <= 5) && (recomp_get_game_feel() & FP_WALK);
+    if (!fp) {
+        fp_view_valid = FALSE;
+        fp_walk_bob = 0.0f;
+        return;
+    }
+    // Until the Kong first moves, the game's own view is used (it zooms in to the Kong's head
+    // as first person starts), and where its eye sits on the Kong is kept up to date.
+    if (!fp_view_valid) {
+        fp_eye_off[0] = *eyeX - target->x_position;
+        fp_eye_off[1] = *eyeY - target->y_position;
+        fp_eye_off[2] = *eyeZ - target->z_position;
+        if (fp_walked) {
+            fp_view_valid = TRUE;
+        } else {
+            return;
+        }
+    }
+    if (!fp_walked) {
+        fp_walk_bob += (0.0f - fp_walk_bob) * 0.15f;
+    }
+    fp_walked = FALSE;
+    lx = *atX - *eyeX;
+    ly = *atY - *eyeY;
+    lz = *atZ - *eyeZ;
+    bob = func_global_asm_80612794((s16)(((s32)fp_walk_phase) & 0xFFF)) * 1.5f * fp_walk_bob;
+    *eyeX = target->x_position + fp_eye_off[0];
+    *eyeY = target->y_position + fp_eye_off[1] + bob;
+    *eyeZ = target->z_position + fp_eye_off[2];
+    *atX = *eyeX + lx;
+    *atY = *eyeY + ly;
+    *atZ = *eyeZ + lz;
+}
+
 void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f32 *eyeZ, f32 *atX, f32 *atY, f32 *atZ) {
     Actor *target = AAD->unk0;
     f32 kongY, wantY, dx, dz, distance, wantX, wantYEye, wantZ, lineX, lineY, lineZ, length, t, lo, hi, mid, reach;
     f32 camX, camY, camZ, w, frameTarget, startX, startY, startZ;
     s32 i;
     u8 active;
+
+    first_person_view(target, eyeX, eyeY, eyeZ, atX, atY, atZ);
 
     active = (is_cutscene_active == 0) && mc_allowed() && (target != NULL) &&
         (target == gCurrentPlayer) && !(AAD->unkAC & 0x2000) && !mc_game_locked(AAD) &&
@@ -1543,6 +1596,12 @@ RECOMP_PATCH u16 func_global_asm_806DFF34(u16 arg0, u16 *arg1) {
             }
         }
     }
+    // Walk in First Person: in first person the C buttons don't leave it (they'd end your walk);
+    // B leaves first person.
+    if ((gCurrentPlayer != NULL) && (gCurrentPlayer->control_state >= 2) && (gCurrentPlayer->control_state <= 5) &&
+        (recomp_get_game_feel() & FP_WALK)) {
+        result &= ~(U_CBUTTONS | D_CBUTTONS | L_CBUTTONS | R_CBUTTONS);
+    }
     return result;
 }
 
@@ -1981,8 +2040,6 @@ void getStickPosition(s32 *x, s32 *y) {
 // @recomp (Android): Walk in First Person: the left stick moves the Kong (forward/back along
 // the view, sideways to strafe) at a walk, with the level's walls and floors respected: it
 // won't walk into a wall, or step up or down more than a small step (no walking off ledges).
-#define FP_RIGHT_STICK_LOOK 1024
-#define FP_WALK 2048
 
 static void first_person_walk(s32 lx, s32 ly) {
     Actor *kong = gCurrentActorPointer;
@@ -2021,6 +2078,10 @@ static void first_person_walk(s32 lx, s32 ly) {
         (floorY < kong->y_position - 18.0f)) {
         return;   // no floor there, or too big a step
     }
+    fp_walk_phase += _sqrtf(((nx - kong->x_position) * (nx - kong->x_position)) +
+                             ((nz - kong->z_position) * (nz - kong->z_position))) * (4096.0f / 28.0f);
+    fp_walk_bob += (1.0f - fp_walk_bob) * 0.25f;
+    fp_walked = TRUE;
     kong->x_position = nx;
     kong->z_position = nz;
     kong->y_position = floorY;
