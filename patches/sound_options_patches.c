@@ -1276,6 +1276,10 @@ static void gun_prompts_update(void) {
 // of our own (0.8 up and down a step, per 28 units walked on the ground). It rises and falls
 // with the Kong's real jumps. Returns TRUE when it placed the camera.
 static f32 fp_head = -1.0f;
+// Where the eye sits: as the game's own first person view (C-Up) and camera have it, a little
+// back from the face and a little above it (the Kong itself is hidden, so nothing's in the way).
+#define FP_EYE_FWD (-2.0f)
+#define FP_EYE_UP 6.0f
 static f32 fp_bob_phase = 0.0f, fp_bob = 0.0f;
 static f32 fp_prev_x = 0.0f, fp_prev_z = 0.0f;
 
@@ -1301,7 +1305,7 @@ static u8 fp_camera(Actor *target, f32 *eyeX, f32 *eyeY, f32 *eyeZ, f32 *atX, f3
     } else {
         fp_bob += (0.0f - fp_bob) * 0.15f;
     }
-    eyeH = fp_head + 2.0f + (func_global_asm_80612794((s16)(((s32)fp_bob_phase) & 0xFFF)) * 0.8f * fp_bob);
+    eyeH = fp_head + FP_EYE_UP + (func_global_asm_80612794((s16)(((s32)fp_bob_phase) & 0xFFF)) * 0.8f * fp_bob);
     mc_direction_with(mc_convention, (((s32)fp_yaw) + 0x800) & 0xFFF, &fx, &fz);   // ahead
     sp = func_global_asm_80612794((s16)(((s32)fp_pitch) & 0xFFF));
     cp = func_global_asm_80612790((s16)(((s32)fp_pitch) & 0xFFF));
@@ -1309,8 +1313,8 @@ static u8 fp_camera(Actor *target, f32 *eyeX, f32 *eyeY, f32 *eyeZ, f32 *atX, f3
     // back into (and behind) the Kong as far as needed so the view doesn't poke through it (the
     // wall test round the eye, as wide as the view's near edge, smoothed so it doesn't jump).
     {
-        static f32 fwd = 6.0f;
-        f32 want = 6.0f;
+        static f32 fwd = FP_EYE_FWD;
+        f32 want = FP_EYE_FWD;
         s16 hitA = 0, hitB = 0xFFF;
         // (Wider than the near edge, and one more step back once clear: looking along a wall at
         // an angle, the view's corners reach further than straight ahead.)
@@ -1319,7 +1323,7 @@ static u8 fp_camera(Actor *target, f32 *eyeX, f32 *eyeY, f32 *eyeZ, f32 *atX, f3
                 target->z_position + (fz * want), 15.0f, &hitA, &hitB, 1U, 0xBCU) != 0)) {
             want -= 4.0f;
         }
-        if (want < 6.0f) {
+        if (want < FP_EYE_FWD) {
             want -= 4.0f;
         }
         fwd += (want - fwd) * ((want < fwd) ? 0.6f : 0.2f);
