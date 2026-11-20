@@ -427,16 +427,26 @@ void game_feel_update(void) {
         }
     }
 
-    // Quick Turn: the skid (0x0E) is cut short: the Kong's speed drops to a stop at once, so it
-    // turns and runs the new way after a brief skid (the dust and its haptic stay).
+    // Quick Turn: the skid (0x0E: the dust and its rumble when you reverse while running) is cut
+    // short after 4 frames: the Kong faces the new way at once (unkEE, the way the stick points),
+    // keeps a little speed, and goes back to standing, from which the game runs it the new way
+    // straight away (the stick's still held).
     if (flags & GF_QUICK_TURN) {
         if ((state == 0x0E) && (gf_last_state != 0x0E)) {
             gf_turn_frames = 0;
         }
         if (state == 0x0E) {
             gf_turn_frames++;
-            if (gf_turn_frames >= 3) {
-                kong->unkB8 *= 0.35f;
+            if (gf_turn_frames >= 4) {
+                f32 top = D_global_asm_807531FC[D_global_asm_807FD584];
+                kong->y_rotation = kong->unkEE & 0xFFF;
+                paad->unkA = kong->y_rotation;
+                kong->unkB8 = ((top > 50.0f) ? top : 150.0f) * 0.3f;
+                kong->control_state = 0x0C;
+                kong->control_state_progress = 0;
+                playAnimation(kong, 9);
+                gf_last_yaw = -1;   // no lean from the sudden turn
+                state = 0x0C;
             }
         }
     }
