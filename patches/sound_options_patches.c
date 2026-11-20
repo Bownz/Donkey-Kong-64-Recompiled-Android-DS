@@ -1261,7 +1261,10 @@ void modern_camera_frame(Actor *camera, CameraPaad *AAD, f32 *eyeX, f32 *eyeY, f
                     camY = kongY + 18.0f;
                 }
             }
-            if (camY < ground + 8.0f) {
+            // Only a little ground above the camera (a slope it has sunk into); a surface far
+            // above is the top of a wall or cliff the camera is passing behind, which the wall
+            // trace deals with: jumping up onto it would make the camera pop over walls.
+            if ((camY < ground + 8.0f) && (ground < camY + 40.0f)) {
                 camY = ground + 8.0f;   // a slope behind the Kong: stay above it
             }
         }
