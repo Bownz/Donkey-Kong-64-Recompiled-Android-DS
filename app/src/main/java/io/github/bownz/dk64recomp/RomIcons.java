@@ -229,6 +229,39 @@ final class RomIcons {
         return frames[(int) ((timeMs * fps / 1000) % frames.length)];
     }
 
+    /**
+     * A gentle turn back and forth over the few frames either side of the front (the still),
+     * slowly (a 3 s sway), so the sprite looks solid rather than flat. {@code phaseMs} offsets
+     * one item from the next.
+     */
+    static Bitmap wobble(Bitmap still, long timeMs, long phaseMs) {
+        if (still == null) {
+            return null;
+        }
+        Bitmap[] frames = animations.get(still);
+        if (frames == null) {
+            return still;
+        }
+        int n = frames.length;
+        int w = Math.max(1, Math.min(2, n / 8));
+        double s = Math.sin(2 * Math.PI * (((timeMs + phaseMs) % 3000) / 3000.0));
+        int p = (int) Math.round(s * w);
+        return frames[((p % n) + n) % n];
+    }
+
+    /** The whole spin once: the frame at {@code progress} (0..1) of it (the still if none). */
+    static Bitmap spin(Bitmap still, float progress) {
+        if (still == null) {
+            return null;
+        }
+        Bitmap[] frames = animations.get(still);
+        if (frames == null) {
+            return still;
+        }
+        int i = (int) (progress * frames.length);
+        return frames[Math.max(0, Math.min(frames.length - 1, i))];
+    }
+
     static boolean hasAnimation(Bitmap still) {
         return still != null && animations.containsKey(still);
     }

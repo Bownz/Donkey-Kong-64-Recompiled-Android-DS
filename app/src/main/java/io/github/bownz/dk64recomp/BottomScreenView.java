@@ -845,12 +845,18 @@ public final class BottomScreenView extends View {
             watch("carryv" + item.label, item.have, spinKey);
             float spin = animProgress(spinKey, SPIN_MS);
             int saved = c.save();
+            iconSpin = spin;
             if (spin >= 0) {
-                float sxk = (float) Math.cos(2 * Math.PI * spin);
                 float pop = 1f + 0.18f * (float) Math.sin(Math.PI * spin);
-                c.scale(Math.abs(sxk) < 0.08f ? 0.08f : sxk * pop, pop, bx, cy);
+                if (RomIcons.hasAnimation(item.icon)) {
+                    c.scale(pop, pop, bx, cy);   // the game's own spin frames (iconFrame)
+                } else {
+                    float sxk = (float) Math.cos(2 * Math.PI * spin);
+                    c.scale(Math.abs(sxk) < 0.08f ? 0.08f : sxk * pop, pop, bx, cy);
+                }
             }
             itemIcon(c, bx, cy, badgeR, item);
+            iconSpin = -1f;
             c.restoreToCount(saved);
             String value = String.valueOf(item.have);
             text.setTextAlign(Paint.Align.LEFT);
@@ -1807,10 +1813,16 @@ public final class BottomScreenView extends View {
             float spin = animProgress(spinKey, SPIN_MS);
             if (spin >= 0) {
                 int saved = c.save();
-                float sx = (float) Math.cos(2 * Math.PI * spin);
                 float pop = 1f + 0.18f * (float) Math.sin(Math.PI * spin);
-                c.scale(Math.abs(sx) < 0.08f ? 0.08f : sx * pop, pop, bx, cy);
+                if (RomIcons.hasAnimation(r.icon)) {
+                    c.scale(pop, pop, bx, cy);   // the game's own spin frames (iconFrame)
+                } else {
+                    float sx = (float) Math.cos(2 * Math.PI * spin);
+                    c.scale(Math.abs(sx) < 0.08f ? 0.08f : sx * pop, pop, bx, cy);
+                }
+                iconSpin = spin;
                 badge(c, bx, cy, badgeR, r);
+                iconSpin = -1f;
                 c.restoreToCount(saved);
             } else {
                 badge(c, bx, cy, badgeR, r);
@@ -1823,8 +1835,29 @@ public final class BottomScreenView extends View {
         drawItemIcon(c, x, y, r, row);
     }
 
+    // Collecting one (the count going up): the whole spin, once (iconSpin = its progress, set
+    // around the draw; -1 otherwise). Otherwise, in game, a slow sway over a few frames either
+    // side of the front, each item a little out of step with the next, so they look solid.
+    private float iconSpin = -1f;
+
+    private Bitmap iconFrame(Row row) {
+        if (row.icon == null) {
+            return null;
+        }
+        if (state.inGame()) {
+            RomIcons.ensureAnimations();
+        }
+        if (iconSpin >= 0) {
+            return RomIcons.spin(row.icon, iconSpin);
+        }
+        if (state.paused || !state.inGame()) {
+            return row.icon;
+        }
+        return RomIcons.wobble(row.icon, android.os.SystemClock.uptimeMillis(), (row.label.hashCode() & 0x7FF) * 3L);
+    }
+
     private void drawItemIcon(Canvas c, float x, float y, float r, Row row) {
-        if (!RomIcons.draw(c, row.icon, x, y, r)) {
+        if (!RomIcons.draw(c, iconFrame(row), x, y, r)) {
             switch (row.fallback) {
                 case 0: DkIcons.banana(c, x, y, r * 0.85f); break;
                 case 1: DkIcons.coin(c, x, y, r * 0.8f); break;
@@ -1848,7 +1881,7 @@ public final class BottomScreenView extends View {
         paint.setColor(Color.argb(70, 255, 255, 255));
         tmp2.set(x - r * 0.55f, y - r * 0.78f, x + r * 0.55f, y - r * 0.1f);
         c.drawOval(tmp2, paint);
-        if (!RomIcons.draw(c, row.icon, x, y, r * 0.62f)) {
+        if (!RomIcons.draw(c, iconFrame(row), x, y, r * 0.62f)) {
             switch (row.fallback) {
                 case 0: DkIcons.banana(c, x, y, r * 0.55f); break;
                 case 1: DkIcons.coin(c, x, y, r * 0.5f); break;
