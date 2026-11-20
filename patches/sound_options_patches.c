@@ -14,6 +14,8 @@ RECOMP_DECLARE_EVENT(recomp_on_dirty_file_start());
 RECOMP_DECLARE_EVENT(recomp_on_flag_check(s16 *flag, u8 *flag_type));
 extern s32 dk64_android_tag_target; // android_hooks.c
 extern s32 dk64_in_every_frame_event; // boot_logos_patches.c
+// Frequent diagnostic log lines (camera zones, every Kong state change): off in releases.
+#define MC_VERBOSE 0
 #define FEEL_CAMERA_POLISH 8192   // Camera Polish (Input)
 #define FEEL_FP_POLISH 16384      // First Person Polish (Input)
 static float fp_kick = 0.0f;     // First Person Polish: the view's kick when you shoot
@@ -975,7 +977,7 @@ static void mc_update_tight(CameraPaad *AAD, Actor *target) {
     u8 zone = mc_in_zone(AAD);
     if ((s32)zone != rawLogged) {
         rawLogged = zone;
-        recomp_printf("Modern Camera: game zone flag %s (zone %d, camera %d above the Kong)\n", zone ? "on" : "off",
+        if (MC_VERBOSE) recomp_printf("Modern Camera: game zone flag %s (zone %d, camera %d above the Kong)\n", zone ? "on" : "off",
             AAD->unk8, (s32)(camera_y_for_log - target->y_position));
     }
     if (zone) {
@@ -1009,7 +1011,7 @@ static void mc_update_tight(CameraPaad *AAD, Actor *target) {
     }
     if ((s32)zone != mc_zone_logged) {
         mc_zone_logged = zone;
-        recomp_printf("Modern Camera: camera zone %s (map 0x%02X, zone %d%s, close preset height %d distance %d)\n",
+        if (MC_VERBOSE) recomp_printf("Modern Camera: camera zone %s (map 0x%02X, zone %d%s, close preset height %d distance %d)\n",
             zone ? "on" : "off", current_map, AAD->unk8, (zone && !mc_in_zone(AAD)) ? ", held" : "",
             (s32)mc_zone_height, (s32)mc_zone_distance);
     }
@@ -1396,7 +1398,7 @@ static u8 fp_camera(Actor *target, f32 *eyeX, f32 *eyeY, f32 *eyeZ, f32 *atX, f3
         while ((want > -20.0f) &&
             (func_global_asm_80671E00(target->x_position + (fx * want), target->y_position + eyeH,
                 target->z_position + (fz * want), 15.0f, &hitA, &hitB, 1U, 0xBCU) != 0)) {
-            want -= 4.0f;
+            want -= 6.0f;
         }
         if (want < FP_EYE_FWD) {
             want -= 4.0f;
@@ -2230,7 +2232,7 @@ RECOMP_PATCH void func_global_asm_8061D1FC(Actor* arg0) {
         if ((CaaD->unkF3 != lastMode) || (gCurrentPlayer->control_state != lastState)) {
             lastMode = CaaD->unkF3;
             lastState = gCurrentPlayer->control_state;
-            recomp_printf("Camera: mode %d, Kong state 0x%02X, map 0x%02X\n", lastMode, lastState, current_map);
+            if (MC_VERBOSE) recomp_printf("Camera: mode %d, Kong state 0x%02X, map 0x%02X\n", lastMode, lastState, current_map);
         }
     }
     // Walk in First Person (fp_update): your view, nothing else turns the camera.
@@ -3103,7 +3105,6 @@ RECOMP_PATCH u8 isFlagSet(s16 flagIndex, u8 flagType) { // TODO: Can we use the 
         s32 k;
         for (k = 0; k < 5; k++) {
             if ((flagIndex == kong_freed_flags[k]) && (k != dk64_android_tag_target)) {
-                recomp_printf("Flags: Kong %d freed flag hidden for the touch swap (map 0x%02X)\n", k, current_map);
                 return FALSE;
             }
         }
@@ -3117,59 +3118,7 @@ RECOMP_PATCH u8 isFlagSet(s16 flagIndex, u8 flagType) { // TODO: Can we use the 
             flagBlock = temporary_flag_block;
     }
     flagByte = flagIndex >> 3;
-    {
-        u8 value = flagBlock[flagByte] >> (s16)(flagIndex - flagByte * 8) & 1;
-        // Diagnostics (a freed Kong seen in its cage): each change in what a Kong's freed flag
-        // reads as, per map, goes to the session log.
-        if (flagType == FLAG_TYPE_PERMANENT) {
-            // The five Kongs' freed flags, then the Shockwave / camera (dirt patches show with
-            // it) and Jungle Japes' Rainbow Coin.
-            static const s16 freed[7] = { 0x181, 0x006, 0x046, 0x042, 0x075, 0x179, 0x2A6 };
-            static s8 last[7] = { -1, -1, -1, -1, -1, -1, -1 };
-            static s32 lastMap = -1;
-            s32 k;
-            if (current_map != lastMap) {
-                lastMap = current_map;
-                for (k = 0; k < 7; k++) {
-                    last[k] = -1;
-                }
-            }
-            for (k = 0; k < 7; k++) {
-                if ((flagIndex == freed[k]) && (last[k] != (s8)value)) {
-                    last[k] = (s8)value;
-                    recomp_printf("Flags: flag 0x%03X (%s) reads %d (map 0x%02X, tag target %d)\n",
-                        flagIndex, (k < 5) ? "Kong freed" : ((k == 5) ? "Shockwave" : "Japes Rainbow Coin"),
-                        value, current_map, dk64_android_tag_target);
-                }
-            }
-        }
-        // Rainbow Coins: the dirt patch (ACTOR_RAINBOW_COIN_PATCH) checks its coin's flag as it
-        // spawns; which map checks which, to match the bottom screen's per-level list to the
-        // game (once per flag per map).
-        if ((flagType == FLAG_TYPE_PERMANENT) && (gCurrentActorPointer != NULL) &&
-            (gCurrentActorPointer->unk58 == ACTOR_RAINBOW_COIN_PATCH)) {
-            recomp_printf("Flags: dirt patch in map 0x%02X at (%d, %d, %d) checks flag 0x%03X: %d\n", current_map,
-                (s32)gCurrentActorPointer->x_position, (s32)gCurrentActorPointer->y_position,
-                (s32)gCurrentActorPointer->z_position, flagIndex, value);
-        }
-        if ((flagType == FLAG_TYPE_PERMANENT) && (flagIndex >= 0x2A6) && (flagIndex <= 0x2B5)) {
-            static u16 seen[16];
-            static s32 seenMap = -1;
-            s32 i = flagIndex - 0x2A6;
-            if (current_map != seenMap) {
-                seenMap = current_map;
-                for (i = 0; i < 16; i++) {
-                    seen[i] = 0;
-                }
-                i = flagIndex - 0x2A6;
-            }
-            if (!seen[i]) {
-                seen[i] = 1;
-                recomp_printf("Flags: Rainbow Coin flag 0x%03X checked in map 0x%02X: %d\n", flagIndex, current_map, value);
-            }
-        }
-        return value;
-    }
+    return flagBlock[flagByte] >> (s16)(flagIndex - flagByte * 8) & 1;
 }
 
 RECOMP_PATCH void setFlag(s16 flagIndex, u8 newValue, u8 flagType) {
@@ -3207,11 +3156,11 @@ RECOMP_PATCH void func_global_asm_80731030(void) { // clearTemporaryFlags()
         temporary_flag_block[flagIndex] = 0;
     }
 }
-// ---- Collectible flags (diagnostics) ---------------------------------------------------------
+// ---- Collectible flags ----------------------------------------------------------------------
 // At boot the game numbers the flags of the actors that spawn collectibles (dirt patches,
-// Kasplats...) across all maps' setups, in map order (func_global_asm_80688940). The same, plus a
-// log line for each Rainbow Coin dirt patch (its map, level and flag), so the bottom screen's
-// per-level Rainbow Coin list can match the game.
+// Kasplats...) across all maps' setups, in map order (func_global_asm_80688940). The same, also
+// telling the app each Rainbow Coin dirt patch's level and flag, so the bottom screen counts the
+// coins the game does.
 typedef struct {
     u8 pad0[0x32];
     s16 unk32;   // actor type - 0x10
@@ -3250,8 +3199,7 @@ RECOMP_PATCH void func_global_asm_80688940(void) {
                 for (actorIndex = 0; actorIndex < numActors; actorIndex++) {
                     u16 type = actors[actorIndex].unk32 + 0x10;
                     if (type == ACTOR_RAINBOW_COIN_PATCH) {
-                        recomp_printf("Collectibles: Rainbow Coin dirt patch: map 0x%02X, level %d, flag 0x%03X\n",
-                            mapIndex, getLevelIndex(mapIndex, TRUE), count + 0x26B);
+                        recomp_report_rainbow_coin(getLevelIndex(mapIndex, TRUE), count + 0x26B);
                     }
                     count += func_global_asm_80688C84(type);
                 }

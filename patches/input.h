@@ -50,5 +50,6 @@ DECLARE_FUNC(void, recomp_haptic_pulse, f32 strength, s32 ms);
 DECLARE_FUNC(s32, recomp_get_gun_button);
 DECLARE_FUNC(s32, recomp_get_game_feel);
 DECLARE_FUNC(void, recomp_set_fp_status, s32 status);
+DECLARE_FUNC(void, recomp_report_rainbow_coin, s32 level, s32 flag);
 
 #endif

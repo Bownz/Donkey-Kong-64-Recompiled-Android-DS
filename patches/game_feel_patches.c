@@ -495,10 +495,28 @@ f32 game_feel_camera_kick(void) {
 static void gf_hit_feel(Actor *kong) {
     s32 i, j, n, count;
     Actor *a;
+    static s32 recent = 0;   // frames left to watch for a hit after an attack
     gf_kick *= 0.75f;
     if (gf_kick < 0.01f) {
         gf_kick = 0.0f;
     }
+    // Only watch while an attack can land: punches, kicks, rolls, the slam, an orange thrown,
+    // or the gun out (its shots); the rest of the time, nothing's scanned.
+    switch (kong->control_state) {
+        case 0x1C: case 0x26: case 0x27: case 0x28: case 0x29: case 0x2A: case 0x2B: case 0x2C:
+            recent = 45;
+            break;
+    }
+    if ((kong->PaaD != NULL) && (kong->PaaD->unk8C != 0)) {
+        recent = 45;
+    }
+    if ((recent <= 0) && (gf_stop_frames <= 0)) {
+        for (i = 0; i < GF_TRACKED; i++) {
+            gf_tracked[i] = NULL;   // starts afresh next time (no false hits)
+        }
+        return;
+    }
+    recent--;
     if (gf_stop_frames > 0) {
         gf_stop_frames--;
         kong->x_position = gf_stop_kong[0];

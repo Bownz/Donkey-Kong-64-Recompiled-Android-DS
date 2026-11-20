@@ -6,6 +6,7 @@
 // structures.
 
 #include <cstring>
+#include <mutex>
 #include <android/log.h>
 #include <jni.h>
 
@@ -804,4 +805,32 @@ Java_io_github_bownz_dk64recomp_GameState_nativeButtonGlyphs(JNIEnv* env, jclass
         out += '\n';
     }
     return env->NewStringUTF(out.c_str());
+}
+
+// Rainbow Coins: each dirt patch's level slot and flag, as the game numbers them at boot
+// (recomp_report_rainbow_coin). Read by the bottom screen (GameState.rainbowCoinFlags).
+namespace {
+    std::mutex g_coins_mutex;
+    std::vector<int32_t> g_coins;   // level, flag, level, flag...
+}
+
+void dk64::android::report_rainbow_coin(int level, int flag) {
+    std::lock_guard<std::mutex> lock(g_coins_mutex);
+    for (size_t i = 0; i + 1 < g_coins.size(); i += 2) {
+        if (g_coins[i + 1] == flag) {
+            return;
+        }
+    }
+    g_coins.push_back(level);
+    g_coins.push_back(flag);
+}
+
+extern "C" JNIEXPORT jintArray JNICALL
+Java_io_github_bownz_dk64recomp_GameState_nativeRainbowCoins(JNIEnv* env, jclass) {
+    std::lock_guard<std::mutex> lock(g_coins_mutex);
+    jintArray out = env->NewIntArray(static_cast<jsize>(g_coins.size()));
+    if (out != nullptr && !g_coins.empty()) {
+        env->SetIntArrayRegion(out, 0, static_cast<jsize>(g_coins.size()), g_coins.data());
+    }
+    return out;
 }

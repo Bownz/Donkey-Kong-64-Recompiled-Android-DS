@@ -631,6 +631,14 @@ extern "C" void recomp_get_game_feel(uint8_t* rdram, recomp_context* ctx) {
 
 // Walk in First Person: whether it's on (1) and the gun's out (2), each frame, for the app's
 // button prompts (patches/sound_options_patches.c, fp_update).
+// At boot: a Rainbow Coin dirt patch's level slot and flag, as the game numbers them
+// (patches/sound_options_patches.c, func_global_asm_80688940), for the bottom screen.
+extern "C" void recomp_report_rainbow_coin(uint8_t* rdram, recomp_context* ctx) {
+#if defined(__ANDROID__)
+    dk64::android::report_rainbow_coin(_arg<0, int32_t>(rdram, ctx), _arg<1, int32_t>(rdram, ctx));
+#endif
+}
+
 extern "C" void recomp_set_fp_status(uint8_t* rdram, recomp_context* ctx) {
 #if defined(__ANDROID__)
     dk64::android::set_fp_status(_arg<0, int32_t>(rdram, ctx));

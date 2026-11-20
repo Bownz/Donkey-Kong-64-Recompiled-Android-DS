@@ -318,6 +318,10 @@ final class RomIcons {
                 animate(key, KEY, -1);
                 animate(rainbowCoin, RAINBOW_COIN, -1);
                 animate(fairy, FAIRY, -1);
+                // The action buttons' items spin once when picked up (BottomScreenView), with their
+                // own sprite frames where the game has them.
+                animate(orange, ORANGE, -1);
+                animate(film, FILM, -1);
                 int[] medalPixels = pixels(f, MEDAL);
                 int found = count(melon, orange, film, goldenBanana, medal, blueprint, crown, key, rainbowCoin, fairy, crosshair, crystal);
                 for (int k = 0; k < 5; k++) {
@@ -343,6 +347,8 @@ final class RomIcons {
                     found += count(blueprintByKong[k]);
                     weapon[k] = load(f, WEAPON[k]);
                     instrument[k] = load(f, INSTRUMENT[k]);
+                    animate(weapon[k], WEAPON[k], -1);
+                    animate(instrument[k], INSTRUMENT[k], -1);
                     face[k] = loadFace(f, FACE_HALVES[k]);
                     found += count(banana[k], weapon[k], instrument[k], face[k]);
                 }

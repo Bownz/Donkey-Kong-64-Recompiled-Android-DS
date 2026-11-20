@@ -351,7 +351,7 @@ public final class BottomScreenView extends View {
         int top = moves.zbBusy ? Color.rgb(250, 200, 90) : Color.rgb(200, 130, 50);
         int bottom = moves.zbBusy ? Color.rgb(200, 120, 30) : Color.rgb(120, 70, 20);
         paint.setAlpha(255);
-        paint.setShader(new LinearGradient(0, cy - r, 0, cy + r, top, bottom, Shader.TileMode.CLAMP));
+        paint.setShader(lg(0, cy - r, 0, cy + r, top, bottom));
         c.drawCircle(osX, cy, r * 0.87f, paint);
         paint.setShader(null);
         paint.setStyle(Paint.Style.STROKE);
@@ -468,7 +468,7 @@ public final class BottomScreenView extends View {
         int top = moves.cancelBusy ? Color.rgb(255, 140, 120) : Color.rgb(220, 70, 50);
         int bottom = moves.cancelBusy ? Color.rgb(200, 60, 40) : Color.rgb(120, 20, 15);
         paint.setAlpha(255);
-        paint.setShader(new LinearGradient(0, cy - r, 0, cy + r, top, bottom, Shader.TileMode.CLAMP));
+        paint.setShader(lg(0, cy - r, 0, cy + r, top, bottom));
         c.drawCircle(osX, cy, r * 0.87f, paint);
         paint.setShader(null);
         paint.setStyle(Paint.Style.STROKE);
@@ -515,7 +515,7 @@ public final class BottomScreenView extends View {
         int top = pressed ? Color.rgb(250, 200, 90) : Color.rgb(200, 130, 50);
         int bottom = pressed ? Color.rgb(200, 120, 30) : Color.rgb(120, 70, 20);
         paint.setAlpha(255);
-        paint.setShader(new LinearGradient(0, cy - r, 0, cy + r, top, bottom, Shader.TileMode.CLAMP));
+        paint.setShader(lg(0, cy - r, 0, cy + r, top, bottom));
         c.drawCircle(osX, cy, r * 0.87f, paint);
         paint.setShader(null);
         paint.setStyle(Paint.Style.STROKE);
@@ -738,7 +738,7 @@ public final class BottomScreenView extends View {
             // The health melons' gentle idle bob: a light 20 FPS redraw, not every display frame.
             postInvalidateDelayed(IDLE_FRAME_MS);
         } else {
-            postInvalidateDelayed(1000);   // the backdrop's slow drift (a pixel at a time)
+            postInvalidateDelayed(2000);   // the backdrop's slow drift (a pixel at a time)
         }
     }
 
@@ -960,7 +960,7 @@ public final class BottomScreenView extends View {
         float br = unit * 0.02f;
         paint.setStyle(Paint.Style.FILL);
         paint.setAlpha(255);
-        paint.setShader(new LinearGradient(0, board.top, 0, board.bottom, Color.rgb(46, 26, 12), Color.rgb(70, 40, 18), Shader.TileMode.CLAMP));
+        paint.setShader(lg(0, board.top, 0, board.bottom, Color.rgb(46, 26, 12), Color.rgb(70, 40, 18)));
         c.drawRoundRect(board, br, br, paint);
         paint.setShader(null);
 
@@ -1288,7 +1288,7 @@ public final class BottomScreenView extends View {
             }
         }
         if (jungle == null) {
-            paint.setShader(new LinearGradient(0, 0, 0, h, JUNGLE_TOP, JUNGLE_BOTTOM, Shader.TileMode.CLAMP));
+            paint.setShader(lg(0, 0, 0, h, JUNGLE_TOP, JUNGLE_BOTTOM));
             c.drawRect(0, 0, w, h, paint);
             paint.setShader(null);
             return;
@@ -1328,7 +1328,7 @@ public final class BottomScreenView extends View {
             path.lineTo(x0 + bw * 2.2f + slant, h);
             path.lineTo(x0 + slant, h);
             path.close();
-            p.setShader(new LinearGradient(0, 0, 0, h, Color.argb(34, 236, 220, 120), Color.argb(0, 236, 220, 120), Shader.TileMode.CLAMP));
+            p.setShader(lg(0, 0, 0, h, Color.argb(34, 236, 220, 120), Color.argb(0, 236, 220, 120)));
             c.drawPath(path, p);
         }
         p.setShader(null);
@@ -1344,7 +1344,7 @@ public final class BottomScreenView extends View {
             path.lineTo(x - tw, h);
             path.quadTo(x - tw * 0.55f, h * 0.6f, x - tw * 0.4f, 0);
             path.close();
-            p.setShader(new LinearGradient(0, 0, 0, h, Color.argb(70, 30, 60, 40), Color.argb(150, 26, 40, 22), Shader.TileMode.CLAMP));
+            p.setShader(lg(0, 0, 0, h, Color.argb(70, 30, 60, 40), Color.argb(150, 26, 40, 22)));
             c.drawPath(path, p);
         }
         p.setShader(null);
@@ -1477,8 +1477,8 @@ public final class BottomScreenView extends View {
     private void woodPanel(Canvas c, RectF r, float radius, boolean lit) {
         paint.setStyle(Paint.Style.FILL);
         paint.setAlpha(255);
-        paint.setShader(new LinearGradient(0, r.top, 0, r.bottom,
-            lit ? Color.rgb(186, 124, 64) : WOOD_LIGHT, lit ? Color.rgb(136, 84, 40) : WOOD_DARK, Shader.TileMode.CLAMP));
+        paint.setShader(lg(0, r.top, 0, r.bottom,
+            lit ? Color.rgb(186, 124, 64) : WOOD_LIGHT, lit ? Color.rgb(136, 84, 40) : WOOD_DARK));
         c.drawRoundRect(r, radius, radius, paint);
         paint.setShader(null);
 
@@ -1700,7 +1700,7 @@ public final class BottomScreenView extends View {
         int top = pressed ? Color.rgb(120, 200, 230) : Color.rgb(70, 150, 190);
         int bottom = pressed ? Color.rgb(40, 120, 160) : Color.rgb(24, 80, 120);
         paint.setAlpha(255);
-        paint.setShader(new LinearGradient(0, cy - r, 0, cy + r, top, bottom, Shader.TileMode.CLAMP));
+        paint.setShader(lg(0, cy - r, 0, cy + r, top, bottom));
         c.drawCircle(fpX, cy, r * 0.87f, paint);
         paint.setShader(null);
         paint.setColor(Color.argb(60, 255, 255, 255));
@@ -2038,7 +2038,7 @@ public final class BottomScreenView extends View {
         float br = unit * 0.02f;
         paint.setStyle(Paint.Style.FILL);
         paint.setAlpha(255);
-        paint.setShader(new LinearGradient(0, board.top, 0, board.bottom, Color.rgb(46, 26, 12), Color.rgb(70, 40, 18), Shader.TileMode.CLAMP));
+        paint.setShader(lg(0, board.top, 0, board.bottom, Color.rgb(46, 26, 12), Color.rgb(70, 40, 18)));
         c.drawRoundRect(board, br, br, paint);
         paint.setShader(null);
         paint.setStyle(Paint.Style.STROKE);
@@ -2145,7 +2145,7 @@ public final class BottomScreenView extends View {
         c.drawCircle(x, y, r, paint);
         int base = row.color;
         paint.setAlpha(255);
-        paint.setShader(new LinearGradient(0, y - r, 0, y + r, lighten(base), base, Shader.TileMode.CLAMP));
+        paint.setShader(lg(0, y - r, 0, y + r, lighten(base), base));
         c.drawCircle(x, y, r * 0.86f, paint);
         paint.setShader(null);
         // Gloss.
@@ -2199,7 +2199,7 @@ public final class BottomScreenView extends View {
         float rad = r.height() * 0.3f;
         paint.setStyle(Paint.Style.FILL);
         paint.setAlpha(255);
-        paint.setShader(new LinearGradient(0, r.top, 0, r.bottom, Color.rgb(240, 150, 50), Color.rgb(184, 96, 26), Shader.TileMode.CLAMP));
+        paint.setShader(lg(0, r.top, 0, r.bottom, Color.rgb(240, 150, 50), Color.rgb(184, 96, 26)));
         c.drawRoundRect(r, rad, rad, paint);
         paint.setShader(null);
         paint.setStyle(Paint.Style.STROKE);
@@ -2215,9 +2215,9 @@ public final class BottomScreenView extends View {
         paint.setStyle(Paint.Style.FILL);
         paint.setAlpha(255);
         // A pale tag (the DK numbers' red outline reads best on it); a little golden once complete.
-        paint.setShader(new LinearGradient(0, r.top, 0, r.bottom,
+        paint.setShader(lg(0, r.top, 0, r.bottom,
             complete ? Color.rgb(255, 236, 150) : Color.rgb(252, 240, 210),
-            complete ? Color.rgb(232, 196, 90) : Color.rgb(226, 204, 160), Shader.TileMode.CLAMP));
+            complete ? Color.rgb(232, 196, 90) : Color.rgb(226, 204, 160)));
         c.drawRoundRect(r, rad, rad, paint);
         paint.setShader(null);
         paint.setStyle(Paint.Style.STROKE);
@@ -2436,6 +2436,33 @@ public final class BottomScreenView extends View {
         } catch (NumberFormatException e) {
             return -1;
         }
+    }
+
+    // Two-colour vertical/horizontal gradients, kept and reused (the boards don't move, so the
+    // same ones come back every redraw) rather than made afresh each time (less garbage to collect).
+    private final android.util.LongSparseArray<LinearGradient> gradients = new android.util.LongSparseArray<>();
+
+    private static long mix(long h, int v) {
+        return (h ^ (v & 0xFFFFFFFFL)) * 1099511628211L;
+    }
+
+    private LinearGradient lg(float x0, float y0, float x1, float y1, int c0, int c1) {
+        long key = 1469598103934665603L;
+        key = mix(key, Float.floatToIntBits(x0));
+        key = mix(key, Float.floatToIntBits(y0));
+        key = mix(key, Float.floatToIntBits(x1));
+        key = mix(key, Float.floatToIntBits(y1));
+        key = mix(key, c0);
+        key = mix(key, c1);
+        LinearGradient g = gradients.get(key);
+        if (g == null) {
+            if (gradients.size() > 400) {
+                gradients.clear();   // (layout changed, or something sliding: start over)
+            }
+            g = new LinearGradient(x0, y0, x1, y1, c0, c1, Shader.TileMode.CLAMP);
+            gradients.put(key, g);
+        }
+        return g;
     }
 
     /** Largest text size up to {@code max} at which {@code s} fits in {@code width}. */
