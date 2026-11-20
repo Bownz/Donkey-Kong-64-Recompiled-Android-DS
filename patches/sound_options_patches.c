@@ -1031,6 +1031,7 @@ static u8 mc_game_locked(CameraPaad *AAD) {
 u8 getBonePosition(Actor *actor, s32 boneIndex, f32 *x, f32 *y, f32 *z);
 void func_global_asm_806E225C(u8 arg0, u8 arg1);
 extern Actor *gCurrentActorPointer;
+f32 func_global_asm_806EA2D8(void);
 void func_global_asm_806EAB44(Actor *arg0, u8 arg1);
 Gfx *alignHUD(Gfx *dl, u8 alignment);
 Gfx *popHUD(Gfx *dl, u8 alignment);
@@ -1150,6 +1151,23 @@ static void fp_update(CameraPaad *CaaD) {
         }
         fp_yaw -= rx * 70.0f * getFrameDelta();
         fp_pitch -= ry * 45.0f * getFrameDelta();
+        // Gyro (and mouse) aiming, as in the game's own first person view (getStickPosition:
+        // the same deltas, inversion settings and scale).
+        {
+            f32 gyx = 0.0f, gyy = 0.0f, msx = 0.0f, msy = 0.0f, k;
+            s32 igx = 0, igy = 0, imx = 0, imy = 0;
+            recomp_get_gyro_deltas(&gyy, &gyx);
+            recomp_get_gyro_inverted_axes(&igx, &igy);
+            recomp_get_mouse_deltas(&msx, &msy);
+            recomp_get_mouse_inverted_axes(&imx, &imy);
+            gyx = igx ? -gyx : gyx;
+            gyy = igy ? gyy : -gyy;
+            msx = imx ? -msx : msx;
+            msy = imy ? msy : -msy;
+            k = func_global_asm_806EA2D8();
+            fp_yaw -= (gyx + msx) * 0.08f * k * (4096.0f / 360.0f);
+            fp_pitch += (gyy + msy) * 0.6f * k;
+        }
         fp_pitch = mc_clamp(fp_pitch, -0x380, 0x380);
         while (fp_yaw < 0.0f) {
             fp_yaw += 4096.0f;
