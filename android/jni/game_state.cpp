@@ -5,6 +5,7 @@
 // addresses (US 1.0) and patches/patches_ui.c for the PlayerProgress / CharacterProgress
 // structures.
 
+#include <cstring>
 #include <android/log.h>
 #include <jni.h>
 
@@ -450,6 +451,18 @@ Java_io_github_bownz_dk64recomp_GameState_nativeRead(JNIEnv* env, jclass, jintAr
             }
             if (control_state == 0x3C) {
                 bits |= (1 << 24) | 4; // crouching: Z + C moves come from here
+            }
+            // Bit 27: under the water (in water, Actor 0x6A bit 2, and more than 10 below its
+            // surface, Actor 0xAC; as the game patch's first person checks), not at the surface.
+            {
+                const uint16_t inWater = read_u16(rdram, player + 0x6A);
+                uint32_t yBits = read_u32(rdram, player + 0x80), surfBits = read_u32(rdram, player + 0xAC);
+                float y, surface;
+                std::memcpy(&y, &yBits, 4);
+                std::memcpy(&surface, &surfBits, 4);
+                if ((inWater & 2) && (y < surface - 10.0f)) {
+                    bits |= 1 << 27;
+                }
             }
         }
         values[kCount - 1] = bits;

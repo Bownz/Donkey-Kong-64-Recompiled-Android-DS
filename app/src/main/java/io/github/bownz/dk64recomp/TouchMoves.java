@@ -282,7 +282,7 @@ final class TouchMoves {
         switch (move) {
             case FIRST_PERSON: return state.canFirstPerson || state.firstPerson || state.gunOut;
             case WEAPON: return state.canZMoves || state.gunOut || state.firstPerson;
-            case CAMERA: return (state.canZMoves || state.swimming) && !state.gunOut;
+            case CAMERA: return (state.canZMoves || state.underwater) && !state.gunOut;
             default: return state.canZMoves && !state.gunOut;
         }
     }
@@ -314,7 +314,8 @@ final class TouchMoves {
             // In first person (or the camera) Z + C-Up would just leave the view.
             case INSTRUMENT: return state.swimming || state.climbing || state.gunOut || state.firstPerson || state.camera
                 || k.instrumentEnergy <= 0;
-            case CAMERA: return !state.camera && (state.climbing || state.gunOut || state.film <= 0);
+            // The camera works under the water, not swimming on the surface.
+            case CAMERA: return !state.camera && ((state.swimming && !state.underwater) || state.climbing || state.gunOut || state.film <= 0);
             default: return false;
         }
     }
