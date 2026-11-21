@@ -454,9 +454,7 @@ Java_io_github_bownz_dk64recomp_GameState_nativeRead(JNIEnv* env, jclass, jintAr
             if (control_state == 0x3C) {
                 bits |= (1 << 24) | 4; // crouching: Z + C moves come from here
             }
-            // Bit 27: under the water (not swimming on its surface): the game's own input set
-            // for it, the one whose C-Up is the underwater first person view (on the surface,
-            // the swimming steering without it). Bit 28: swimming on the surface.
+            // Bit 27: under the water; bit 28: swimming on the surface (water_mode).
             {
                 const int w = dk64::android::water_mode(rdram);
                 if (w == 2) {
@@ -498,35 +496,22 @@ Java_io_github_bownz_dk64recomp_GameState_nativeReadFlags(JNIEnv* env, jclass, j
     return JNI_TRUE;
 }
 
-// 0 not in the water, 1 swimming on the surface, 2 under the water: from the input sets the
-// player is using this frame (patches/android_hooks.c reports them). The first time each set is
-// seen it's also written to the session log, to check these rules.
+// 0 not swimming, 1 swimming on the surface, 2 under the water: the Kong's control state, as
+// the game uses them (code_D78D0.c: 0x4E, swimming on the surface, becomes 0x4F once the Kong
+// dives more than 10 below it). Standing in shallow water is neither (the land states).
 int dk64::android::water_mode(const uint8_t* rdram) {
-    const uint64_t sets[2] = { g_sets_frame[0].load(), g_sets_frame[1].load() };
-    int mode = 0;
-    for (uint32_t i = 0; i < static_cast<uint32_t>(kControlStates); i++) {
-        if (!((sets[i >> 6] >> (i & 63)) & 1)) {
-            continue;
-        }
-        const uint32_t c_up = handler(rdram, static_cast<uint8_t>(i), kHandlerCUp);
-        const uint32_t last = handler(rdram, static_cast<uint8_t>(i), 0x40);
-        int m = 0;
-        if (c_up == kFirstPersonUnderwater) {
-            m = 2;
-        } else if (in(last, kSwimmingHandlers, 2)) {
-            m = 1;
-        }
-        static std::atomic<uint64_t> logged[2]{};
-        const uint64_t bit = 1ull << (i & 63);
-        if ((logged[i >> 6].fetch_or(bit) & bit) == 0) {
-            printf("Water check: input set 0x%02X, C-Up %08X, last %08X -> %s\n", i, c_up, last,
-                m == 2 ? "under the water" : m == 1 ? "surface swimming" : "not swimming");
-        }
-        if (m > mode) {
-            mode = m;
-        }
+    const uint32_t player = read_u32(rdram, kPlayerPointer);
+    if (player < 0x80000000u || player >= 0x80800000u - 0x300) {
+        return 0;
     }
-    return mode;
+    const uint8_t state = read_u8(rdram, player + kPlayerControlState);
+    if (state == 0x4E) {
+        return 1;
+    }
+    if (state == 0x4F) {
+        return 2;
+    }
+    return 0;
 }
 
 void dk64::android::set_touch_kong_swap(bool enabled) {
