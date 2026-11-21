@@ -76,19 +76,36 @@ final class FirstPersonPromptView extends View {
         if ((status & 1) == 0) {
             return;
         }
-        float s = getHeight() / 240f;   // pixels per game unit
+        // Where the game's 320 x 240 HUD lands on this view: it fills the height and is
+        // right-aligned on screens 4:3 to 16:9 wide; on narrower screens (4:3 or squarer, e.g.
+        // the bottom screen) the picture fits the width and is centred vertically; wider than
+        // 16:9 the HUD is clamped to a centred 16:9 area.
+        float w = getWidth(), h = getHeight();
+        float s;
+        if (w / h < 4f / 3f) {
+            s = w / 320f;
+            hudTop = (h - 240f * s) / 2f;
+            hudRight = w;
+        } else {
+            s = h / 240f;
+            hudTop = 0f;
+            float hudW = Math.min(w, h * 16f / 9f);
+            hudRight = (w + hudW) / 2f;
+        }
         drawGlyph(canvas, s, ROW_EXIT, glyphs[0], "B");
         if ((status & 2) != 0) {
             drawGlyph(canvas, s, ROW_SHOOT, glyphs[1], "R");
         }
     }
 
+    private float hudTop, hudRight;
+
     // The glyph ending just left of the text, centred on its row.
     private void drawGlyph(Canvas canvas, float s, float row, String glyph, String fallback) {
         {
             float size = ROW_HEIGHT * 1.6f * s;
-            float textLeft = getWidth() - ((320f - ((status & 4) != 0 ? TEXT_X_PHOTO : TEXT_X)) * s);
-            float mid = (row + (ROW_HEIGHT / 2f)) * s;
+            float textLeft = hudRight - ((320f - ((status & 4) != 0 ? TEXT_X_PHOTO : TEXT_X)) * s);
+            float mid = hudTop + (row + (ROW_HEIGHT / 2f)) * s;
             if (ButtonIcons.draw(canvas, getContext(), glyph, textLeft - (3f * s) - size / 2f, mid, size)) {
                 return;
             }
@@ -97,10 +114,10 @@ final class FirstPersonPromptView extends View {
         String text = useGlyph ? glyph : fallback;
         glyphPaint.setTypeface(useGlyph ? promptFont : Typeface.DEFAULT_BOLD);
         glyphPaint.setTextSize(ROW_HEIGHT * 1.5f * s);
-        float textLeft = getWidth() - ((320f - ((status & 4) != 0 ? TEXT_X_PHOTO : TEXT_X)) * s);
+        float textLeft = hudRight - ((320f - ((status & 4) != 0 ? TEXT_X_PHOTO : TEXT_X)) * s);
         float w = glyphPaint.measureText(text);
         float x = textLeft - (3f * s) - w;
-        float mid = (row + (ROW_HEIGHT / 2f)) * s;
+        float mid = hudTop + (row + (ROW_HEIGHT / 2f)) * s;
         Paint.FontMetrics fm = glyphPaint.getFontMetrics();
         canvas.drawText(text, x, mid - ((fm.ascent + fm.descent) / 2f), glyphPaint);
     }
