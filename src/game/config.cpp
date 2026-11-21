@@ -1553,6 +1553,16 @@ extern "C" void dk64_android_apply_control_preset(int modern) {
     if (general.has_option(recompui::config::general::options::gyro_sensitivity)) {
         general.update_option_value(recompui::config::general::options::gyro_sensitivity, modern ? 25.0 : 0.0);
     }
+    // First Person: Modern with the Modern layout (walk, look with the right stick, ZR shoots),
+    // Classic (as on the N64) with Classic. Still yours to change after.
+    {
+        recomp::config::Config &dual = recompui::config::get_config("dual_screen");
+        for (const char *id : { "android_fp_right_stick", "android_fp_walk", "android_fp_polish" }) {
+            dual.update_option_value(id, static_cast<uint32_t>(modern ? 1u : 0u));
+        }
+        dk64_sync_combined_options();
+        dual.save_config();
+    }
     general.save_config();
 
     control_preset_cached.store(modern ? 1 : 0, std::memory_order_relaxed);
