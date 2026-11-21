@@ -10,6 +10,7 @@
 #include "librecomp/config.hpp"
 #if defined(__ANDROID__)
 #include <fstream>
+#include <array>
 #include "recompinput/profiles.h"
 #include "librecomp/game.hpp"
 #endif
@@ -1461,6 +1462,80 @@ static bool dk64_load_layout_bindings(int profile, int modern) {
     return any;
 }
 
+// The shipped bindings for each layout (set up on the AYN Thor, 2026-11-20; DK64Controls log).
+static void dk64_apply_layout_table(int profile, int modern) {
+    using namespace recompinput;
+    static const std::pair<GameInput, std::array<InputField, 2>> modern_table[] = {
+        { GameInput::Y_AXIS_POS, {{ InputField::controller_analog(SDL_CONTROLLER_AXIS_LEFTY, false), InputField{} }} },
+        { GameInput::Y_AXIS_NEG, {{ InputField::controller_analog(SDL_CONTROLLER_AXIS_LEFTY, true), InputField{} }} },
+        { GameInput::X_AXIS_NEG, {{ InputField::controller_analog(SDL_CONTROLLER_AXIS_LEFTX, false), InputField{} }} },
+        { GameInput::X_AXIS_POS, {{ InputField::controller_analog(SDL_CONTROLLER_AXIS_LEFTX, true), InputField{} }} },
+        { GameInput::A, {{ InputField::controller_digital(SDL_CONTROLLER_BUTTON_A), InputField{} }} },
+        { GameInput::B, {{ InputField::controller_digital(SDL_CONTROLLER_BUTTON_B), InputField{} }} },
+        { GameInput::Z, {{ InputField::controller_analog(SDL_CONTROLLER_AXIS_TRIGGERLEFT, true), InputField{} }} },
+        { GameInput::L, {{ InputField::controller_digital(SDL_CONTROLLER_BUTTON_LEFTSHOULDER), InputField{} }} },
+        { GameInput::R, {{ InputField::controller_analog(SDL_CONTROLLER_AXIS_TRIGGERRIGHT, true), InputField{} }} },
+        { GameInput::START, {{ InputField::controller_digital(SDL_CONTROLLER_BUTTON_START), InputField{} }} },
+        { GameInput::C_UP, {{ InputField::controller_digital(SDL_CONTROLLER_BUTTON_RIGHTSTICK), InputField{} }} },
+        { GameInput::C_DOWN, {{ InputField{}, InputField{} }} },
+        { GameInput::C_LEFT, {{ InputField{}, InputField{} }} },
+        { GameInput::C_RIGHT, {{ InputField{}, InputField{} }} },
+        { GameInput::DPAD_UP, {{ InputField::controller_digital(SDL_CONTROLLER_BUTTON_DPAD_UP), InputField{} }} },
+        { GameInput::DPAD_DOWN, {{ InputField::controller_digital(SDL_CONTROLLER_BUTTON_DPAD_DOWN), InputField{} }} },
+        { GameInput::DPAD_LEFT, {{ InputField::controller_digital(SDL_CONTROLLER_BUTTON_DPAD_LEFT), InputField{} }} },
+        { GameInput::DPAD_RIGHT, {{ InputField::controller_digital(SDL_CONTROLLER_BUTTON_DPAD_RIGHT), InputField{} }} },
+        { GameInput::INSTRUMENT, {{ InputField{}, InputField{} }} },
+        { GameInput::FAIRY_CAMERA, {{ InputField{}, InputField{} }} },
+        { GameInput::GUN, {{ InputField::controller_digital(SDL_CONTROLLER_BUTTON_Y), InputField{} }} },
+        { GameInput::ORANGE, {{ InputField::controller_digital(SDL_CONTROLLER_BUTTON_X), InputField{} }} },
+        { GameInput::Z_INSTRUMENT, {{ InputField::controller_analog(SDL_CONTROLLER_AXIS_RIGHTY, false), InputField{} }} },
+        { GameInput::Z_FAIRY_CAMERA, {{ InputField::controller_analog(SDL_CONTROLLER_AXIS_RIGHTY, true), InputField{} }} },
+        { GameInput::Z_GUN, {{ InputField::controller_analog(SDL_CONTROLLER_AXIS_RIGHTX, false), InputField{} }} },
+        { GameInput::Z_ORANGE, {{ InputField::controller_analog(SDL_CONTROLLER_AXIS_RIGHTX, true), InputField{} }} },
+    };
+    static const std::pair<GameInput, std::array<InputField, 2>> classic_table[] = {
+        { GameInput::Y_AXIS_POS, {{ InputField::controller_analog(SDL_CONTROLLER_AXIS_LEFTY, false), InputField{} }} },
+        { GameInput::Y_AXIS_NEG, {{ InputField::controller_analog(SDL_CONTROLLER_AXIS_LEFTY, true), InputField{} }} },
+        { GameInput::X_AXIS_NEG, {{ InputField::controller_analog(SDL_CONTROLLER_AXIS_LEFTX, false), InputField{} }} },
+        { GameInput::X_AXIS_POS, {{ InputField::controller_analog(SDL_CONTROLLER_AXIS_LEFTX, true), InputField{} }} },
+        { GameInput::A, {{ InputField::controller_digital(SDL_CONTROLLER_BUTTON_A), InputField{} }} },
+        { GameInput::B, {{ InputField::controller_digital(SDL_CONTROLLER_BUTTON_B), InputField{} }} },
+        { GameInput::Z, {{ InputField::controller_analog(SDL_CONTROLLER_AXIS_TRIGGERLEFT, true), InputField::controller_analog(SDL_CONTROLLER_AXIS_TRIGGERRIGHT, true) }} },
+        { GameInput::L, {{ InputField::controller_digital(SDL_CONTROLLER_BUTTON_LEFTSHOULDER), InputField{} }} },
+        { GameInput::R, {{ InputField::controller_digital(SDL_CONTROLLER_BUTTON_RIGHTSHOULDER), InputField{} }} },
+        { GameInput::START, {{ InputField::controller_digital(SDL_CONTROLLER_BUTTON_START), InputField{} }} },
+        { GameInput::C_UP, {{ InputField::controller_analog(SDL_CONTROLLER_AXIS_RIGHTY, false), InputField{} }} },
+        { GameInput::C_DOWN, {{ InputField::controller_analog(SDL_CONTROLLER_AXIS_RIGHTY, true), InputField{} }} },
+        { GameInput::C_LEFT, {{ InputField::controller_analog(SDL_CONTROLLER_AXIS_RIGHTX, false), InputField{} }} },
+        { GameInput::C_RIGHT, {{ InputField::controller_analog(SDL_CONTROLLER_AXIS_RIGHTX, true), InputField{} }} },
+        { GameInput::DPAD_UP, {{ InputField::controller_digital(SDL_CONTROLLER_BUTTON_DPAD_UP), InputField{} }} },
+        { GameInput::DPAD_DOWN, {{ InputField::controller_digital(SDL_CONTROLLER_BUTTON_DPAD_DOWN), InputField{} }} },
+        { GameInput::DPAD_LEFT, {{ InputField::controller_digital(SDL_CONTROLLER_BUTTON_DPAD_LEFT), InputField{} }} },
+        { GameInput::DPAD_RIGHT, {{ InputField::controller_digital(SDL_CONTROLLER_BUTTON_DPAD_RIGHT), InputField{} }} },
+        { GameInput::INSTRUMENT, {{ InputField{}, InputField{} }} },
+        { GameInput::FAIRY_CAMERA, {{ InputField{}, InputField{} }} },
+        { GameInput::GUN, {{ InputField{}, InputField{} }} },
+        { GameInput::ORANGE, {{ InputField{}, InputField{} }} },
+        { GameInput::Z_INSTRUMENT, {{ InputField{}, InputField{} }} },
+        { GameInput::Z_FAIRY_CAMERA, {{ InputField{}, InputField{} }} },
+        { GameInput::Z_GUN, {{ InputField{}, InputField{} }} },
+        { GameInput::Z_ORANGE, {{ InputField{}, InputField{} }} },
+    };
+    if (modern) {
+        for (const auto &row : modern_table) {
+            for (size_t b = 0; b < 2 && b < num_bindings_per_input; b++) {
+                profiles::set_input_binding(profile, row.first, b, row.second[b]);
+            }
+        }
+    } else {
+        for (const auto &row : classic_table) {
+            for (size_t b = 0; b < 2 && b < num_bindings_per_input; b++) {
+                profiles::set_input_binding(profile, row.first, b, row.second[b]);
+            }
+        }
+    }
+}
+
 extern "C" void dk64_android_apply_control_preset(int modern) {
     using namespace recompinput;
     const int profile = profiles::get_sp_controller_profile_index();
@@ -1525,6 +1600,7 @@ extern "C" void dk64_android_apply_control_preset(int modern) {
                 }
             }
         }
+        dk64_apply_layout_table(profile, modern ? 1 : 0);
         // Your own bindings for this layout, if you've set it up before (on top of the defaults).
         dk64_load_layout_bindings(profile, modern ? 1 : 0);
         profiles::save_controls_config(recomp::get_config_path() / (recompui::config::controls::id + ".json"));
