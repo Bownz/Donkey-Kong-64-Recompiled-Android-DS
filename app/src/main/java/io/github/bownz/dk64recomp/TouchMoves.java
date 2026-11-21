@@ -331,7 +331,7 @@ final class TouchMoves {
                 || (GameState.fpStatus() & 1) != 0
                 || k.instrumentEnergy <= 0;
             // The camera works under the water, not swimming on the surface.
-            case CAMERA: return !state.camera && (((state.swimming || state.inWater) && !state.underwater) || state.climbing || state.gunOut || state.film <= 0);
+            case CAMERA: return !state.camera && (state.surfaceSwimming || state.climbing || state.gunOut || state.film <= 0);
             default: return false;
         }
     }

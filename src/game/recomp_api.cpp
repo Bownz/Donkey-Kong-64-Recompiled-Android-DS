@@ -678,7 +678,9 @@ extern "C" void recomp_get_extra_actions(uint8_t* rdram, recomp_context* ctx) {
             dk64_android_log_bindings(frames == 1 ? "startup" : "changed", 0);
         }
     }
-    _return<int32_t>(ctx, dk64::android::extra_actions() | (dk64_android_control_preset() != 0 ? 64 : 0));
+    // 2048: swimming on the water's surface (no fairy camera there; under the water it works).
+    _return<int32_t>(ctx, dk64::android::extra_actions() | (dk64_android_control_preset() != 0 ? 64 : 0) |
+        (dk64::android::water_mode(rdram) == 1 ? 2048 : 0));
 #else
     _return<int32_t>(ctx, 0);
 #endif

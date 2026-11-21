@@ -386,7 +386,7 @@ final class GameState {
     boolean fileLoaded;
     /** Swimming (on the surface or underwater). */
     boolean underwater;   // swimming under the surface (not on it)
-    boolean inWater;      // in the water (on the surface or under it)
+    boolean surfaceSwimming;   // swimming on the water's surface
     boolean swimming;
     /** Hanging on a vine, or climbing a tree or pole. */
     boolean climbing;
@@ -488,7 +488,7 @@ final class GameState {
         onFeet = (raw[COUNT - 1] & (1 << 24)) != 0;
         camera = (raw[COUNT - 1] & (1 << 25)) != 0;
         underwater = (raw[COUNT - 1] & (1 << 27)) != 0;
-        inWater = (raw[COUNT - 1] & (1 << 28)) != 0;
+        surfaceSwimming = (raw[COUNT - 1] & (1 << 28)) != 0;
         cutscene = (raw[COUNT - 1] & (1 << 26)) != 0;
         for (int k = 0; k < KONG_COUNT; k++) {
             for (int l = 0; l < LEVELS; l++) {

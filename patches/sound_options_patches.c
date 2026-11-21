@@ -2159,10 +2159,9 @@ RECOMP_PATCH u16 func_global_asm_806DFF34(u16 arg0, u16 *arg1) {
         }
         pressed = actions & ~lastActions;
         lastActions = actions;
-        // The fairy camera only works under the water, not swimming on its surface.
-        if ((gCurrentPlayer != NULL) && (gCurrentPlayer->unk6A & 2) &&
-            !(gCurrentPlayer->y_position < gCurrentPlayer->unkAC - 10.0f) &&
-            !fp_photo_state(gCurrentPlayer->control_state)) {
+        // The fairy camera only works under the water, not swimming on its surface (bit 2048:
+        // recomp_get_extra_actions, from the game's input sets).
+        if (actions & 2048) {
             pressed &= ~(2 | 256);
         }
         // Z moves (Configure Inputs, Modern: by default Z + the right stick): pressed while Z
