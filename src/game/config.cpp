@@ -1592,7 +1592,7 @@ extern "C" int dk64_android_experience_chosen() {
 // experience: 0 Classic, 1 Modern, 3 Enhanced (2 is Custom in the option). Enhanced: Modern's
 // graphics, cutscenes and camera with the Modern control layout (minus Gun / Orange on X / Y),
 // and otherwise the original game: no game feel changes, the game's own first person (looking
-// with the right stick), original lightning, no quick Kong swapping, no rumbles.
+// with the left stick, as on the N64), original lightning, no quick Kong swapping, no rumbles.
 extern "C" void dk64_android_apply_experience(int experience) {
     if (applying_experience) {
         return;
@@ -1662,9 +1662,6 @@ extern "C" void dk64_android_apply_experience(int experience) {
                             "android_fp_right_stick", "android_fp_walk",
                             "android_fp_polish" }) {
         dual.update_option_value(id, static_cast<uint32_t>(modern ? 1u : 0u));
-    }
-    if (enhanced) {
-        dual.update_option_value("android_fp_right_stick", 1u);   // the game's own view, looked round with the right stick
     }
     dk64_sync_combined_options();
     dual.save_config();
