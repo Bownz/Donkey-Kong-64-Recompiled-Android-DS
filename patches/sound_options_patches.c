@@ -1097,6 +1097,10 @@ static u8 fp_photo_state(s32 state) {
 }
 
 static u8 fp_in_photo = FALSE;   // the camera is out (with Walk in First Person on): its prompts
+// The on-screen touch controller is in use (recomp_get_extra_actions bit 4096, read once a frame
+// in the input mapping): B shoots / takes the photo instead of leaving, nothing is put on ZR,
+// and no prompts are shown (the touch first person and camera buttons leave).
+static u8 touch_ctl = FALSE;
 
 static Gfx *fp_draw_prompts(Gfx *dl, Actor *unused) {
     gSPDisplayList(dl++, &D_1000118);
@@ -1201,11 +1205,13 @@ static void fp_update(CameraPaad *CaaD) {
         if (rawNew & B_BUTTON) {
             fp_resume_after_photo = FALSE;
         }
-        addActorToTextOverlayRenderArray(fp_draw_prompts, NULL, 5);
+        if (!touch_ctl) {
+            addActorToTextOverlayRenderArray(fp_draw_prompts, NULL, 5);
+        }
     }
     // B leaves; so do trees, poles and vines (modern_camera_free_state), swimming (Kong states
     // 0x4E/0x4F, or under the water's surface) and the Rocketbarrel. Getting hit doesn't.
-    if (fp_mode && ((rawNew & B_BUTTON) || modern_camera_free_state(kong) || (kong->control_state == 0x63) ||
+    if (fp_mode && (((rawNew & B_BUTTON) && !touch_ctl) || modern_camera_free_state(kong) || (kong->control_state == 0x63) ||
         (!fp_water && ((kong->control_state == 0x4E) || (kong->control_state == 0x4F) ||
         (((kong->unk6A & 2) != 0) && (kong->y_position < kong->unkAC - 10.0f)))))) {
         fp_set_mode(kong, FALSE);
@@ -1213,7 +1219,7 @@ static void fp_update(CameraPaad *CaaD) {
     }
     // ZR with the gun out: the game's own first person shot (func_global_asm_806E225C with its
     // first person flag: from the view, where it points, up and down too), as the Kong.
-    if (fp_mode && (rawNew & R_TRIG) && fp_gun_out()) {
+    if (fp_mode && (rawNew & (touch_ctl ? B_BUTTON : R_TRIG)) && fp_gun_out()) {   // (touch: B)
         Actor *was = gCurrentActorPointer;
         gCurrentActorPointer = kong;
         func_global_asm_806E225C(1, 1);
@@ -1293,7 +1299,9 @@ static void fp_update(CameraPaad *CaaD) {
         CaaD->unkB2 = (((s32)fp_yaw) + 0x800) & 0xFFF;
         CaaD->unkB0 = 0;
         kong->shadow_opacity = 0;   // unseen (still animated, so its head can be followed)
-        addActorToTextOverlayRenderArray(fp_draw_prompts, NULL, 5);
+        if (!touch_ctl) {
+            addActorToTextOverlayRenderArray(fp_draw_prompts, NULL, 5);
+        }
         // With the gun out, the game's own first person crosshair (or the sniper scope with
         // that upgrade), as func_global_asm_806D2954 shows them: red, or green on a homing lock.
         if (fp_gun_out()) {
@@ -1304,7 +1312,8 @@ static void fp_update(CameraPaad *CaaD) {
             }
         }
     }
-    recomp_set_fp_status(((fp_mode || fp_in_photo) ? 1 : 0) | (((fp_mode && fp_gun_out()) || fp_in_photo) ? 2 : 0) | (fp_in_photo ? 4 : 0));
+    recomp_set_fp_status(((fp_mode || fp_in_photo) ? 1 : 0) | (((fp_mode && fp_gun_out()) || fp_in_photo) ? 2 : 0) | (fp_in_photo ? 4 : 0) |
+        (touch_ctl ? 8 : 0));
 }
 
 // Shoot Gun With: ZR (outside first person): with the gun out, ZR shoots and B puts it away
@@ -1315,7 +1324,7 @@ static u8 gun_b_was = FALSE, gun_b_new = FALSE;
 
 static u8 gun_tp_active(void) {
     Actor *kong = gCurrentPlayer;
-    return (kong != NULL) && !fp_mode && !fp_in_photo && (recomp_get_gun_button() == 1) &&
+    return (kong != NULL) && !fp_mode && !fp_in_photo && !touch_ctl && (recomp_get_gun_button() == 1) &&
         (kong->PaaD != NULL) && (kong->PaaD->unk8C != 0) && gameIsInAdventureMode() &&
         (is_cutscene_active == 0) && !gameIsInDKTVMode();
 }
@@ -2060,7 +2069,9 @@ static u16 dk_map_buttons(u16 arg0, u16 *arg1) {
     // they press one); ZR shoots with the gun out (it presses B), facing where you look.
     // The camera (with Walk in First Person on): ZR takes the photo (B), B puts it away (C-Down,
     // as the game does); the controller's C buttons do nothing (the touch buttons' still work).
-    if ((gCurrentPlayer != NULL) && fp_photo_state(gCurrentPlayer->control_state) && (recomp_get_game_feel() & FP_WALK)) {
+    // (With the touch controller: B takes the photo, as the game has it; nothing changes here.)
+    if ((gCurrentPlayer != NULL) && fp_photo_state(gCurrentPlayer->control_state) && (recomp_get_game_feel() & FP_WALK) &&
+        !touch_ctl) {
         s32 feel = recomp_get_game_feel();
         u16 b = result & B_BUTTON;
         u16 r = result & R_TRIG;
@@ -2106,7 +2117,7 @@ static u16 dk_map_buttons(u16 arg0, u16 *arg1) {
     if ((gCurrentPlayer != NULL) && (((gCurrentPlayer->PaaD != NULL) && (gCurrentPlayer->PaaD->unk8C != 0)) ||
         ((gCurrentPlayer->control_state >= 0x60) && (gCurrentPlayer->control_state <= 0x63)))) {
         mode = recomp_get_gun_button();
-        if (mode != 0) {
+        if ((mode != 0) && !touch_ctl) {   // (the touch controller: B shoots, as in the game)
             u8 r = (result & R_TRIG) != 0;
             if (mode == 1) {
                 // B puts the gun away: Z held, then Z + C-Left (the game's own combo for it).
@@ -2151,6 +2162,7 @@ RECOMP_PATCH u16 func_global_asm_806DFF34(u16 arg0, u16 *arg1) {
         // (C-Down on its own).
         s32 actions = recomp_get_extra_actions();
         s32 pressed;
+        touch_ctl = (actions & 4096) != 0;
         // Modern layout: R3 (C-Up) is only First Person; with Z held it would play the
         // instrument, so then it does nothing (the Z moves below play it).
         stripCUp = (actions & 64) && (actions & 32) && (result & Z_TRIG);

@@ -73,8 +73,8 @@ final class FirstPersonPromptView extends View {
 
     @Override
     protected void onDraw(Canvas canvas) {
-        if ((status & 1) == 0) {
-            return;
+        if ((status & 1) == 0 || (status & 8) != 0) {
+            return;   // (8: the touch controller - no prompts)
         }
         // Where the game's 320 x 240 HUD lands on this view: it fills the height and is
         // right-aligned on screens 4:3 to 16:9 wide; on narrower screens (4:3 or squarer, e.g.
