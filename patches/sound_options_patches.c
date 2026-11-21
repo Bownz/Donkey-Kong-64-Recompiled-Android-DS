@@ -2184,13 +2184,6 @@ RECOMP_PATCH u16 func_global_asm_806DFF34(u16 arg0, u16 *arg1) {
             combo_at = D_global_asm_80767CC0 - 2;   // straight to the C part...
             combo_c = D_CBUTTONS;
             fp_photo_exit_c = TRUE;                 // ...without Z
-        } else if ((pressed & 4) && fp_mode && fp_gun_out()) {
-            // Gun in Walk in First Person, already out: C-Left on its own puts it away (the
-            // gun-holding states take that); to pull it out, the usual Z + C-Left below (only the
-            // crouch takes C-Left as "draw").
-            combo_at = D_global_asm_80767CC0 - 2;
-            combo_c = L_CBUTTONS;
-            fp_photo_exit_c = TRUE;
         } else if ((pressed & 1) && !fp_mode) {   // (no instrument in first person)
             combo_start(U_CBUTTONS);
             fp_photo_exit_c = FALSE;

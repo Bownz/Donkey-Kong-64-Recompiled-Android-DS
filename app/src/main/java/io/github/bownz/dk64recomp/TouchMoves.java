@@ -202,7 +202,7 @@ final class TouchMoves {
             return;
         }
 
-        if (move == Move.WEAPON && !state.gunOut && (GameState.fpStatus() & 1) != 0) {
+        if (move == Move.WEAPON && (GameState.fpStatus() & 1) != 0) {   // (out or away)
             // Walk in First Person, pulling the gun out: Z, then Z + C-Left (the crouch is what
             // takes C-Left as "draw"), staying in first person.
             final int zz = TouchInput.N64_Z;
