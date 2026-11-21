@@ -464,6 +464,9 @@ Java_io_github_bownz_dk64recomp_GameState_nativeRead(JNIEnv* env, jclass, jintAr
                 if ((inWater & 2) && (y < surface - 10.0f)) {
                     bits |= 1 << 27;
                 }
+                if (inWater & 2) {
+                    bits |= 1 << 28;   // in the water at all (on the surface or under it)
+                }
             }
         }
         values[kCount - 1] = bits;

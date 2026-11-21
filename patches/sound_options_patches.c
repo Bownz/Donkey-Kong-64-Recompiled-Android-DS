@@ -2159,6 +2159,12 @@ RECOMP_PATCH u16 func_global_asm_806DFF34(u16 arg0, u16 *arg1) {
         }
         pressed = actions & ~lastActions;
         lastActions = actions;
+        // The fairy camera only works under the water, not swimming on its surface.
+        if ((gCurrentPlayer != NULL) && (gCurrentPlayer->unk6A & 2) &&
+            !(gCurrentPlayer->y_position < gCurrentPlayer->unkAC - 10.0f) &&
+            !fp_photo_state(gCurrentPlayer->control_state)) {
+            pressed &= ~(2 | 256);
+        }
         // Z moves (Configure Inputs, Modern: by default Z + the right stick): pressed while Z
         // is held, they're the N64's Z + C-Up / C-Down / C-Left / C-Right. Z is already held,
         // so just the C button. Without Z they do nothing here.
