@@ -1280,7 +1280,7 @@ extern "C" int dk64_android_control_preset() {
 }
 
 // ---- Controller bindings log (for choosing the shipped defaults) ---------------------------
-// Logs the controller profile's bindings (logcat tag DK64Controls) as C++ ready to paste into
+// Logs the controller profile's bindings (the session log, lines starting DK64Controls) as C++ ready to paste into
 // dk64_android_apply_control_preset: at startup, whenever they change (checked every ~2 s), and
 // just before switching layout (so the layout being left is logged too).
 #include <android/log.h>
@@ -1364,16 +1364,17 @@ extern "C" void dk64_android_log_bindings(const char *why, int force) {
     }
     last = dump;
     const int preset = dk64_android_control_preset();
-    __android_log_print(ANDROID_LOG_INFO, "DK64Controls", "==== %s layout bindings (%s) ====",
+    printf("DK64Controls ==== %s layout bindings (%s) ====\n",
         preset == 1 ? "MODERN" : preset == 0 ? "CLASSIC" : "UNCHOSEN", why);
     size_t start = 0;
     while (start < dump.size()) {
         size_t end = dump.find('\n', start);
         if (end == std::string::npos) end = dump.size();
-        __android_log_print(ANDROID_LOG_INFO, "DK64Controls", "%s", dump.substr(start, end - start).c_str());
+        printf("DK64Controls %s\n", dump.substr(start, end - start).c_str());
         start = end + 1;
     }
-    __android_log_print(ANDROID_LOG_INFO, "DK64Controls", "==== end ====");
+    printf("DK64Controls ==== end ====\n");
+    fflush(stdout);
 }
 
 // Configure Inputs with the Modern layout: each row named by what it does in the game (the
