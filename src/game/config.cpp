@@ -1044,6 +1044,10 @@ static void set_control_defaults() {
 
 static void set_control_descriptions() {
     recompinput::set_game_input_description(recompinput::GameInput::INSTRUMENT, "Plays your Kong's instrument in one press (the same as Z + C Up).");
+    recompinput::set_game_input_description(recompinput::GameInput::Z_INSTRUMENT, "While holding Z, plays your Kong's instrument (the N64's Z + C Up). On its own this button does whatever else it's set to (the right stick: the camera).");
+    recompinput::set_game_input_description(recompinput::GameInput::Z_FAIRY_CAMERA, "While holding Z, takes out the fairy camera (the N64's Z + C Down).");
+    recompinput::set_game_input_description(recompinput::GameInput::Z_GUN, "While holding Z, takes out (or puts away) your Kong's gun (the N64's Z + C Left).");
+    recompinput::set_game_input_description(recompinput::GameInput::Z_ORANGE, "While holding Z, throws an orange (the N64's Z + C Right).");
     recompinput::set_game_input_description(recompinput::GameInput::GUN, "Takes out your Kong's gun in one press (the same as Z + C Left), or puts it away.");
     recompinput::set_game_input_description(recompinput::GameInput::ORANGE, "Throws an orange in one press (the same as Z + C Right).");
     recompinput::set_game_input_description(recompinput::GameInput::FAIRY_CAMERA, "Takes out the fairy camera in one press (the same as Z + C Down). Press it again, or B, to put it away.");
@@ -1282,18 +1286,22 @@ extern "C" const char *dk64_android_control_action_name(int input) {
     switch (static_cast<GI>(input)) {
         case GI::A: return "Jump";
         case GI::B: return "Attack";
-        case GI::Z: return "Crouch (Z, with C: items)";
+        case GI::Z: return "Crouch (Z)";
         case GI::L: return "Camera Behind";
         case GI::R: return "Shoot / Take Photo";
         case GI::START: return "Pause";
-        case GI::C_UP: return "First Person (C Up, with Z: Instrument)";
-        case GI::C_DOWN: return "Camera Zoom (C Down, with Z: Fairy Camera)";
-        case GI::INSTRUMENT: return "Instrument";
-        case GI::FAIRY_CAMERA: return "Fairy Camera";
-        case GI::C_LEFT: return "Camera Left (C Left, with Z: Gun)";
-        case GI::C_RIGHT: return "Camera Right (C Right, with Z: Orange)";
-        case GI::GUN: return "Gun";
-        case GI::ORANGE: return "Orange";
+        case GI::C_UP: return "First Person";
+        case GI::C_DOWN: return "Camera Zoom";
+        case GI::INSTRUMENT: return "Instrument (one press)";
+        case GI::FAIRY_CAMERA: return "Fairy Camera (one press)";
+        case GI::Z_INSTRUMENT: return "Instrument";
+        case GI::Z_FAIRY_CAMERA: return "Fairy Camera";
+        case GI::Z_GUN: return "Gun";
+        case GI::Z_ORANGE: return "Orange";
+        case GI::C_LEFT: return "C Left";
+        case GI::C_RIGHT: return "C Right";
+        case GI::GUN: return "Gun (one press)";
+        case GI::ORANGE: return "Orange (one press)";
         case GI::DPAD_UP: return "Arcade Up";
         case GI::DPAD_DOWN: return "Arcade Down";
         case GI::DPAD_LEFT: return "Previous Kong";
@@ -1312,13 +1320,14 @@ extern "C" void dk64_android_apply_control_preset(int modern) {
     if (profile >= 0) {
         profiles::reset_profile_bindings(profile, InputDevice::Controller);
         if (modern) {
-            // The right stick keeps C Down / Left / Right; only C Up (first person) comes off it,
-            // so pushing the camera up doesn't drop into first person. C Up is R3.
-            for (GameInput input : { GameInput::C_UP }) {
+            // The right stick is only the camera: the C buttons come off it. C Up (first person)
+            // is pressing it in; C Down, Left and Right aren't used - with Z held, the stick's
+            // four directions are the Z moves instead (Z_INSTRUMENT... below).
+            for (GameInput input : { GameInput::C_UP, GameInput::C_DOWN, GameInput::C_LEFT, GameInput::C_RIGHT }) {
                 for (size_t b = 0; b < num_bindings_per_input; b++) {
                     if (profiles::get_input_binding(profile, input, b).input_type == InputType::ControllerAnalog) {
-                        // Pressing the right stick in is C Up instead (X still is too).
-                        profiles::set_input_binding(profile, input, b, InputField::controller_digital(SDL_CONTROLLER_BUTTON_RIGHTSTICK));
+                        profiles::set_input_binding(profile, input, b, input == GameInput::C_UP
+                            ? InputField::controller_digital(SDL_CONTROLLER_BUTTON_RIGHTSTICK) : InputField{});
                     }
                 }
             }
@@ -1343,15 +1352,23 @@ extern "C" void dk64_android_apply_control_preset(int modern) {
             // ...which the gun (X) and oranges (Y) take: one press each instead of Z + C Left /
             // Z + C Right. (Instrument and Fairy Camera start unassigned.)
             for (size_t b = 0; b < num_bindings_per_input; b++) {
-                for (GameInput shortcut : { GameInput::INSTRUMENT, GameInput::FAIRY_CAMERA, GameInput::GUN, GameInput::ORANGE }) {
+                for (GameInput shortcut : { GameInput::INSTRUMENT, GameInput::FAIRY_CAMERA, GameInput::GUN, GameInput::ORANGE,
+                                            GameInput::Z_INSTRUMENT, GameInput::Z_FAIRY_CAMERA, GameInput::Z_GUN, GameInput::Z_ORANGE }) {
                     profiles::set_input_binding(profile, shortcut, b, InputField{});
                 }
             }
             profiles::set_input_binding(profile, GameInput::GUN, 0, x);
             profiles::set_input_binding(profile, GameInput::ORANGE, 0, y);
+            // Z moves: hold Z and push the right stick (up: instrument, down: fairy camera,
+            // left: gun, right: orange), as the N64's Z + C buttons were.
+            profiles::set_input_binding(profile, GameInput::Z_INSTRUMENT, 0, InputField::controller_analog(SDL_CONTROLLER_AXIS_RIGHTY, false));
+            profiles::set_input_binding(profile, GameInput::Z_FAIRY_CAMERA, 0, InputField::controller_analog(SDL_CONTROLLER_AXIS_RIGHTY, true));
+            profiles::set_input_binding(profile, GameInput::Z_GUN, 0, InputField::controller_analog(SDL_CONTROLLER_AXIS_RIGHTX, false));
+            profiles::set_input_binding(profile, GameInput::Z_ORANGE, 0, InputField::controller_analog(SDL_CONTROLLER_AXIS_RIGHTX, true));
         } else {
             for (size_t b = 0; b < num_bindings_per_input; b++) {
-                for (GameInput shortcut : { GameInput::INSTRUMENT, GameInput::FAIRY_CAMERA, GameInput::GUN, GameInput::ORANGE }) {
+                for (GameInput shortcut : { GameInput::INSTRUMENT, GameInput::FAIRY_CAMERA, GameInput::GUN, GameInput::ORANGE,
+                                            GameInput::Z_INSTRUMENT, GameInput::Z_FAIRY_CAMERA, GameInput::Z_GUN, GameInput::Z_ORANGE }) {
                     profiles::set_input_binding(profile, shortcut, b, InputField{});
                 }
             }

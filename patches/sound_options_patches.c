@@ -2151,28 +2151,31 @@ RECOMP_PATCH u16 func_global_asm_806DFF34(u16 arg0, u16 *arg1) {
         // (C-Down on its own).
         s32 actions = recomp_get_extra_actions();
         s32 pressed;
-        // Modern layout: Z + the right stick pushed up plays the instrument (Z + C-Up; C-Up
-        // itself is the stick pressed in, First Person). The stick on its own stays the camera;
-        // down, left and right with Z are already C-Down, C-Left and C-Right (fairy camera, gun,
-        // orange).
-        {
-            f32 rx, ry;
-            recomp_get_right_analog_inputs(&rx, &ry);   // (y: down is positive)
-            if ((result & Z_TRIG) && (ry < -0.6f) && (rx > -0.5f) && (rx < 0.5f) && !fp_mode) {
-                actions |= 16;
-            }
-        }
         // Modern layout: R3 (C-Up) is only First Person; with Z held it would play the
-        // instrument, so then it does nothing (Z + right stick up plays it).
+        // instrument, so then it does nothing (the Z moves below play it).
         stripCUp = (actions & 64) && (actions & 32) && (result & Z_TRIG);
         pressed = actions & ~lastActions;
         lastActions = actions;
-        if (pressed & 16) {
-            // Z is already held: just C-Up.
-            combo_at = D_global_asm_80767CC0 - 2;
-            combo_c = U_CBUTTONS;
-            fp_photo_exit_c = TRUE;
-            pressed = 0;
+        // Z moves (Configure Inputs, Modern: by default Z + the right stick): pressed while Z
+        // is held, they're the N64's Z + C-Up / C-Down / C-Left / C-Right. Z is already held,
+        // so just the C button. Without Z they do nothing here.
+        if ((pressed & (128 | 256 | 512 | 1024)) && (result & Z_TRIG)) {
+            u16 c = 0;
+            if ((pressed & 128) && !fp_mode) {
+                c = U_CBUTTONS;
+            } else if (pressed & 256) {
+                c = D_CBUTTONS;
+            } else if (pressed & 512) {
+                c = L_CBUTTONS;
+            } else if (pressed & 1024) {
+                c = R_CBUTTONS;
+            }
+            if (c != 0) {
+                combo_at = D_global_asm_80767CC0 - 2;
+                combo_c = c;
+                fp_photo_exit_c = TRUE;
+                pressed = 0;
+            }
         }
         if ((pressed & 2) && (gCurrentPlayer != NULL) && fp_photo_state(gCurrentPlayer->control_state)) {
             combo_at = D_global_asm_80767CC0 - 2;   // straight to the C part...
