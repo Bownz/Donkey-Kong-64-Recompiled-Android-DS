@@ -1570,29 +1570,47 @@ extern "C" int dk64_android_experience_chosen() {
     return std::filesystem::exists(experience_marker()) ? 1 : 0;
 }
 
-extern "C" void dk64_android_apply_experience(int modern) {
+// experience: 0 Classic, 1 Modern, 3 Enhanced (2 is Custom in the option). Enhanced: Modern's
+// graphics, cutscenes and camera with the Modern control layout (minus Gun / Orange on X / Y),
+// and otherwise the original game: no game feel changes, the game's own first person (looking
+// with the right stick), original lightning, no quick Kong swapping, no rumbles.
+extern "C" void dk64_android_apply_experience(int experience) {
     if (applying_experience) {
         return;
     }
     applying_experience = true;
+    const bool enhanced = experience == 3;
+    const int modern = (experience == 1) ? 1 : 0;   // the gameplay features
+    const int looks = (experience == 1 || enhanced) ? 1 : 0;   // graphics, cutscenes, camera
 
-    dk64_android_apply_control_preset(modern);
+    dk64_android_apply_control_preset(looks);
+    if (enhanced) {
+        using namespace recompinput;
+        const int profile = profiles::get_sp_controller_profile_index();
+        if (profile >= 0) {
+            for (size_t b = 0; b < num_bindings_per_input; b++) {
+                profiles::set_input_binding(profile, GameInput::GUN, b, InputField{});
+                profiles::set_input_binding(profile, GameInput::ORANGE, b, InputField{});
+            }
+            profiles::save_controls_config(recomp::get_config_path() / (recompui::config::controls::id + ".json"));
+        }
+    }
 
     recomp::config::Config &graphics = recompui::config::get_graphics_config();
     graphics.update_option_value(recompui::config::graphics::options::res_option,
-        static_cast<uint32_t>(modern ? ultramodern::renderer::Resolution::Auto : ultramodern::renderer::Resolution::Original));
+        static_cast<uint32_t>(looks ? ultramodern::renderer::Resolution::Auto : ultramodern::renderer::Resolution::Original));
     graphics.update_option_value(recompui::config::graphics::options::msaa_option,
-        static_cast<uint32_t>(modern ? ultramodern::renderer::Antialiasing::MSAA2X : ultramodern::renderer::Antialiasing::None));
+        static_cast<uint32_t>(looks ? ultramodern::renderer::Antialiasing::MSAA2X : ultramodern::renderer::Antialiasing::None));
     // Classic keeps the N64's 4:3 picture and HUD; Modern fills a widescreen.
     graphics.update_option_value(recompui::config::graphics::options::ar_option,
-        static_cast<uint32_t>(modern ? ultramodern::renderer::AspectRatio::Expand : ultramodern::renderer::AspectRatio::Original));
+        static_cast<uint32_t>(looks ? ultramodern::renderer::AspectRatio::Expand : ultramodern::renderer::AspectRatio::Original));
     graphics.update_option_value(recompui::config::graphics::options::hr_option,
-        static_cast<uint32_t>(modern ? ultramodern::renderer::HUDRatioMode::Clamp16x9 : ultramodern::renderer::HUDRatioMode::Original));
+        static_cast<uint32_t>(looks ? ultramodern::renderer::HUDRatioMode::Clamp16x9 : ultramodern::renderer::HUDRatioMode::Original));
     // Classic: the cutscene borders and the original draw distance; Modern: no borders, and
     // things stay drawn a bit further away.
     graphics.update_option_value(dk64::configkeys::graphics::cutscene_borders,
-        static_cast<uint32_t>(modern ? dk64::CutsceneBordersMode::Off : dk64::CutsceneBordersMode::On));
-    graphics.update_option_value(dk64::configkeys::graphics::draw_distance, modern ? 30.0 : 0.0);
+        static_cast<uint32_t>(looks ? dk64::CutsceneBordersMode::Off : dk64::CutsceneBordersMode::On));
+    graphics.update_option_value(dk64::configkeys::graphics::draw_distance, looks ? 30.0 : 0.0);
     graphics.save_config();
 
     // Camera: Modern Camera, or the original's own (Free Cam); lightning flashes as in the
@@ -1600,7 +1618,7 @@ extern "C" void dk64_android_apply_experience(int modern) {
     {
         recomp::config::Config &gen = recompui::config::get_general_config();
         gen.update_option_value(dk64::configkeys::general::camera_type,
-            static_cast<uint32_t>(modern ? dk64::CameraTypeMode::Modern : dk64::CameraTypeMode::Free));
+            static_cast<uint32_t>(looks ? dk64::CameraTypeMode::Modern : dk64::CameraTypeMode::Free));
         gen.update_option_value(dk64::configkeys::general::lightning_flashes,
             static_cast<uint32_t>(modern ? dk64::LightningFlashMode::Reduced : dk64::LightningFlashMode::Vanilla));
         gen.save_config();
@@ -1609,7 +1627,7 @@ extern "C" void dk64_android_apply_experience(int modern) {
     recomp::mods::enable_mod("dk64_tag_anywhere", modern != 0);
     recomp::config::Config &dual = recompui::config::get_config("dual_screen");
     dual.update_option_value("android_touch_kong_swap", static_cast<uint32_t>(modern ? 1u : 0u));
-    dual.update_option_value("android_button_icons", static_cast<uint32_t>(modern ? 1u : 0u));
+    dual.update_option_value("android_button_icons", static_cast<uint32_t>(looks ? 1u : 0u));
     dual.update_option_value("android_haptic_feedback", static_cast<uint32_t>(modern ? 1u : 0u));
     dual.update_option_value("android_jump_assist", static_cast<uint32_t>(modern ? 1u : 0u));
     dual.update_option_value("android_gun_button", static_cast<uint32_t>(modern ? 1u : 0u));   // ZR shoots, B puts it away
@@ -1618,23 +1636,26 @@ extern "C" void dk64_android_apply_experience(int modern) {
     dual.update_option_value("android_movement_polish", static_cast<uint32_t>(modern ? 1u : 0u));
     // Bottom screen: Modern has the touch action buttons and the first person button; Classic
     // shows the info only (no buttons).
-    dual.update_option_value("android_bottom_buttons", static_cast<uint32_t>(modern ? 1u : 0u));
-    dual.update_option_value("android_bottom_first_person", static_cast<uint32_t>(modern ? 1u : 0u));
+    dual.update_option_value("android_bottom_buttons", static_cast<uint32_t>(looks ? 1u : 0u));
+    dual.update_option_value("android_bottom_first_person", static_cast<uint32_t>(looks ? 1u : 0u));
     for (const char *id : { "android_move_chaining", "android_air_control",
                             "android_hit_feel", "android_fast_transitions",
                             "android_fp_right_stick", "android_fp_walk",
                             "android_fp_polish" }) {
         dual.update_option_value(id, static_cast<uint32_t>(modern ? 1u : 0u));
     }
+    if (enhanced) {
+        dual.update_option_value("android_fp_right_stick", 1u);   // the game's own view, looked round with the right stick
+    }
     dk64_sync_combined_options();
     dual.save_config();
 
     recomp::config::Config &general = recompui::config::get_general_config();
-    general.update_option_value(experience_option, static_cast<uint32_t>(modern ? 1u : 0u));
+    general.update_option_value(experience_option, static_cast<uint32_t>(enhanced ? 3u : modern ? 1u : 0u));
     general.save_config();
 
     std::ofstream out{ experience_marker() };
-    out << (modern ? "modern" : "classic") << "\n";
+    out << (enhanced ? "enhanced" : modern ? "modern" : "classic") << "\n";
     applying_experience = false;
 }
 
@@ -1651,6 +1672,7 @@ void dk64_android_choose_experience() {
         "Choose Your Experience",
         "Modern: the Modern Camera, walking in first person, smoother movement, jump help and feel rumbles, "
         "sharp widescreen graphics and quick Kong swapping.\n\n"
+        "Enhanced: sharp widescreen graphics, no cutscene borders and the Modern Camera, with the original gameplay.\n\n"
         "Classic: as close to the original N64 game as possible.\n\n"
         "The app restarts to apply your choice." + unsaved,
         "Modern",
@@ -1664,6 +1686,10 @@ void dk64_android_choose_experience() {
         recompui::ButtonStyle::Tertiary,
         true
     );
+    recompui::set_prompt_extra_button("Enhanced", []() {
+        dk64_android_apply_experience(3);
+        dk64_android_restart_to_launcher();
+    }, recompui::ButtonStyle::Secondary);
     recompui::set_prompt_extra_button("Classic", []() {
         dk64_android_apply_experience(0);
         dk64_android_restart_to_launcher();
@@ -1675,6 +1701,7 @@ namespace recompui::config {
         static const std::vector<recomp::config::ConfigOptionEnumOption> experience_options = {
             {0u, "Classic", "Classic"},
             {1u, "Modern", "Modern"},
+            {3u, "Enhanced", "Enhanced"},
             {2u, "Custom", "Custom"},
         };
         config.add_enum_option(
@@ -1686,6 +1713,7 @@ namespace recompui::config {
             "<recomp-color primary>Modern</recomp-color>: Analog Camera on the right stick, gyro aiming, the device's resolution, "
             "anti-aliasing, quick Kong swapping (Tag Anywhere and Touch Kong Swap), button icons that match your controller "
             "and haptic feedback.<br />"
+            "<recomp-color primary>Enhanced</recomp-color>: Modern's graphics, cutscenes, camera and control layout, with the original gameplay.<br />"
             "<recomp-color primary>Custom</recomp-color>: keeps whatever you've set yourself.<br />"
             "Each option can still be changed afterwards.",
             experience_options,
@@ -1694,7 +1722,7 @@ namespace recompui::config {
         config.add_option_change_callback(experience_option,
             [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
                 const uint32_t value = std::get<uint32_t>(cur);
-                if (context == recomp::config::OptionChangeContext::Permanent && !applying_experience && value < 2u) {
+                if (context == recomp::config::OptionChangeContext::Permanent && !applying_experience && (value < 2u || value == 3u)) {
                     dk64_android_apply_experience(int(value));
                 }
             });

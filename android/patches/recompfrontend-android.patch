@@ -1226,19 +1226,21 @@ index 294c371..f9bee82 100644
      void mod_toggled(bool enabled);
      void mod_selected(uint32_t mod_index);
 diff --git a/recompui/src/composites/ui_prompt.cpp b/recompui/src/composites/ui_prompt.cpp
-index 56a0b70..fd57e2c 100644
+index 56a0b70..77a85a6 100644
 --- a/recompui/src/composites/ui_prompt.cpp
 +++ b/recompui/src/composites/ui_prompt.cpp
-@@ -14,6 +14,8 @@ struct {
+@@ -14,6 +14,10 @@ struct {
      recompui::Element* prompt_controls;
      recompui::Button* confirm_button;
      recompui::Button* cancel_button;
-+    recompui::Button* extra_button;   // Android: a third choice (Main Menu on the quit prompt)
++    recompui::Button* extra_button;   // Android: more choices (Main Menu on the quit prompt...)
 +    std::function<void()> extra_action;
++    recompui::Button* extra_button2;
++    std::function<void()> extra_action2;
      std::function<void()> confirm_action;
      std::function<void()> cancel_action;
      std::mutex mutex;
-@@ -31,6 +33,18 @@ void run_confirm_callback() {
+@@ -31,6 +35,30 @@ void run_confirm_callback() {
      recompui::hide_context(prompt_state.ui_context);
  }
  
@@ -1254,10 +1256,22 @@ index 56a0b70..fd57e2c 100644
 +    recompui::hide_context(prompt_state.ui_context);
 +}
 +
++void run_extra_callback2() {
++    std::function<void()> extra_action;
++    {
++        std::lock_guard lock{ prompt_state.mutex };
++        extra_action = std::move(prompt_state.extra_action2);
++    }
++    if (extra_action) {
++        extra_action();
++    }
++    recompui::hide_context(prompt_state.ui_context);
++}
++
  void run_cancel_callback() {
      std::function<void()> cancel_action;
      {
-@@ -115,6 +129,11 @@ void recompui::init_prompt_context() {
+@@ -115,6 +143,16 @@ void recompui::init_prompt_context() {
      prompt_state.confirm_button->set_min_width(185.0f, Unit::Dp);
      prompt_state.confirm_button->add_pressed_callback(run_confirm_callback);
  
@@ -1266,41 +1280,58 @@ index 56a0b70..fd57e2c 100644
 +    prompt_state.extra_button->add_pressed_callback(run_extra_callback);
 +    prompt_state.extra_button->set_display(Display::None);
 +
++    prompt_state.extra_button2 = context.create_element<Button>(prompt_state.prompt_controls, "", ButtonStyle::Secondary);
++    prompt_state.extra_button2->set_min_width(150.0f, Unit::Dp);
++    prompt_state.extra_button2->add_pressed_callback(run_extra_callback2);
++    prompt_state.extra_button2->set_display(Display::None);
++
      prompt_state.cancel_button = context.create_element<Button>(prompt_state.prompt_controls, "", ButtonStyle::Danger);
      prompt_state.cancel_button->set_min_width(185.0f, Unit::Dp);
      prompt_state.cancel_button->add_pressed_callback(run_cancel_callback);
-@@ -166,6 +185,8 @@ void recompui::open_choice_prompt(
+@@ -166,6 +204,10 @@ void recompui::open_choice_prompt(
      prompt_state.prompt_controls->set_display(Display::Flex);
      prompt_state.confirm_button->set_display(Display::Flex);
      prompt_state.cancel_button->set_display(Display::Flex);
 +    prompt_state.extra_button->set_display(Display::None);
 +    prompt_state.extra_action = nullptr;
++    prompt_state.extra_button2->set_display(Display::None);
++    prompt_state.extra_action2 = nullptr;
      prompt_state.confirm_button->set_text(confirm_label_text);
      prompt_state.cancel_button->set_text(cancel_label_text);
      prompt_state.confirm_action = confirm_action;
-@@ -202,6 +223,8 @@ void recompui::open_info_prompt(
+@@ -202,6 +244,10 @@ void recompui::open_info_prompt(
      prompt_state.prompt_controls->set_display(Display::Flex);
      prompt_state.confirm_button->set_display(Display::None);
      prompt_state.cancel_button->set_display(Display::Flex);
 +    prompt_state.extra_button->set_display(Display::None);
 +    prompt_state.extra_action = nullptr;
++    prompt_state.extra_button2->set_display(Display::None);
++    prompt_state.extra_action2 = nullptr;
      prompt_state.cancel_button->set_text(okay_label_text);
      prompt_state.confirm_action = {};
      prompt_state.cancel_action = okay_action;
-@@ -263,3 +286,18 @@ bool recompui::is_prompt_open() {
+@@ -263,3 +309,26 @@ bool recompui::is_prompt_open() {
  
  	return recompui::is_context_shown(prompt_state.ui_context);
  }
 +
-+// Adds a third button (between the other two) to the prompt just opened.
++// Adds another button (between the other two) to the prompt just opened; up to two.
 +void recompui::set_prompt_extra_button(const std::string& label_text, std::function<void()> action, ButtonStyle variant) {
 +    std::lock_guard lock{ prompt_state.mutex };
 +    ContextId prev_context = try_close_current_context();
 +    prompt_state.ui_context.open();
-+    prompt_state.extra_button->set_text(label_text);
-+    prompt_state.extra_button->apply_button_style(variant);
-+    prompt_state.extra_button->set_display(Display::Flex);
-+    prompt_state.extra_action = std::move(action);
++    const bool second = prompt_state.extra_action != nullptr;
++    recompui::Button *button = second ? prompt_state.extra_button2 : prompt_state.extra_button;
++    button->set_text(label_text);
++    button->apply_button_style(variant);
++    button->set_display(Display::Flex);
++    if (second) {
++        prompt_state.extra_action2 = std::move(action);
++        prompt_state.extra_button->set_min_width(150.0f, Unit::Dp);
++    } else {
++        prompt_state.extra_action = std::move(action);
++        prompt_state.extra_button->set_min_width(185.0f, Unit::Dp);
++    }
 +    prompt_state.ui_context.close();
 +    if (prev_context != ContextId::null()) {
 +        prev_context.open();

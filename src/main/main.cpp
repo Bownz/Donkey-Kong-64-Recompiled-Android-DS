@@ -913,7 +913,7 @@ void on_launcher_init(recompui::LauncherMenu *menu) {
 // modes to choose from), start the game as the Start Game option would.
 #ifdef __ANDROID__
 extern "C" int dk64_android_experience_chosen();
-extern "C" void dk64_android_apply_experience(int modern);
+extern "C" void dk64_android_apply_experience(int experience);
 extern "C" int dk64_android_last_run_crashed();
 extern "C" int dk64_android_take_show_launcher_once();
 
@@ -924,8 +924,9 @@ static bool ask_for_experience() {
     }
     recompui::open_choice_prompt(
         "How do you want to play?",
-        "Modern: Analog Camera on the right stick, gyro aiming, sharp full-resolution graphics "
-        "with anti-aliasing, and quick Kong swapping. "
+        "Modern: the Modern Camera, walking in first person, smoother movement, sharp widescreen graphics "
+        "and quick Kong swapping. "
+        "Enhanced: sharp widescreen graphics, no cutscene borders and the Modern Camera, with the original gameplay. "
         "Classic: the N64 as it was, with the original controls, camera and resolution. "
         "You can change this later in Settings > Gameplay > Choose Experience, or any single option on its own.",
         "Modern",
@@ -936,6 +937,8 @@ static bool ask_for_experience() {
         recompui::ButtonStyle::Secondary,
         false
     );
+    recompui::set_prompt_extra_button("Enhanced", []() { dk64_android_apply_experience(3); },
+        recompui::ButtonStyle::Secondary);
     return true;
 }
 #endif
