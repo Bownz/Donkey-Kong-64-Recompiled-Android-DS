@@ -2294,8 +2294,8 @@ public final class BottomScreenView extends View {
 
     // The button picture in the button's top-right corner.
     private void drawActionIcon(Canvas c, RectF r, String icon) {
-        float size = r.height() * 0.3f;
-        ButtonIcons.draw(c, getContext(), icon, r.right - size * 0.75f, r.top + size * 0.75f, size);
+        float size = r.height() * 0.22f;
+        ButtonIcons.draw(c, getContext(), icon, r.right - size * 0.85f, r.top + size * 0.85f, size, 150);
     }
 
     private void drawActions(Canvas c) {

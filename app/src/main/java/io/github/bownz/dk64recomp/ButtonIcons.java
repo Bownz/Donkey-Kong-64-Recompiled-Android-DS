@@ -58,12 +58,19 @@ final class ButtonIcons {
 
     /** Draws the icon centred on (cx, cy), {@code size} across. False when there's no icon. */
     static boolean draw(Canvas c, Context context, String name, float cx, float cy, float size) {
+        return draw(c, context, name, cx, cy, size, 255);
+    }
+
+    /** As above, at {@code alpha} (0-255). */
+    static boolean draw(Canvas c, Context context, String name, float cx, float cy, float size, int alpha) {
         Bitmap bmp = get(context, name);
         if (bmp == null) {
             return false;
         }
         dst.set(cx - size / 2f, cy - size / 2f, cx + size / 2f, cy + size / 2f);
+        paint.setAlpha(alpha);
         c.drawBitmap(bmp, null, dst, paint);
+        paint.setAlpha(255);
         return true;
     }
 }
