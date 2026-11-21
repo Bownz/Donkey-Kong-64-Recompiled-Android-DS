@@ -312,7 +312,9 @@ final class TouchMoves {
                 return state.swimming || state.climbing || (state.ammo <= 0 && state.homingAmmo <= 0);
             case ORANGE: return state.swimming || state.climbing || state.gunOut || state.oranges <= 0;
             // In first person (or the camera) Z + C-Up would just leave the view.
+            // (Walk in First Person too: fpStatus bit 1.)
             case INSTRUMENT: return state.swimming || state.climbing || state.gunOut || state.firstPerson || state.camera
+                || (GameState.fpStatus() & 1) != 0
                 || k.instrumentEnergy <= 0;
             // The camera works under the water, not swimming on the surface.
             case CAMERA: return !state.camera && ((state.swimming && !state.underwater) || state.climbing || state.gunOut || state.film <= 0);
