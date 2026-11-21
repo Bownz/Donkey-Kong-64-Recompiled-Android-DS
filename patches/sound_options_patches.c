@@ -724,20 +724,20 @@ static void modern_camera_input(Actor *camera, CameraPaad *CaaD, s32 touchMoved,
         speed = gCurrentPlayer->unkB8;
         follow = mc_clamp(speed / 100.0f, 0.0f, 1.0f);
         if ((follow > 0.02f) && (diff > -0x600) && (diff < 0x600)) {
-            yawStep += diff * 0.05f * follow * dt;
+            yawStep += diff * 0.035f * follow * dt;
         }
-    } else if ((mc_idle > 50.0f) && !mc_on_vine && !onTree) {
+    } else if ((mc_idle > 75.0f) && !mc_on_vine && !onTree) {
         // Gentle follow while running; never while running towards the camera (more than
         // ~120 degrees off), so turning round to face it doesn't spin the view.
         speed = gCurrentPlayer->unkB8;
         follow = mc_clamp(speed / 150.0f, 0.0f, 1.0f);
         if ((follow > 0.05f) && (diff > -0x555) && (diff < 0x555)) {
-            yawStep += diff * 0.012f * follow * dt;
+            yawStep += diff * 0.008f * follow * dt;
         }
         // Like Odyssey, while you run without touching the camera it also drifts back to the
         // usual height, slowly (standing on the ground only; vines keep your vine height).
-        if ((mc_idle > 90.0f) && !mc_floating && !mc_on_vine && (follow > 0.2f)) {
-            mc_height += (55.0f - mc_height) * 0.008f * follow * dt;
+        if ((mc_idle > 110.0f) && !mc_floating && !mc_on_vine && (follow > 0.2f)) {
+            mc_height += (55.0f - mc_height) * 0.006f * follow * dt;
         }
     }
     // Round corners, like the game's own camera (func_global_asm_80620F00): the Kong's clearance
