@@ -2127,6 +2127,7 @@ RECOMP_PATCH u16 func_global_asm_806DFF34(u16 arg0, u16 *arg1) {
     static s32 frame = -1;
     static s32 call = 0;
     static s32 lastActions = 0;
+    static u8 stripCUp = FALSE;   // this frame: C-Up is R3 pressed while Z is held (Modern)
     u16 result = dk_map_buttons(arg0, arg1);
     // With Z held, C-Up only counts from the right stick pushed up (the instrument), not from
     // pressing the stick in (R3, First Person in the Modern layout), so Z then R3 doesn't play the
@@ -2161,6 +2162,9 @@ RECOMP_PATCH u16 func_global_asm_806DFF34(u16 arg0, u16 *arg1) {
                 actions |= 16;
             }
         }
+        // Modern layout: R3 (C-Up) is only First Person; with Z held it would play the
+        // instrument, so then it does nothing (Z + right stick up plays it).
+        stripCUp = (actions & 64) && (actions & 32) && (result & Z_TRIG);
         pressed = actions & ~lastActions;
         lastActions = actions;
         if (pressed & 16) {
@@ -2197,6 +2201,9 @@ RECOMP_PATCH u16 func_global_asm_806DFF34(u16 arg0, u16 *arg1) {
         u16 bits = combo_bits(call != 0);
         if (fp_photo_exit_c) {
             bits &= ~Z_TRIG;
+        }
+        if (stripCUp) {
+            result &= ~U_CBUTTONS;
         }
         return result | bits;
     }

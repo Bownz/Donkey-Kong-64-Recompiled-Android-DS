@@ -1261,13 +1261,18 @@ static std::filesystem::path control_preset_marker() {
     return recomp::get_config_path() / "controls_preset.txt";
 }
 
+// (Read once, then kept: the game asks every frame.)
+static std::atomic<int> control_preset_cached{-2};
 extern "C" int dk64_android_control_preset() {
+    int cached = control_preset_cached.load(std::memory_order_relaxed);
+    if (cached != -2) {
+        return cached;
+    }
     std::ifstream in{ control_preset_marker() };
     std::string value;
-    if (!(in >> value)) {
-        return -1;   // not chosen yet
-    }
-    return value == "modern" ? 1 : 0;
+    cached = !(in >> value) ? -1 : (value == "modern" ? 1 : 0);   // -1: not chosen yet
+    control_preset_cached.store(cached, std::memory_order_relaxed);
+    return cached;
 }
 
 // Configure Inputs with the Modern layout: each row named by what it does in the game (the
@@ -1378,6 +1383,7 @@ extern "C" void dk64_android_apply_control_preset(int modern) {
     }
     general.save_config();
 
+    control_preset_cached.store(modern ? 1 : 0, std::memory_order_relaxed);
     std::ofstream out{ control_preset_marker() };
     out << (modern ? "modern" : "classic") << "\n";
 }

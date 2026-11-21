@@ -340,7 +340,7 @@ index c6786e6..73eda2e 100644
      default:
          return recompinput::unknown_device_input;
 diff --git a/recompinput/src/profiles.cpp b/recompinput/src/profiles.cpp
-index c89956e..5301444 100644
+index c89956e..f93ac85 100644
 --- a/recompinput/src/profiles.cpp
 +++ b/recompinput/src/profiles.cpp
 @@ -371,6 +371,20 @@ namespace recompinput {
@@ -354,7 +354,7 @@ index c89956e..5301444 100644
 +    // Told player 1's own N64 buttons (from the controller/keyboard, before the on-screen
 +    // ones are added), e.g. so a toggle that holds Z can hand over to a real Z press.
 +    extern "C" void dk64_android_report_physical_n64_buttons(uint16_t buttons) __attribute__((weak));
-+    // Told which of the DK64 shortcut inputs are held (1 Instrument, 2 Fairy Camera, 4 Gun, 8 Orange).
++    // Told which of the DK64 shortcut inputs are held (1 Instrument, 2 Fairy Camera, 4 Gun, 8 Orange; 32 R3).
 +    extern "C" void dk64_android_report_extra_actions(uint32_t actions) __attribute__((weak));
 +#endif
 +
@@ -364,7 +364,7 @@ index c89956e..5301444 100644
      bool profiles::get_n64_input(int player_index, uint16_t* buttons_out, float* x_out, float* y_out) {
          uint16_t cur_buttons = 0;
          float cur_x = 0.0f;
-@@ -401,10 +415,49 @@ namespace recompinput {
+@@ -401,10 +415,51 @@ namespace recompinput {
              int profile_index_kb = players::is_single_player_mode() ? profiles::get_sp_keyboard_profile_index() : players_input_profile_indices[player_index].second;
              check_buttons(profile_index_cont);
              check_buttons(profile_index_kb);
@@ -381,6 +381,8 @@ index c89956e..5301444 100644
 +                    actions |= recompinput::get_input_digital(player_index, mappings[(size_t)GameInput::GUN]) ? 4u : 0u;
 +                    actions |= recompinput::get_input_digital(player_index, mappings[(size_t)GameInput::ORANGE]) ? 8u : 0u;
 +                }
++                // 32: the right stick pressed in (R3) itself, whatever it's bound to.
++                actions |= recompinput::get_input_digital(player_index, InputField::controller_digital(SDL_CONTROLLER_BUTTON_RIGHTSTICK)) ? 32u : 0u;
 +                dk64_android_report_extra_actions(actions);
 +            }
 +#endif
