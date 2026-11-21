@@ -210,6 +210,30 @@ namespace {
 }
 #endif
 
+#if defined(__ANDROID__)
+// The button icon (assets/button_icons/<name>.rgba, as the in-game prompts draw) for the first
+// controller button bound to a game input; "" with no controller or nothing bound. Used by the
+// Android bottom screen and first person prompts (android/jni/game_state.cpp).
+std::string dk64_android_input_icon_name(int game_input) {
+    if (game_input < 0 || game_input >= static_cast<int>(recompinput::GameInput::COUNT)
+            || recompinput::connected_controller_name().empty()) {
+        return "";
+    }
+    const int profile = recompinput::profiles::get_sp_controller_profile_index();
+    if (profile < 0) {
+        return "";
+    }
+    for (size_t b = 0; b < recompinput::num_bindings_per_input; b++) {
+        std::string name = icon_name_for(recompinput::profiles::get_input_binding(profile,
+            static_cast<recompinput::GameInput>(game_input), b), recompinput::get_face_button_style());
+        if (!name.empty()) {
+            return name;
+        }
+    }
+    return "";
+}
+#endif
+
 extern "C" void recomp_fill_button_icon(uint8_t* rdram, recomp_context* ctx) {
 #if defined(__ANDROID__)
     PTR(u8) request = _arg<0, PTR(u8)>(rdram, ctx);
@@ -641,9 +665,19 @@ extern "C" void recomp_report_rainbow_coin(uint8_t* rdram, recomp_context* ctx) 
 
 // The DK64 shortcut inputs held (1 Instrument, 2 Fairy Camera; Configure Inputs, Modern).
 extern "C" int dk64_android_control_preset();   // config.cpp: 0 Classic, 1 Modern, -1 not chosen
+#if defined(__ANDROID__)
+extern "C" void dk64_android_log_bindings(const char *why, int force);   // config.cpp
+#endif
 extern "C" void recomp_get_extra_actions(uint8_t* rdram, recomp_context* ctx) {
 #if defined(__ANDROID__)
     // 64: the Modern layout (anything but Classic).
+    {
+        // The bindings log (config.cpp): at the start, then a check every ~2 s for changes.
+        static int frames = 0;
+        if ((frames++ % 60) == 0) {
+            dk64_android_log_bindings(frames == 1 ? "startup" : "changed", 0);
+        }
+    }
     _return<int32_t>(ctx, dk64::android::extra_actions() | (dk64_android_control_preset() != 0 ? 64 : 0));
 #else
     _return<int32_t>(ctx, 0);

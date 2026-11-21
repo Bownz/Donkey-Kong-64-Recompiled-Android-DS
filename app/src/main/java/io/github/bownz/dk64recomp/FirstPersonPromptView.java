@@ -11,9 +11,9 @@ import android.view.View;
 /**
  * Walk in First Person (Input): the controller's buttons beside the game's own "EXIT" and
  * "SHOOT" text in the bottom right (the game patch draws the text: fp_draw_prompts in
- * sound_options_patches.c). The buttons are your controller's glyphs (PromptFont, as in the
- * controls menu) for whatever presses N64 B (exit) and N64 R (shoot, with the gun out), so they
- * follow your controller and mapping.
+ * sound_options_patches.c). The buttons are your controller's button pictures (ButtonIcons, as
+ * the in-game prompts draw them) for whatever presses N64 B (exit) and N64 R (shoot, with the
+ * gun out), so they follow your controller and mapping.
  *
  * Placement follows the game's: its HUD is 320 x 240 units filling the screen's height, the
  * prompts right-aligned to the screen's right edge, the text starting at TEXT_X on rows
@@ -58,7 +58,8 @@ final class FirstPersonPromptView extends View {
             int now = GameState.fpStatus();
             long t = android.os.SystemClock.uptimeMillis();
             if ((now & 1) != 0 && t - glyphsAt > 2000) {   // the mapping can change in the menu
-                glyphs = GameState.buttonGlyphs();
+                String[] icons = GameState.buttonIcons();
+                glyphs = new String[] { icons[0], icons[1] };
                 glyphsAt = t;
                 invalidate();
             }
@@ -84,7 +85,15 @@ final class FirstPersonPromptView extends View {
 
     // The glyph ending just left of the text, centred on its row.
     private void drawGlyph(Canvas canvas, float s, float row, String glyph, String fallback) {
-        boolean useGlyph = fontOk && !glyph.isEmpty();
+        {
+            float size = ROW_HEIGHT * 1.6f * s;
+            float textLeft = getWidth() - ((320f - ((status & 4) != 0 ? TEXT_X_PHOTO : TEXT_X)) * s);
+            float mid = (row + (ROW_HEIGHT / 2f)) * s;
+            if (ButtonIcons.draw(canvas, getContext(), glyph, textLeft - (3f * s) - size / 2f, mid, size)) {
+                return;
+            }
+        }
+        boolean useGlyph = false;
         String text = useGlyph ? glyph : fallback;
         glyphPaint.setTypeface(useGlyph ? promptFont : Typeface.DEFAULT_BOLD);
         glyphPaint.setTextSize(ROW_HEIGHT * 1.5f * s);

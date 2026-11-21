@@ -264,19 +264,19 @@ final class GameState {
         }
     }
 
+    private static native String nativeButtonIcons();
+
     /**
-     * The controller buttons bound to the one-press Instrument, Fairy Camera, Gun and Orange
-     * (PromptFont glyphs; "" when not bound), in that order.
+     * The button pictures (ButtonIcons names; "" when not bound or no controller) for what
+     * presses N64 B, N64 R, and the one-press Instrument, Fairy Camera, Gun and Orange.
      */
-    static String[] actionGlyphs() {
-        String[] out = { "", "", "", "" };
+    static String[] buttonIcons() {
+        String[] out = { "", "", "", "", "", "" };
         try {
-            String s = nativeButtonGlyphs();
+            String s = nativeButtonIcons();
             String[] parts = (s == null ? "" : s).split("\n", -1);
-            for (int i = 0; i < 4; i++) {
-                if (parts.length > i + 2) {
-                    out[i] = parts[i + 2];
-                }
+            for (int i = 0; i < out.length && i < parts.length; i++) {
+                out[i] = parts[i];
             }
         } catch (UnsatisfiedLinkError e) {
             // none

@@ -810,6 +810,22 @@ Java_io_github_bownz_dk64recomp_GameState_nativeButtonGlyphs(JNIEnv* env, jclass
     return env->NewStringUTF(out.c_str());
 }
 
+// The button pictures (assets/button_icons, as the in-game prompts draw them) for what presses
+// N64 B, N64 R, and the one-press Instrument, Fairy Camera, Gun and Orange, one name per line;
+// an empty line for one with no controller button (or no controller).
+std::string dk64_android_input_icon_name(int game_input);   // src/game/recomp_api.cpp
+extern "C" JNIEXPORT jstring JNICALL
+Java_io_github_bownz_dk64recomp_GameState_nativeButtonIcons(JNIEnv* env, jclass) {
+    std::string out;
+    for (recompinput::GameInput input : { recompinput::GameInput::B, recompinput::GameInput::R,
+            recompinput::GameInput::INSTRUMENT, recompinput::GameInput::FAIRY_CAMERA,
+            recompinput::GameInput::GUN, recompinput::GameInput::ORANGE }) {
+        out += dk64_android_input_icon_name(static_cast<int>(input));
+        out += '\n';
+    }
+    return env->NewStringUTF(out.c_str());
+}
+
 // Rainbow Coins: each dirt patch's level slot and flag, as the game numbers them at boot
 // (recomp_report_rainbow_coin). Read by the bottom screen (GameState.rainbowCoinFlags).
 namespace {
