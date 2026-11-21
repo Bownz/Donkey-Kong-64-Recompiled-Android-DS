@@ -368,7 +368,7 @@ struct CombinedOption {
     const char *id;
     const char *name;
     const char *desc;
-    std::vector<recomp::config::ConfigOptionEnumOption> choices;   // the last one: Custom
+    std::vector<recomp::config::ConfigOptionEnumOption> choices;
     std::vector<std::string> parts;                               // the options it sets
     std::vector<std::vector<uint32_t>> sets;                       // their values, per choice
     bool second_screen_only;
@@ -381,18 +381,18 @@ static const std::vector<CombinedOption> &combined_options() {
           "What the second screen shows: <recomp-color primary>Info only</recomp-color> (health, Kongs and collectibles), "
           "<recomp-color primary>Info + Buttons</recomp-color> (also the oranges, gun, instrument, camera and first person buttons), "
           "or <recomp-color primary>Buttons on Z</recomp-color> (the buttons slide in while you hold Z). Off leaves the second screen free.",
-          { {0u, "Off", "Off"}, {1u, "Info", "Info only"}, {2u, "Buttons", "Info + Buttons"}, {3u, "OnZ", "Buttons on Z"}, {4u, "Custom", "Custom"} },
+          { {0u, "Off", "Off"}, {1u, "Info", "Info only"}, {2u, "Buttons", "Info + Buttons"}, {3u, "OnZ", "Buttons on Z"} },
           { "android_bottom_screen", "android_bottom_buttons", "android_bottom_first_person" },
           { {0u, 1u, 1u}, {1u, 0u, 0u}, {1u, 1u, 1u}, {1u, 2u, 1u} }, true },
         { "android_touch_feedback_level", "Touch Feedback",
           "A short vibration when you press a touch button, and how strong.",
-          { {0u, "Off", "Off"}, {1u, "Light", "Light"}, {2u, "Medium", "Medium"}, {3u, "Strong", "Strong"}, {4u, "Custom", "Custom"} },
+          { {0u, "Off", "Off"}, {1u, "Light", "Light"}, {2u, "Medium", "Medium"}, {3u, "Strong", "Strong"} },
           { "android_touch_feedback", "android_touch_feedback_strength" },
           { {0u, 2u}, {1u, 1u}, {1u, 2u}, {1u, 3u} }, false },
         { "android_feel_rumbles", "Feel Rumbles",
           "Small rumbles for game feel, like recent 3D platformers: landings, skids, each banana and coin, a Golden Banana, "
           "shots and oranges, getting hurt, running into walls, playing an instrument, and your hits landing. On your controller, or the phone with touch controls; as strong as Rumble Strength.",
-          { {0u, "Off", "Off"}, {1u, "On", "On"}, {2u, "Custom", "Custom"} },
+          { {0u, "Off", "Off"}, {1u, "On", "On"} },
           { "android_haptic_feedback", "android_hit_feel" },
           { {0u, 0u}, {1u, 1u} }, false },
         { "android_first_person_mode", "First Person",
@@ -400,55 +400,74 @@ static const std::vector<CombinedOption> &combined_options() {
           "<recomp-color primary>Right Stick Looks</recomp-color>: the game's own view, looking with the right stick. "
           "<recomp-color primary>Modern</recomp-color>: walk with the left stick and look with the right (in the water too), "
           "ZR shoots, B leaves, with smoother looking, a kick when you shoot and a dip when you land.",
-          { {0u, "Classic", "Classic"}, {1u, "RightStick", "Right Stick Looks"}, {2u, "Modern", "Modern"}, {3u, "Custom", "Custom"} },
+          { {0u, "Classic", "Classic"}, {1u, "RightStick", "Right Stick Looks"}, {2u, "Modern", "Modern"} },
           { "android_fp_right_stick", "android_fp_walk", "android_fp_polish" },
           { {0u, 0u, 0u}, {1u, 0u, 0u}, {1u, 1u, 1u} }, false },
         { "android_jump_help", "Jump Help",
           "<recomp-color primary>Jump Assist</recomp-color>: a jump pressed just before landing, or just after running off a ledge, still happens. "
           "<recomp-color primary>Full</recomp-color>: also steer much more in mid-air (pulling back brakes instead of flipping round).",
-          { {0u, "Off", "Off"}, {1u, "Assist", "Jump Assist"}, {2u, "Full", "Full"}, {3u, "Custom", "Custom"} },
+          { {0u, "Off", "Off"}, {1u, "Assist", "Jump Assist"}, {2u, "Full", "Full"} },
           { "android_jump_assist", "android_air_control" },
           { {0u, 0u}, {1u, 0u}, {1u, 1u} }, false },
         { "android_movement", "Movement",
           "<recomp-color primary>Modern</recomp-color>: Odyssey-style running. Speed builds and eases off smoothly, "
           "reversing gives a quick skid turn, running feels more responsive, and you can jump straight out of a punch or a roll, keeping its speed.",
-          { {0u, "Classic", "Classic"}, {1u, "Modern", "Modern"}, {2u, "Custom", "Custom"} },
+          { {0u, "Classic", "Classic"}, {1u, "Modern", "Modern"} },
           { "android_quick_turn", "android_smooth_running", "android_movement_polish", "android_move_chaining" },
           { {0u, 0u, 0u, 0u}, {1u, 1u, 1u, 1u} }, false },
     };
     return list;
 }
 
-// Sets each combined option from the options it's made of (Custom if they match none of its
-// choices). Called once the settings are loaded, and after the Experience changes them.
+// Sets each combined option from the options it's made of. If those have been mixed some
+// other way (an older version's settings), the closest choice is picked and they're set to it.
+// Called once the settings are loaded, and after the Experience changes them.
 void dk64_sync_combined_options() {
     recomp::config::Config &dual = recompui::config::get_config("dual_screen");
     combined_syncing = true;
+    bool changed = false;
     for (const CombinedOption &co : combined_options()) {
-        uint32_t found = static_cast<uint32_t>(co.sets.size());   // Custom
-        for (size_t c = 0; c < co.sets.size() && found == co.sets.size(); c++) {
+        size_t best = 0, best_score = 0;
+        bool exact = false;
+        for (size_t c = 0; c < co.sets.size() && !exact; c++) {
+            size_t score = 0;
             bool match = true;
             for (size_t i = 0; i < co.parts.size(); i++) {
                 const auto v = dual.get_option_value(co.parts[i]);
                 // Off for the bottom screen / touch feedback: the others don't matter.
                 if ((i > 0) && (c == 0) && (co.sets[0][0] == 0u) &&
                     (std::string(co.id) == "android_bottom_layout" || std::string(co.id) == "android_touch_feedback_level")) {
+                    score++;
                     continue;
                 }
-                if (std::get<uint32_t>(v) != co.sets[c][i]) {
+                if (std::get<uint32_t>(v) == co.sets[c][i]) {
+                    score++;
+                } else {
                     match = false;
-                    break;
                 }
             }
             if (match) {
-                found = static_cast<uint32_t>(c);
+                best = c;
+                exact = true;
+            } else if (score > best_score) {
+                best = c;
+                best_score = score;
             }
         }
-        if (std::get<uint32_t>(dual.get_option_value(co.id)) != found) {
-            dual.update_option_value(co.id, found);
+        if (!exact) {
+            for (size_t i = 0; i < co.parts.size(); i++) {
+                dual.update_option_value(co.parts[i], co.sets[best][i]);
+            }
+            changed = true;
+        }
+        if (std::get<uint32_t>(dual.get_option_value(co.id)) != static_cast<uint32_t>(best)) {
+            dual.update_option_value(co.id, static_cast<uint32_t>(best));
         }
     }
     combined_syncing = false;
+    if (changed) {
+        dual.save_config();
+    }
 }
 
 static void add_dual_screen_options(recomp::config::Config &config) {
@@ -835,8 +854,8 @@ static void add_dual_screen_options(recomp::config::Config &config) {
 
     // ---- Combined options --------------------------------------------------------------------
     // Each sets a few of the options above (which stay, unlisted, and keep their saved values).
-    // They show "Custom" when those have been mixed some other way (by an older version, or a
-    // future Advanced list). Their own values are only derived (dk64_sync_combined_options).
+    // Their own values are only derived (dk64_sync_combined_options, which also tidies up a mix
+    // left by an older version).
     for (const CombinedOption &co : combined_options()) {
         config.add_enum_option(co.id, co.name, co.desc, co.choices, 0u, co.second_screen_only && one_screen);
         const CombinedOption *opt = &co;
@@ -847,7 +866,7 @@ static void add_dual_screen_options(recomp::config::Config &config) {
                 }
                 const uint32_t choice = std::get<uint32_t>(cur);
                 if (choice >= opt->sets.size()) {
-                    return;   // Custom: leave them as they are
+                    return;
                 }
                 recomp::config::Config &dual = recompui::config::get_config("dual_screen");
                 for (size_t i = 0; i < opt->parts.size(); i++) {
