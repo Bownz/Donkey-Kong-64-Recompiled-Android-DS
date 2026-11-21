@@ -1832,7 +1832,7 @@ index 0561657..06088b1 100644
  
      std::string_view get_type_name() override { return "ConfigOptionEnum"; }
 diff --git a/recompui/src/config/ui_config_page_controls.cpp b/recompui/src/config/ui_config_page_controls.cpp
-index f379a6f..94d495e 100644
+index f379a6f..186c243 100644
 --- a/recompui/src/config/ui_config_page_controls.cpp
 +++ b/recompui/src/config/ui_config_page_controls.cpp
 @@ -1,4 +1,5 @@
@@ -1849,7 +1849,7 @@ index f379a6f..94d495e 100644
  
  namespace recompui {
  
-@@ -62,12 +64,41 @@ GameInputRow::GameInputRow(
+@@ -62,12 +64,44 @@ GameInputRow::GameInputRow(
  
      set_debug_id("GameInputRow (" + input_ctx.name + ")");
  
@@ -1872,6 +1872,9 @@ index f379a6f..94d495e 100644
 +        names->set_flex_basis(300.0f);
 +        auto label = context.create_element<Label>(names, main_text, theme::Typography::LabelMD);
 +        label->set_height_auto();
++        label->set_text_transform(TextTransform::Uppercase);
++        label->set_font_weight(700);
++        label->set_color(Color{255, 244, 214, 255});
 +        if (!sub_text.empty()) {
 +            auto sub = context.create_element<Label>(names, sub_text, theme::Typography::LabelSM);
 +            sub->set_height_auto();
@@ -1891,7 +1894,7 @@ index f379a6f..94d495e 100644
  
      auto bindings_container = context.create_element<Element>(this, 0, "div", false);
      {
-@@ -114,6 +145,18 @@ GameInputRow::GameInputRow(
+@@ -114,6 +148,15 @@ GameInputRow::GameInputRow(
      }
  
      scroll_buffer = context.create_element<ScrollBuffer>(this, 16.0f);
@@ -1903,9 +1906,6 @@ index f379a6f..94d495e 100644
 +    set_padding_right(14.0f);
 +    active_style.set_background_color(Color{96, 62, 28, 230});
 +    active_style.set_border_color(Color{249, 214, 72, 255});
-+    label->set_text_transform(TextTransform::Uppercase);
-+    label->set_font_weight(700);
-+    label->set_color(Color{255, 244, 214, 255});
 +#endif
  }
  
