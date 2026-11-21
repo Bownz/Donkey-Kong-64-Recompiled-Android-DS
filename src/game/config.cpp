@@ -1280,103 +1280,6 @@ extern "C" int dk64_android_control_preset() {
     return cached;
 }
 
-// ---- Controller bindings log (for choosing the shipped defaults) ---------------------------
-// Logs the controller profile's bindings (the session log, lines starting DK64Controls) as C++ ready to paste into
-// dk64_android_apply_control_preset: at startup, whenever they change (checked every ~2 s), and
-// just before switching layout (so the layout being left is logged too).
-#include <android/log.h>
-#include <mutex>
-static const char *dk64_sdl_button_name(int id) {
-    switch (id) {
-        case SDL_CONTROLLER_BUTTON_A: return "SDL_CONTROLLER_BUTTON_A";
-        case SDL_CONTROLLER_BUTTON_B: return "SDL_CONTROLLER_BUTTON_B";
-        case SDL_CONTROLLER_BUTTON_X: return "SDL_CONTROLLER_BUTTON_X";
-        case SDL_CONTROLLER_BUTTON_Y: return "SDL_CONTROLLER_BUTTON_Y";
-        case SDL_CONTROLLER_BUTTON_BACK: return "SDL_CONTROLLER_BUTTON_BACK";
-        case SDL_CONTROLLER_BUTTON_GUIDE: return "SDL_CONTROLLER_BUTTON_GUIDE";
-        case SDL_CONTROLLER_BUTTON_START: return "SDL_CONTROLLER_BUTTON_START";
-        case SDL_CONTROLLER_BUTTON_LEFTSTICK: return "SDL_CONTROLLER_BUTTON_LEFTSTICK";
-        case SDL_CONTROLLER_BUTTON_RIGHTSTICK: return "SDL_CONTROLLER_BUTTON_RIGHTSTICK";
-        case SDL_CONTROLLER_BUTTON_LEFTSHOULDER: return "SDL_CONTROLLER_BUTTON_LEFTSHOULDER";
-        case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER: return "SDL_CONTROLLER_BUTTON_RIGHTSHOULDER";
-        case SDL_CONTROLLER_BUTTON_DPAD_UP: return "SDL_CONTROLLER_BUTTON_DPAD_UP";
-        case SDL_CONTROLLER_BUTTON_DPAD_DOWN: return "SDL_CONTROLLER_BUTTON_DPAD_DOWN";
-        case SDL_CONTROLLER_BUTTON_DPAD_LEFT: return "SDL_CONTROLLER_BUTTON_DPAD_LEFT";
-        case SDL_CONTROLLER_BUTTON_DPAD_RIGHT: return "SDL_CONTROLLER_BUTTON_DPAD_RIGHT";
-        default: return nullptr;
-    }
-}
-static const char *dk64_sdl_axis_name(int axis) {
-    switch (axis) {
-        case SDL_CONTROLLER_AXIS_LEFTX: return "SDL_CONTROLLER_AXIS_LEFTX";
-        case SDL_CONTROLLER_AXIS_LEFTY: return "SDL_CONTROLLER_AXIS_LEFTY";
-        case SDL_CONTROLLER_AXIS_RIGHTX: return "SDL_CONTROLLER_AXIS_RIGHTX";
-        case SDL_CONTROLLER_AXIS_RIGHTY: return "SDL_CONTROLLER_AXIS_RIGHTY";
-        case SDL_CONTROLLER_AXIS_TRIGGERLEFT: return "SDL_CONTROLLER_AXIS_TRIGGERLEFT";
-        case SDL_CONTROLLER_AXIS_TRIGGERRIGHT: return "SDL_CONTROLLER_AXIS_TRIGGERRIGHT";
-        default: return nullptr;
-    }
-}
-static std::string dk64_field_code(const recompinput::InputField &f) {
-    using recompinput::InputType;
-    switch (f.input_type) {
-        case InputType::None: return "InputField{}";
-        case InputType::ControllerDigital: {
-            const char *n = dk64_sdl_button_name(f.input_id);
-            return n ? std::string("InputField::controller_digital(") + n + ")"
-                     : "InputField{ InputType::ControllerDigital, " + std::to_string(f.input_id) + " }";
-        }
-        case InputType::ControllerAnalog: {
-            const char *n = dk64_sdl_axis_name(std::abs(f.input_id) - 1);
-            return n ? std::string("InputField::controller_analog(") + n + (f.input_id > 0 ? ", true)" : ", false)")
-                     : "InputField{ InputType::ControllerAnalog, " + std::to_string(f.input_id) + " }";
-        }
-        default:
-            return "InputField{ InputType(" + std::to_string(static_cast<int>(f.input_type)) + "), " + std::to_string(f.input_id) + " }";
-    }
-}
-static std::string dk64_bindings_dump(int profile) {
-    using namespace recompinput;
-    std::string out;
-    for (int i = 0; i < static_cast<int>(GameInput::COUNT); i++) {
-        const GameInput input = static_cast<GameInput>(i);
-        if (get_game_input_is_menu(input)) {
-            continue;
-        }
-        out += "{ GameInput::" + get_game_input_enum_name(input) + ", {";
-        for (size_t b = 0; b < num_bindings_per_input; b++) {
-            out += (b ? ", " : " ") + dk64_field_code(profiles::get_input_binding(profile, input, b));
-        }
-        out += " } },\n";
-    }
-    return out;
-}
-extern "C" void dk64_android_log_bindings(const char *why, int force) {
-    static std::mutex m;
-    static std::string last;
-    const int profile = recompinput::profiles::get_sp_controller_profile_index();
-    if (profile < 0) {
-        return;
-    }
-    std::lock_guard<std::mutex> lock(m);
-    std::string dump = dk64_bindings_dump(profile);
-    if (!force && dump == last) {
-        return;
-    }
-    last = dump;
-    const int preset = dk64_android_control_preset();
-    printf("DK64Controls ==== %s layout bindings (%s) ====\n",
-        preset == 1 ? "MODERN" : preset == 0 ? "CLASSIC" : "UNCHOSEN", why);
-    size_t start = 0;
-    while (start < dump.size()) {
-        size_t end = dump.find('\n', start);
-        if (end == std::string::npos) end = dump.size();
-        printf("DK64Controls %s\n", dump.substr(start, end - start).c_str());
-        start = end + 1;
-    }
-    printf("DK64Controls ==== end ====\n");
-    fflush(stdout);
-}
 
 // Configure Inputs with the Modern layout: each row named by what it does in the game (the
 // Classic layout shows the N64 buttons' own names). Null: keep the usual name.
@@ -1462,7 +1365,7 @@ static bool dk64_load_layout_bindings(int profile, int modern) {
     return any;
 }
 
-// The shipped bindings for each layout (set up on the AYN Thor, 2026-11-20; DK64Controls log).
+// The shipped bindings for each layout (set up on the AYN Thor, 2026-11-20).
 static void dk64_apply_layout_table(int profile, int modern) {
     using namespace recompinput;
     static const std::pair<GameInput, std::array<InputField, 2>> modern_table[] = {
@@ -1540,7 +1443,6 @@ extern "C" void dk64_android_apply_control_preset(int modern) {
     using namespace recompinput;
     const int profile = profiles::get_sp_controller_profile_index();
     if (profile >= 0) {
-        dk64_android_log_bindings("before switching layout", 1);
         const int leaving = dk64_android_control_preset();
         if (leaving == 0 || leaving == 1) {
             dk64_save_layout_bindings(profile, leaving);

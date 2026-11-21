@@ -2054,16 +2054,6 @@ static u16 dk_map_buttons(u16 arg0, u16 *arg1) {
     }
     result = (i | (arg0 & ~j));
 
-    {
-        static s32 gunWas = -1;
-        s32 gunNow = (gCurrentPlayer != NULL) && (gCurrentPlayer->PaaD != NULL) && (gCurrentPlayer->PaaD->unk8C != 0);
-        if (gunNow != gunWas) {
-            if (gunWas != -1) {
-                recomp_printf("Gun: %s\n", gunNow ? "out" : "away");
-            }
-            gunWas = gunNow;
-        }
-    }
     // Walk in First Person: B leaves it (fp_update; so it isn't an attack here); the controller's
     // C buttons do nothing (the touch buttons' still work: bit 4096 of the game feel flags while
     // they press one); ZR shoots with the gun out (it presses B), facing where you look.
