@@ -1627,6 +1627,10 @@ extern "C" void dk64_android_apply_experience(int modern) {
     dual.update_option_value("android_quick_turn", static_cast<uint32_t>(modern ? 1u : 0u));
     dual.update_option_value("android_smooth_running", static_cast<uint32_t>(modern ? 1u : 0u));
     dual.update_option_value("android_movement_polish", static_cast<uint32_t>(modern ? 1u : 0u));
+    // Bottom screen: Modern has the touch action buttons and the first person button; Classic
+    // shows the info only (no buttons).
+    dual.update_option_value("android_bottom_buttons", static_cast<uint32_t>(modern ? 1u : 0u));
+    dual.update_option_value("android_bottom_first_person", static_cast<uint32_t>(modern ? 1u : 0u));
     for (const char *id : { "android_move_chaining", "android_air_control",
                             "android_hit_feel", "android_fast_transitions",
                             "android_fp_right_stick", "android_fp_walk",
