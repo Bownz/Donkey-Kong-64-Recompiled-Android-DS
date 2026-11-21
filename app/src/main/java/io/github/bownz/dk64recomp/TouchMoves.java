@@ -202,6 +202,20 @@ final class TouchMoves {
             return;
         }
 
+        if (move == Move.WEAPON && !state.gunOut && (GameState.fpStatus() & 1) != 0) {
+            // Walk in First Person, pulling the gun out: Z, then Z + C-Left (the crouch is what
+            // takes C-Left as "draw"), staying in first person.
+            final int zz = TouchInput.N64_Z;
+            TouchInput.setN64Buttons(zz);
+            handler.postDelayed(() -> TouchInput.setN64Buttons(zz | TouchInput.N64_C_LEFT), Z_LEAD_MS);
+            handler.postDelayed(() -> TouchInput.setN64Buttons(zz), Z_LEAD_MS + C_HOLD_MS);
+            handler.postDelayed(() -> {
+                TouchInput.setN64Buttons(0);
+                running = null;
+                notifyListeners();
+            }, Z_LEAD_MS + C_HOLD_MS + Z_TAIL_MS);
+            return;
+        }
         if (move == Move.WEAPON && state.firstPerson && (GameState.gameFeel() & GameState.FEEL_FP_WALK) != 0) {
             // Walk in First Person: the gun comes out (or goes away) without leaving first person:
             // C-Left on its own, which the game patch turns into the gun's draw / put away there.
