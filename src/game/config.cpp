@@ -1282,16 +1282,16 @@ extern "C" const char *dk64_android_control_action_name(int input) {
     switch (static_cast<GI>(input)) {
         case GI::A: return "Jump";
         case GI::B: return "Attack";
-        case GI::Z: return "Crouch (Z moves)";
+        case GI::Z: return "Crouch (Z, with C: items)";
         case GI::L: return "Camera Behind";
         case GI::R: return "Shoot / Take Photo";
         case GI::START: return "Pause";
-        case GI::C_UP: return "C Up: First Person (Instrument with Z)";
-        case GI::C_DOWN: return "C Down: Camera Zoom (Fairy Camera with Z)";
+        case GI::C_UP: return "First Person (C Up, with Z: Instrument)";
+        case GI::C_DOWN: return "Camera Zoom (C Down, with Z: Fairy Camera)";
         case GI::INSTRUMENT: return "Instrument";
         case GI::FAIRY_CAMERA: return "Fairy Camera";
-        case GI::C_LEFT: return "C Left: Camera (Gun with Z)";
-        case GI::C_RIGHT: return "C Right: Camera (Orange with Z)";
+        case GI::C_LEFT: return "Camera Left (C Left, with Z: Gun)";
+        case GI::C_RIGHT: return "Camera Right (C Right, with Z: Orange)";
         case GI::GUN: return "Gun";
         case GI::ORANGE: return "Orange";
         case GI::DPAD_UP: return "Arcade Up";

@@ -1823,7 +1823,7 @@ index 0561657..06088b1 100644
  
      std::string_view get_type_name() override { return "ConfigOptionEnum"; }
 diff --git a/recompui/src/config/ui_config_page_controls.cpp b/recompui/src/config/ui_config_page_controls.cpp
-index f379a6f..9f90df3 100644
+index f379a6f..d31e465 100644
 --- a/recompui/src/config/ui_config_page_controls.cpp
 +++ b/recompui/src/config/ui_config_page_controls.cpp
 @@ -1,4 +1,5 @@
@@ -1840,7 +1840,49 @@ index f379a6f..9f90df3 100644
  
  namespace recompui {
  
-@@ -114,6 +116,18 @@ GameInputRow::GameInputRow(
+@@ -62,12 +64,41 @@ GameInputRow::GameInputRow(
+ 
+     set_debug_id("GameInputRow (" + input_ctx.name + ")");
+ 
++#ifdef __ANDROID__
++    // "Name (detail)": the name on top, the detail smaller and dimmer under it, so long names
++    // (First Person, with what Z does) stay on two tidy lines instead of wrapping into the next row.
++    {
++        std::string main_text = input_ctx.name, sub_text;
++        const size_t open = main_text.find(" (");
++        if (open != std::string::npos && main_text.back() == ')') {
++            sub_text = main_text.substr(open + 2, main_text.size() - open - 3);
++            main_text = main_text.substr(0, open);
++        }
++        Element *names = context.create_element<Element>(this, 0, "div", false);
++        names->set_display(Display::Flex);
++        names->set_flex_direction(FlexDirection::Column);
++        names->set_justify_content(JustifyContent::Center);
++        names->set_flex_grow(2.0f);
++        names->set_flex_shrink(1.0f);
++        names->set_flex_basis(300.0f);
++        auto label = context.create_element<Label>(names, main_text, theme::Typography::LabelMD);
++        label->set_height_auto();
++        if (!sub_text.empty()) {
++            auto sub = context.create_element<Label>(names, sub_text, theme::Typography::LabelSM);
++            sub->set_height_auto();
++            sub->set_font_size(17.0f);
++            sub->set_color(Color{232, 213, 168, 170});
++            sub->set_margin_top(2.0f);
++        }
++    }
++#else
+     auto label = context.create_element<Label>(this, input_ctx.name, theme::Typography::LabelMD);
+     label->set_flex_grow(2.0f);
+     label->set_flex_shrink(1.0f);
+     label->set_flex_basis(300.0f);
+     label->set_height_auto();
+     // TODO: whitespace nowrap impl
++#endif
+ 
+     auto bindings_container = context.create_element<Element>(this, 0, "div", false);
+     {
+@@ -114,6 +145,18 @@ GameInputRow::GameInputRow(
      }
  
      scroll_buffer = context.create_element<ScrollBuffer>(this, 16.0f);
@@ -1859,7 +1901,7 @@ index f379a6f..9f90df3 100644
  }
  
  GameInputRow::~GameInputRow() {
-@@ -186,6 +200,19 @@ ConfigPageControls::~ConfigPageControls() {
+@@ -186,6 +229,19 @@ ConfigPageControls::~ConfigPageControls() {
      controls_page = nullptr;
  }
  
@@ -1879,7 +1921,7 @@ index f379a6f..9f90df3 100644
  void ConfigPageControls::create_game_input_contexts() {
      game_input_sections.n64.contexts.clear();
      game_input_sections.menu.contexts.clear();
-@@ -204,6 +231,42 @@ void ConfigPageControls::create_game_input_contexts() {
+@@ -204,6 +260,42 @@ void ConfigPageControls::create_game_input_contexts() {
              recompinput::get_game_input_clearable(input)
          };
  
@@ -1922,7 +1964,7 @@ index f379a6f..9f90df3 100644
          if (recompinput::get_game_input_is_menu(input)) {
              game_input_sections.menu.contexts.push_back(input_ctx);
          } else {
-@@ -229,6 +292,9 @@ void ConfigPageControls::process_event(const Event &e) {
+@@ -229,6 +321,9 @@ void ConfigPageControls::process_event(const Event &e) {
              last_update_index = update_index;
              render_all();
          }
@@ -1932,7 +1974,7 @@ index f379a6f..9f90df3 100644
          queue_update();
          break;
      default:
-@@ -357,6 +423,17 @@ void ConfigPageControls::render_body_mappings() {
+@@ -357,6 +452,17 @@ void ConfigPageControls::render_body_mappings() {
          body->get_right()->clear_children();
          description_container = context.create_element<Element>(body->get_right(), 0, "p", true);
          description_container->set_text("");
@@ -1950,7 +1992,7 @@ index f379a6f..9f90df3 100644
      }
  }
  
-@@ -460,6 +537,12 @@ void ConfigPageControls::on_edit_player_profile(int player_index) {
+@@ -460,6 +566,12 @@ void ConfigPageControls::on_edit_player_profile(int player_index) {
      }
  }
  
@@ -1963,7 +2005,7 @@ index f379a6f..9f90df3 100644
  void ConfigPageControls::render_footer() {
      if (multiplayer_enabled && !multiplayer_view_mappings) {
          hide_footer();
-@@ -473,7 +556,17 @@ void ConfigPageControls::render_footer() {
+@@ -473,7 +585,17 @@ void ConfigPageControls::render_footer() {
      {
          auto footer_left = footer->get_left();
          footer_left->clear_children();
@@ -1981,7 +2023,7 @@ index f379a6f..9f90df3 100644
              keyboard_toggle = context.create_element<IconToggle>(footer_left, "icons/Cont.svg", "icons/Keyboard.svg", ToggleSize::Large);
              keyboard_toggle->set_checked(single_player_show_keyboard_mappings);
              keyboard_toggle->add_checked_callback([this](bool checked) {
-@@ -520,6 +613,59 @@ void ConfigPageControls::render_control_mappings() {
+@@ -520,6 +642,59 @@ void ConfigPageControls::render_control_mappings() {
  
          game_input_rows.clear();
  
@@ -2041,7 +2083,7 @@ index f379a6f..9f90df3 100644
          create_game_input_contexts();
          set_current_profile_index();
  
-@@ -669,7 +815,330 @@ void ConfigPageControls::on_option_hover(recompinput::GameInput input_id) {
+@@ -669,7 +844,330 @@ void ConfigPageControls::on_option_hover(recompinput::GameInput input_id) {
              description_container->set_text("");
          }
      }
