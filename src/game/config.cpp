@@ -1412,11 +1412,64 @@ extern "C" const char *dk64_android_control_action_name(int input) {
     }
 }
 
+// Each layout keeps your own bindings: switching saves the one you're leaving (controls_<layout>.txt
+// in the config folder) and brings back the other's, if you've used it before.
+static std::filesystem::path dk64_layout_bindings_path(int modern) {
+    return recomp::get_config_path() / (modern ? "controls_modern.txt" : "controls_classic.txt");
+}
+static void dk64_save_layout_bindings(int profile, int modern) {
+    using namespace recompinput;
+    std::ofstream out{ dk64_layout_bindings_path(modern) };
+    for (int i = 0; i < static_cast<int>(GameInput::COUNT); i++) {
+        const GameInput input = static_cast<GameInput>(i);
+        if (get_game_input_is_menu(input)) {
+            continue;
+        }
+        out << get_game_input_enum_name(input);
+        for (size_t b = 0; b < num_bindings_per_input; b++) {
+            const InputField f = profiles::get_input_binding(profile, input, b);
+            out << ' ' << static_cast<int>(f.input_type) << ' ' << f.input_id;
+        }
+        out << '\n';
+    }
+}
+static bool dk64_load_layout_bindings(int profile, int modern) {
+    using namespace recompinput;
+    std::ifstream in{ dk64_layout_bindings_path(modern) };
+    if (!in) {
+        return false;
+    }
+    std::string name;
+    bool any = false;
+    while (in >> name) {
+        int found = -1;
+        for (int i = 0; i < static_cast<int>(GameInput::COUNT); i++) {
+            if (get_game_input_enum_name(static_cast<GameInput>(i)) == name) {
+                found = i;
+                break;
+            }
+        }
+        for (size_t b = 0; b < num_bindings_per_input; b++) {
+            int type = 0, id = 0;
+            in >> type >> id;
+            if (found >= 0 && type >= 0 && type <= static_cast<int>(InputType::ControllerAnalog)) {
+                profiles::set_input_binding(profile, static_cast<GameInput>(found), b, InputField{ static_cast<InputType>(type), id });
+                any = true;
+            }
+        }
+    }
+    return any;
+}
+
 extern "C" void dk64_android_apply_control_preset(int modern) {
     using namespace recompinput;
     const int profile = profiles::get_sp_controller_profile_index();
     if (profile >= 0) {
         dk64_android_log_bindings("before switching layout", 1);
+        const int leaving = dk64_android_control_preset();
+        if (leaving == 0 || leaving == 1) {
+            dk64_save_layout_bindings(profile, leaving);
+        }
         profiles::reset_profile_bindings(profile, InputDevice::Controller);
         if (modern) {
             // The right stick is only the camera: the C buttons come off it. C Up (first person)
@@ -1472,6 +1525,8 @@ extern "C" void dk64_android_apply_control_preset(int modern) {
                 }
             }
         }
+        // Your own bindings for this layout, if you've set it up before (on top of the defaults).
+        dk64_load_layout_bindings(profile, modern ? 1 : 0);
         profiles::save_controls_config(recomp::get_config_path() / (recompui::config::controls::id + ".json"));
     }
 

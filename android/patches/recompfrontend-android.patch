@@ -1832,7 +1832,7 @@ index 0561657..06088b1 100644
  
      std::string_view get_type_name() override { return "ConfigOptionEnum"; }
 diff --git a/recompui/src/config/ui_config_page_controls.cpp b/recompui/src/config/ui_config_page_controls.cpp
-index f379a6f..186c243 100644
+index f379a6f..89f77e3 100644
 --- a/recompui/src/config/ui_config_page_controls.cpp
 +++ b/recompui/src/config/ui_config_page_controls.cpp
 @@ -1,4 +1,5 @@
@@ -1930,7 +1930,7 @@ index f379a6f..186c243 100644
  void ConfigPageControls::create_game_input_contexts() {
      game_input_sections.n64.contexts.clear();
      game_input_sections.menu.contexts.clear();
-@@ -204,6 +260,50 @@ void ConfigPageControls::create_game_input_contexts() {
+@@ -204,6 +260,53 @@ void ConfigPageControls::create_game_input_contexts() {
              recompinput::get_game_input_clearable(input)
          };
  
@@ -1956,6 +1956,9 @@ index f379a6f..186c243 100644
 +                }
 +                group = 4;
 +            } else if (input == GI::INSTRUMENT || input == GI::FAIRY_CAMERA || input == GI::GUN || input == GI::ORANGE) {
++                if (!actions) {
++                    continue;   // Classic: no one-press moves (Z + the C buttons, as on the N64)
++                }
 +                group = 5;
 +            } else if (recompinput::get_game_input_is_menu(input)) {
 +                group = 6;
@@ -1981,7 +1984,7 @@ index f379a6f..186c243 100644
          if (recompinput::get_game_input_is_menu(input)) {
              game_input_sections.menu.contexts.push_back(input_ctx);
          } else {
-@@ -229,6 +329,9 @@ void ConfigPageControls::process_event(const Event &e) {
+@@ -229,6 +332,9 @@ void ConfigPageControls::process_event(const Event &e) {
              last_update_index = update_index;
              render_all();
          }
@@ -1991,7 +1994,7 @@ index f379a6f..186c243 100644
          queue_update();
          break;
      default:
-@@ -357,6 +460,17 @@ void ConfigPageControls::render_body_mappings() {
+@@ -357,6 +463,17 @@ void ConfigPageControls::render_body_mappings() {
          body->get_right()->clear_children();
          description_container = context.create_element<Element>(body->get_right(), 0, "p", true);
          description_container->set_text("");
@@ -2009,7 +2012,7 @@ index f379a6f..186c243 100644
      }
  }
  
-@@ -460,6 +574,12 @@ void ConfigPageControls::on_edit_player_profile(int player_index) {
+@@ -460,6 +577,12 @@ void ConfigPageControls::on_edit_player_profile(int player_index) {
      }
  }
  
@@ -2022,7 +2025,7 @@ index f379a6f..186c243 100644
  void ConfigPageControls::render_footer() {
      if (multiplayer_enabled && !multiplayer_view_mappings) {
          hide_footer();
-@@ -473,7 +593,17 @@ void ConfigPageControls::render_footer() {
+@@ -473,7 +596,17 @@ void ConfigPageControls::render_footer() {
      {
          auto footer_left = footer->get_left();
          footer_left->clear_children();
@@ -2040,7 +2043,7 @@ index f379a6f..186c243 100644
              keyboard_toggle = context.create_element<IconToggle>(footer_left, "icons/Cont.svg", "icons/Keyboard.svg", ToggleSize::Large);
              keyboard_toggle->set_checked(single_player_show_keyboard_mappings);
              keyboard_toggle->add_checked_callback([this](bool checked) {
-@@ -520,6 +650,59 @@ void ConfigPageControls::render_control_mappings() {
+@@ -520,6 +653,59 @@ void ConfigPageControls::render_control_mappings() {
  
          game_input_rows.clear();
  
@@ -2100,7 +2103,7 @@ index f379a6f..186c243 100644
          create_game_input_contexts();
          set_current_profile_index();
  
-@@ -669,7 +852,330 @@ void ConfigPageControls::on_option_hover(recompinput::GameInput input_id) {
+@@ -669,7 +855,330 @@ void ConfigPageControls::on_option_hover(recompinput::GameInput input_id) {
              description_container->set_text("");
          }
      }

@@ -2154,6 +2154,9 @@ RECOMP_PATCH u16 func_global_asm_806DFF34(u16 arg0, u16 *arg1) {
         // Modern layout: R3 (C-Up) is only First Person; with Z held it would play the
         // instrument, so then it does nothing (the Z moves below play it).
         stripCUp = (actions & 64) && (actions & 32) && (result & Z_TRIG);
+        if (!(actions & 64)) {
+            actions &= ~(1 | 2 | 4 | 8 | 128 | 256 | 512 | 1024);   // Classic: no one-press or Z moves
+        }
         pressed = actions & ~lastActions;
         lastActions = actions;
         // Z moves (Configure Inputs, Modern: by default Z + the right stick): pressed while Z
