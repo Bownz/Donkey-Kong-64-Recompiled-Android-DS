@@ -789,12 +789,15 @@ Java_io_github_bownz_dk64recomp_GameState_nativeFpStatus(JNIEnv*, jclass) {
 #include "recompinput/profiles.h"
 
 // The controller buttons (PromptFont glyphs, as the controls menu shows them) that press N64 B
-// and N64 R for player 1, "B-glyph\nR-glyph"; an empty line for one that isn't bound.
+// and N64 R for player 1, then the one-press Instrument, Fairy Camera, Gun and Orange buttons
+// (Configure Inputs, Modern), one per line; an empty line for one that isn't bound.
 extern "C" JNIEXPORT jstring JNICALL
 Java_io_github_bownz_dk64recomp_GameState_nativeButtonGlyphs(JNIEnv* env, jclass) {
     std::string out;
     const int profile = recompinput::profiles::get_input_profile_for_player(0, recompinput::InputDevice::Controller);
-    for (recompinput::GameInput input : { recompinput::GameInput::B, recompinput::GameInput::R }) {
+    for (recompinput::GameInput input : { recompinput::GameInput::B, recompinput::GameInput::R,
+            recompinput::GameInput::INSTRUMENT, recompinput::GameInput::FAIRY_CAMERA,
+            recompinput::GameInput::GUN, recompinput::GameInput::ORANGE }) {
         std::string glyph;
         if (profile >= 0) {
             for (size_t i = 0; i < recompinput::num_bindings_per_input && glyph.empty(); i++) {

@@ -264,6 +264,26 @@ final class GameState {
         }
     }
 
+    /**
+     * The controller buttons bound to the one-press Instrument, Fairy Camera, Gun and Orange
+     * (PromptFont glyphs; "" when not bound), in that order.
+     */
+    static String[] actionGlyphs() {
+        String[] out = { "", "", "", "" };
+        try {
+            String s = nativeButtonGlyphs();
+            String[] parts = (s == null ? "" : s).split("\n", -1);
+            for (int i = 0; i < 4; i++) {
+                if (parts.length > i + 2) {
+                    out[i] = parts[i + 2];
+                }
+            }
+        } catch (UnsatisfiedLinkError e) {
+            // none
+        }
+        return out;
+    }
+
     static int bottomButtonsMode() {
         try {
             return nativeBottomButtonsMode();

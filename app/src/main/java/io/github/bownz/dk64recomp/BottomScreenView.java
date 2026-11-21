@@ -2267,6 +2267,61 @@ public final class BottomScreenView extends View {
     private static final long ICON_FLIP_MS = 420;
     private int flipFromKong = GameState.DK;
 
+    // The controller button each action is bound to (one press, Configure Inputs), shown in the
+    // button's corner; nothing when it isn't bound. Re-read every 2 s (the menu can change it).
+    private String[] actionGlyphs = { "", "", "", "" };
+    private long actionGlyphsAt = -10000;
+    private android.graphics.Typeface promptFont;
+    private boolean promptFontTried;
+    private final Paint glyphPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+    private String actionGlyph(TouchMoves.Move move) {
+        long now = android.os.SystemClock.uptimeMillis();
+        if (now - actionGlyphsAt > 2000) {
+            actionGlyphsAt = now;
+            String[] g = GameState.actionGlyphs();
+            if (!java.util.Arrays.equals(g, actionGlyphs)) {
+                actionGlyphs = g;
+                postInvalidate();
+            }
+        }
+        if (!promptFontTried) {
+            promptFontTried = true;
+            try {
+                promptFont = android.graphics.Typeface.createFromAsset(getContext().getAssets(), "game/assets/promptfont/promptfont.ttf");
+            } catch (RuntimeException e) {
+                promptFont = null;
+            }
+        }
+        if (promptFont == null) {
+            return "";
+        }
+        switch (move) {
+            case INSTRUMENT: return actionGlyphs[0];
+            case CAMERA: return actionGlyphs[1];
+            case WEAPON: return actionGlyphs[2];
+            case ORANGE: return actionGlyphs[3];
+            default: return "";
+        }
+    }
+
+    // A small controller-button glyph in the button's top-right corner.
+    private void drawActionGlyph(Canvas c, RectF r, String glyph) {
+        if (glyph.isEmpty()) {
+            return;
+        }
+        glyphPaint.setTypeface(promptFont);
+        glyphPaint.setTextAlign(Paint.Align.CENTER);
+        glyphPaint.setTextSize(r.height() * 0.28f);
+        glyphPaint.setColor(0xF2FFF4D6);
+        glyphPaint.setShadowLayer(r.height() * 0.03f, 0f, r.height() * 0.015f, 0xC0000000);
+        Paint.FontMetrics fm = glyphPaint.getFontMetrics();
+        float size = r.height() * 0.28f;
+        float cx = r.right - size * 0.62f;
+        float cy = r.top + size * 0.62f;
+        c.drawText(glyph, cx, cy - (fm.ascent + fm.descent) / 2f, glyphPaint);
+    }
+
     private void drawActions(Canvas c) {
         int kong = playingKong();
         // Swapping Kongs, the gun and instrument icons flip over to the new Kong's.
@@ -2400,6 +2455,7 @@ public final class BottomScreenView extends View {
                 dkNumber(c, tickedCount("tick" + move, counts[i]), countLeft, iconY + text.getTextSize() * 0.36f, false);
                 c.restoreToCount(countSaved);
             }
+            drawActionGlyph(c, r, actionGlyph(move));
             c.restoreToCount(saved);
         }
     }
