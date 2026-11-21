@@ -1286,12 +1286,12 @@ extern "C" const char *dk64_android_control_action_name(int input) {
         case GI::L: return "Camera Behind";
         case GI::R: return "Shoot / Take Photo";
         case GI::START: return "Pause";
-        case GI::C_UP: return "First Person";
-        case GI::C_DOWN: return "Camera Zoom";
+        case GI::C_UP: return "C Up: First Person (Instrument with Z)";
+        case GI::C_DOWN: return "C Down: Camera Zoom (Fairy Camera with Z)";
         case GI::INSTRUMENT: return "Instrument";
         case GI::FAIRY_CAMERA: return "Fairy Camera";
-        case GI::C_LEFT: return "C Left (Gun with Z)";
-        case GI::C_RIGHT: return "C Right (Orange with Z)";
+        case GI::C_LEFT: return "C Left: Camera (Gun with Z)";
+        case GI::C_RIGHT: return "C Right: Camera (Orange with Z)";
         case GI::GUN: return "Gun";
         case GI::ORANGE: return "Orange";
         case GI::DPAD_UP: return "Arcade Up";
