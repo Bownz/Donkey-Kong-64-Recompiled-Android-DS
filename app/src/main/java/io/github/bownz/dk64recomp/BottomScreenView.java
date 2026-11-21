@@ -351,7 +351,7 @@ public final class BottomScreenView extends View {
         int top = moves.zbBusy ? Color.rgb(250, 200, 90) : Color.rgb(200, 130, 50);
         int bottom = moves.zbBusy ? Color.rgb(200, 120, 30) : Color.rgb(120, 70, 20);
         paint.setAlpha(255);
-        paint.setShader(new LinearGradient(0, cy - r, 0, cy + r, top, bottom, Shader.TileMode.CLAMP));
+        paint.setShader(lg(0, cy - r, 0, cy + r, top, bottom));
         c.drawCircle(osX, cy, r * 0.87f, paint);
         paint.setShader(null);
         paint.setStyle(Paint.Style.STROKE);
@@ -468,7 +468,7 @@ public final class BottomScreenView extends View {
         int top = moves.cancelBusy ? Color.rgb(255, 140, 120) : Color.rgb(220, 70, 50);
         int bottom = moves.cancelBusy ? Color.rgb(200, 60, 40) : Color.rgb(120, 20, 15);
         paint.setAlpha(255);
-        paint.setShader(new LinearGradient(0, cy - r, 0, cy + r, top, bottom, Shader.TileMode.CLAMP));
+        paint.setShader(lg(0, cy - r, 0, cy + r, top, bottom));
         c.drawCircle(osX, cy, r * 0.87f, paint);
         paint.setShader(null);
         paint.setStyle(Paint.Style.STROKE);
@@ -515,7 +515,7 @@ public final class BottomScreenView extends View {
         int top = pressed ? Color.rgb(250, 200, 90) : Color.rgb(200, 130, 50);
         int bottom = pressed ? Color.rgb(200, 120, 30) : Color.rgb(120, 70, 20);
         paint.setAlpha(255);
-        paint.setShader(new LinearGradient(0, cy - r, 0, cy + r, top, bottom, Shader.TileMode.CLAMP));
+        paint.setShader(lg(0, cy - r, 0, cy + r, top, bottom));
         c.drawCircle(osX, cy, r * 0.87f, paint);
         paint.setShader(null);
         paint.setStyle(Paint.Style.STROKE);
@@ -564,11 +564,41 @@ public final class BottomScreenView extends View {
         return k < GameState.KONG_COUNT && state.inGame() && !state.isFreed(k);
     }
 
-    /** Performs a move from one of this screen's buttons, with its squash and wiggle. */
+    // Movement Polish: an action button pressed while another move is running (or the Kong is
+    // busy, e.g. mid-roll) is kept for half a second and done as soon as it can be.
+    private TouchMoves.Move bufferedMove;
+    private long bufferedUntil;
+    private final Runnable bufferTick = new Runnable() {
+        @Override
+        public void run() {
+            if (bufferedMove == null) {
+                return;
+            }
+            if (android.os.SystemClock.uptimeMillis() > bufferedUntil || !state.inGame() || state.paused) {
+                bufferedMove = null;
+                return;
+            }
+            if (moves.running == null && moves.available(bufferedMove)) {
+                TouchMoves.Move m = bufferedMove;
+                bufferedMove = null;
+                doMove(m);
+                return;
+            }
+            handler.postDelayed(this, 30);
+        }
+    };
+
+    private void bufferMove(TouchMoves.Move move) {
+        bufferedMove = move;
+        bufferedUntil = android.os.SystemClock.uptimeMillis() + 500;
+        handler.removeCallbacks(bufferTick);
+        handler.postDelayed(bufferTick, 30);
+    }
+
+    /** Performs a move from one of this screen's buttons, with its squash. */
     private void doMove(TouchMoves.Move move) {
         if (moves.running == null) {
             startAnim("squash" + move);
-            startAnim("wiggle" + move);
         }
         moves.perform(move, this);
         invalidate();
@@ -682,7 +712,9 @@ public final class BottomScreenView extends View {
         long now = android.os.SystemClock.uptimeMillis();
         float dt = dimTime == 0 ? 0f : Math.min(100f, now - dimTime);
         dimTime = now;
-        float target = state.inGame() && state.cutscene && !state.paused ? 1f : 0f;
+        // Also the menus once the logo has gone (title screen, file select...), until a game starts.
+        boolean menus = !state.inGame() && titleGone;
+        float target = menus || (state.inGame() && state.cutscene && !state.paused) ? 1f : 0f;
         if (dim != target) {
             float step = dt / DIM_FADE_MS;
             dim = target > dim ? Math.min(target, dim + step) : Math.max(target, dim - step);
@@ -705,6 +737,8 @@ public final class BottomScreenView extends View {
         } else if (titleIdle || (state.inGame() && !state.paused && !state.cutscene)) {
             // The health melons' gentle idle bob: a light 20 FPS redraw, not every display frame.
             postInvalidateDelayed(IDLE_FRAME_MS);
+        } else {
+            postInvalidateDelayed(2000);   // the backdrop's slow drift (a pixel at a time)
         }
     }
 
@@ -842,20 +876,26 @@ public final class BottomScreenView extends View {
             float sx = r.left + labelW + slot * i;
             float bx = sx + slot * 0.12f + badgeR, cy = r.centerY();
             String spinKey = "carry" + item.label;
-            watch("carryv" + item.label, item.have, spinKey);
+            watchUp("carryv" + item.label, item.have, spinKey);
             float spin = animProgress(spinKey, SPIN_MS);
             int saved = c.save();
+            iconSpin = spin;
             if (spin >= 0) {
-                float sxk = (float) Math.cos(2 * Math.PI * spin);
                 float pop = 1f + 0.18f * (float) Math.sin(Math.PI * spin);
-                c.scale(Math.abs(sxk) < 0.08f ? 0.08f : sxk * pop, pop, bx, cy);
+                if (RomIcons.hasAnimation(item.icon)) {
+                    c.scale(pop, pop, bx, cy);   // the game's own spin frames (iconFrame)
+                } else {
+                    float sxk = (float) Math.cos(2 * Math.PI * spin);
+                    c.scale(Math.abs(sxk) < 0.08f ? 0.08f : sxk * pop, pop, bx, cy);
+                }
             }
             itemIcon(c, bx, cy, badgeR, item);
+            iconSpin = -1f;
             c.restoreToCount(saved);
             String value = String.valueOf(item.have);
             text.setTextAlign(Paint.Align.LEFT);
             text.setTextSize(fitText(value, slot - (bx - sx) - badgeR * 1.15f, r.height() * 0.46f));
-            outlined(c, value, bx + badgeR * 1.05f, cy + text.getTextSize() * 0.36f, BANANA);
+            dkNumber(c, value, bx + badgeR * 1.05f, cy + text.getTextSize() * 0.36f, false);
         }
     }
 
@@ -920,7 +960,7 @@ public final class BottomScreenView extends View {
         float br = unit * 0.02f;
         paint.setStyle(Paint.Style.FILL);
         paint.setAlpha(255);
-        paint.setShader(new LinearGradient(0, board.top, 0, board.bottom, Color.rgb(46, 26, 12), Color.rgb(70, 40, 18), Shader.TileMode.CLAMP));
+        paint.setShader(lg(0, board.top, 0, board.bottom, Color.rgb(46, 26, 12), Color.rgb(70, 40, 18)));
         c.drawRoundRect(board, br, br, paint);
         paint.setShader(null);
 
@@ -1020,8 +1060,11 @@ public final class BottomScreenView extends View {
                 }
                 text.setTextAlign(Paint.Align.CENTER);
                 text.setTextSize(fitText(value, colW * 0.86f, tmp.height() * 0.46f));
-                outlined(c, value, board.left + nameW + colW * (col + 0.5f), cy + text.getTextSize() * 0.36f,
-                    locked || r == null || r.total == 0 ? Color.rgb(140, 130, 120) : complete ? COMPLETE : BANANA);
+                if (locked || r == null || r.total == 0) {
+                    outlined(c, value, board.left + nameW + colW * (col + 0.5f), cy + text.getTextSize() * 0.36f, Color.rgb(140, 130, 120));
+                } else {
+                    dkNumber(c, value, board.left + nameW + colW * (col + 0.5f), cy + text.getTextSize() * 0.36f, complete);
+                }
             }
         }
 
@@ -1222,24 +1265,186 @@ public final class BottomScreenView extends View {
     }
 
     /** Deep jungle backdrop with big leaves around the edges. */
+    // The jungle backdrop: drawn once into a bitmap a little bigger than the screen, then shown
+    // drifting very slowly by a few pixels (a slow figure-of-eight over a couple of minutes),
+    // so nothing sits on the same pixels for long (no burn-in on OLED screens).
+    private Bitmap jungle;
+    private int jungleW, jungleH, jungleMargin;
+    private static final double DRIFT_X_MS = 97_000, DRIFT_Y_MS = 151_000;
+
     private void drawJungle(Canvas c, int w, int h) {
-        paint.setStyle(Paint.Style.FILL);
-        paint.setAlpha(255);
-        paint.setShader(new LinearGradient(0, 0, 0, h, JUNGLE_TOP, JUNGLE_BOTTOM, Shader.TileMode.CLAMP));
-        c.drawRect(0, 0, w, h, paint);
-        paint.setShader(null);
-        // Soft light from above, through the canopy.
-        paint.setAlpha(255);
-        paint.setShader(new LinearGradient(0, 0, 0, h * 0.5f, Color.argb(60, 190, 230, 120), Color.argb(0, 190, 230, 120), Shader.TileMode.CLAMP));
-        c.drawRect(0, 0, w, h * 0.5f, paint);
-        paint.setShader(null);
-        float s = unit;
-        leaf(c, w * 0.02f, h * 1.02f, s * 0.42f, -60, Color.argb(120, 20, 96, 46));
-        leaf(c, w * 0.30f, h * 1.05f, s * 0.34f, -100, Color.argb(100, 30, 110, 50));
-        leaf(c, w * 0.62f, h * 1.03f, s * 0.38f, -75, Color.argb(110, 16, 84, 40));
-        leaf(c, w * 1.01f, h * 0.55f, s * 0.40f, -160, Color.argb(90, 26, 100, 48));
-        leaf(c, w * 0.50f, -h * 0.03f, s * 0.30f, 115, Color.argb(80, 40, 120, 56));
-        leaf(c, -w * 0.01f, h * 0.30f, s * 0.30f, 10, Color.argb(80, 24, 92, 44));
+        if (w <= 0 || h <= 0) {
+            return;
+        }
+        if (jungle == null || jungleW != w || jungleH != h) {
+            jungleMargin = Math.max(4, Math.round(Math.min(w, h) * 0.02f));
+            jungleW = w;
+            jungleH = h;
+            try {
+                jungle = Bitmap.createBitmap(w + 2 * jungleMargin, h + 2 * jungleMargin, Bitmap.Config.ARGB_8888);
+                paintJungle(new Canvas(jungle), w + 2 * jungleMargin, h + 2 * jungleMargin);
+            } catch (OutOfMemoryError e) {
+                jungle = null;
+            }
+        }
+        if (jungle == null) {
+            paint.setShader(lg(0, 0, 0, h, JUNGLE_TOP, JUNGLE_BOTTOM));
+            c.drawRect(0, 0, w, h, paint);
+            paint.setShader(null);
+            return;
+        }
+        long now = android.os.SystemClock.uptimeMillis();
+        float dx = (float) Math.sin(2 * Math.PI * (now % (long) DRIFT_X_MS) / DRIFT_X_MS) * jungleMargin;
+        float dy = (float) Math.sin(2 * Math.PI * (now % (long) DRIFT_Y_MS) / DRIFT_Y_MS) * jungleMargin;
+        c.drawBitmap(jungle, -jungleMargin + dx, -jungleMargin + dy, null);
+    }
+
+    /**
+     * A deep-jungle scene in the spirit of DK64's levels (our own drawing, no game art): light
+     * falling through the canopy, distant tree trunks, hanging vines, big palm fronds, ferns along
+     * the floor and a soft vignette, all kept dark so the boards on top stand out.
+     */
+    private void paintJungle(Canvas c, int w, int h) {
+        java.util.Random rnd = new java.util.Random(64);
+        float u = Math.min(w, h);
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        Path path = new Path();
+
+        // Sky through the canopy: deep teal above, earthy green below.
+        p.setShader(new LinearGradient(0, 0, 0, h,
+            new int[] { Color.rgb(28, 84, 64), Color.rgb(22, 66, 40), Color.rgb(12, 34, 20) },
+            new float[] { 0f, 0.45f, 1f }, Shader.TileMode.CLAMP));
+        c.drawRect(0, 0, w, h, p);
+        p.setShader(null);
+
+        // Sunbeams slanting down from the top left.
+        for (int i = 0; i < 4; i++) {
+            float x0 = w * (0.08f + 0.24f * i + rnd.nextFloat() * 0.06f);
+            float bw = u * (0.06f + rnd.nextFloat() * 0.07f);
+            float slant = h * 0.45f;
+            path.reset();
+            path.moveTo(x0, 0);
+            path.lineTo(x0 + bw, 0);
+            path.lineTo(x0 + bw * 2.2f + slant, h);
+            path.lineTo(x0 + slant, h);
+            path.close();
+            p.setShader(lg(0, 0, 0, h, Color.argb(34, 236, 220, 120), Color.argb(0, 236, 220, 120)));
+            c.drawPath(path, p);
+        }
+        p.setShader(null);
+
+        // Distant trunks, misty.
+        for (int i = 0; i < 6; i++) {
+            float x = w * (i + 0.2f + rnd.nextFloat() * 0.6f) / 6f;
+            float tw = u * (0.035f + rnd.nextFloat() * 0.04f);
+            path.reset();
+            path.moveTo(x - tw * 0.4f, 0);
+            path.lineTo(x + tw * 0.4f, 0);
+            path.quadTo(x + tw * 0.55f, h * 0.6f, x + tw, h);
+            path.lineTo(x - tw, h);
+            path.quadTo(x - tw * 0.55f, h * 0.6f, x - tw * 0.4f, 0);
+            path.close();
+            p.setShader(lg(0, 0, 0, h, Color.argb(70, 30, 60, 40), Color.argb(150, 26, 40, 22)));
+            c.drawPath(path, p);
+        }
+        p.setShader(null);
+
+        // Hanging vines with little leaves.
+        p.setStyle(Paint.Style.STROKE);
+        p.setStrokeCap(Paint.Cap.ROUND);
+        for (int i = 0; i < 7; i++) {
+            float x = w * (0.05f + 0.9f * rnd.nextFloat());
+            float len = h * (0.18f + rnd.nextFloat() * 0.45f);
+            float sway = u * (0.03f + rnd.nextFloat() * 0.05f) * (rnd.nextBoolean() ? 1 : -1);
+            path.reset();
+            path.moveTo(x, -2);
+            path.cubicTo(x + sway, len * 0.35f, x - sway, len * 0.7f, x + sway * 0.4f, len);
+            p.setStrokeWidth(u * 0.008f);
+            p.setColor(Color.argb(170, 18, 52, 26));
+            c.drawPath(path, p);
+            android.graphics.PathMeasure pm = new android.graphics.PathMeasure(path, false);
+            float[] pos = new float[2], tan = new float[2];
+            p.setStyle(Paint.Style.FILL);
+            for (float d = pm.getLength() * 0.15f; d < pm.getLength(); d += u * 0.05f) {
+                pm.getPosTan(d, pos, tan);
+                boolean left = ((int) (d / (u * 0.05f))) % 2 == 0;
+                smallLeaf(c, p, pos[0], pos[1], u * 0.035f, left ? 140 : 40, Color.argb(190, 30, 86, 38));
+            }
+            p.setStyle(Paint.Style.STROKE);
+        }
+        p.setStyle(Paint.Style.FILL);
+
+        // Palm fronds from the corners and sides.
+        frond(c, p, -u * 0.02f, h * 0.08f, u * 0.62f, 18, Color.argb(200, 20, 72, 34));
+        frond(c, p, w + u * 0.02f, h * 0.14f, u * 0.58f, 160, Color.argb(200, 22, 78, 36));
+        frond(c, p, w * 0.45f, -u * 0.04f, u * 0.40f, 70, Color.argb(160, 26, 88, 42));
+        frond(c, p, -u * 0.03f, h * 0.72f, u * 0.50f, -25, Color.argb(190, 16, 60, 28));
+        frond(c, p, w + u * 0.03f, h * 0.80f, u * 0.55f, 200, Color.argb(190, 16, 62, 30));
+
+        // Ferns and grass along the floor.
+        for (int i = 0; i < 14; i++) {
+            float x = w * (i + rnd.nextFloat()) / 14f;
+            float len = u * (0.10f + rnd.nextFloat() * 0.12f);
+            float a = -90 + (rnd.nextFloat() - 0.5f) * 70;
+            smallLeaf(c, p, x, h + u * 0.01f, len, a, Color.argb(220, 12, 44 + rnd.nextInt(16), 22));
+        }
+
+        // A few motes of light drifting in the beams.
+        for (int i = 0; i < 18; i++) {
+            float x = w * rnd.nextFloat(), y = h * rnd.nextFloat() * 0.8f;
+            p.setColor(Color.argb(40 + rnd.nextInt(40), 250, 236, 150));
+            c.drawCircle(x, y, u * (0.003f + rnd.nextFloat() * 0.004f), p);
+        }
+
+        // Vignette.
+        p.setShader(new android.graphics.RadialGradient(w / 2f, h / 2f, Math.max(w, h) * 0.75f,
+            new int[] { Color.argb(0, 0, 0, 0), Color.argb(0, 0, 0, 0), Color.argb(130, 0, 10, 4) },
+            new float[] { 0f, 0.55f, 1f }, Shader.TileMode.CLAMP));
+        c.drawRect(0, 0, w, h, p);
+        p.setShader(null);
+    }
+
+    /** A palm frond: a curved rib with leaflets along both sides, from (x, y) at angle degrees. */
+    private void frond(Canvas c, Paint p, float x, float y, float len, float angle, int color) {
+        int saved = c.save();
+        c.translate(x, y);
+        c.rotate(angle);
+        Path rib = new Path();
+        rib.moveTo(0, 0);
+        rib.quadTo(len * 0.5f, -len * 0.12f, len, len * 0.10f);
+        p.setStyle(Paint.Style.STROKE);
+        p.setStrokeWidth(len * 0.02f);
+        p.setColor(color);
+        c.drawPath(rib, p);
+        p.setStyle(Paint.Style.FILL);
+        android.graphics.PathMeasure pm = new android.graphics.PathMeasure(rib, false);
+        float[] pos = new float[2], tan = new float[2];
+        int n = 13;
+        for (int i = 1; i <= n; i++) {
+            float d = pm.getLength() * i / (n + 1f);
+            pm.getPosTan(d, pos, tan);
+            float ribAngle = (float) Math.toDegrees(Math.atan2(tan[1], tan[0]));
+            float l = len * 0.30f * (1f - 0.6f * i / n);
+            smallLeaf(c, p, pos[0], pos[1], l, ribAngle - 55, color);
+            smallLeaf(c, p, pos[0], pos[1], l, ribAngle + 55, color);
+        }
+        c.restoreToCount(saved);
+    }
+
+    /** A plain slender leaf (filled), from (x, y), length len, at angle degrees. */
+    private void smallLeaf(Canvas c, Paint p, float x, float y, float len, float angle, int color) {
+        int saved = c.save();
+        c.translate(x, y);
+        c.rotate(angle);
+        Path leafPath = new Path();
+        float wdt = len * 0.22f;
+        leafPath.moveTo(0, 0);
+        leafPath.quadTo(len * 0.4f, -wdt, len, 0);
+        leafPath.quadTo(len * 0.4f, wdt, 0, 0);
+        leafPath.close();
+        p.setColor(color);
+        c.drawPath(leafPath, p);
+        c.restoreToCount(saved);
     }
 
     /** A jungle leaf from (x, y), length len, pointing at angle degrees, with a midrib. */
@@ -1272,8 +1477,8 @@ public final class BottomScreenView extends View {
     private void woodPanel(Canvas c, RectF r, float radius, boolean lit) {
         paint.setStyle(Paint.Style.FILL);
         paint.setAlpha(255);
-        paint.setShader(new LinearGradient(0, r.top, 0, r.bottom,
-            lit ? Color.rgb(186, 124, 64) : WOOD_LIGHT, lit ? Color.rgb(136, 84, 40) : WOOD_DARK, Shader.TileMode.CLAMP));
+        paint.setShader(lg(0, r.top, 0, r.bottom,
+            lit ? Color.rgb(186, 124, 64) : WOOD_LIGHT, lit ? Color.rgb(136, 84, 40) : WOOD_DARK));
         c.drawRoundRect(r, radius, radius, paint);
         paint.setShader(null);
 
@@ -1352,6 +1557,72 @@ public final class BottomScreenView extends View {
         c.drawText(s, x, y, text);
     }
 
+    // DK64-style numbers: yellow with a thick red outline edged in dark brown (green with a dark
+    // green outline once complete), like the game's HUD and pause-screen counters.
+    private static final int DK_RED = Color.rgb(196, 22, 18), DK_EDGE = Color.rgb(48, 6, 2);
+    private static final int DK_GREEN_EDGE = Color.rgb(18, 92, 20);
+
+    private void dkNumber(Canvas c, String s, float x, float y, boolean complete) {
+        float size = text.getTextSize();
+        text.setStyle(Paint.Style.STROKE);
+        text.setStrokeJoin(Paint.Join.ROUND);
+        text.setStrokeWidth(size * 0.34f);
+        text.setColor(DK_EDGE);
+        c.drawText(s, x, y, text);
+        text.setStrokeWidth(size * 0.22f);
+        text.setColor(complete ? DK_GREEN_EDGE : DK_RED);
+        c.drawText(s, x, y, text);
+        text.setStyle(Paint.Style.FILL);
+        text.setColor(complete ? COMPLETE : BANANA);
+        c.drawText(s, x, y, text);
+    }
+
+    /**
+     * An action button as the end of a DK barrel: round-ended, end-grain staves, a thick iron
+     * hoop round the rim; it glows when lit (pressed, gun out, camera up).
+     */
+    private void barrelEnd(Canvas c, RectF r, boolean lit) {
+        float rad = r.height() * 0.45f;
+        paint.setStyle(Paint.Style.FILL);
+        if (lit) {
+            paint.setColor(Color.argb(90, 255, 224, 112));
+            tmp2.set(r.left - unit * 0.012f, r.top - unit * 0.012f, r.right + unit * 0.012f, r.bottom + unit * 0.012f);
+            c.drawRoundRect(tmp2, rad + unit * 0.012f, rad + unit * 0.012f, paint);
+        }
+        paint.setAlpha(255);
+        paint.setShader(new android.graphics.RadialGradient(r.centerX(), r.centerY(), Math.max(r.width(), r.height()) * 0.7f,
+            lit ? Color.rgb(212, 146, 76) : Color.rgb(190, 126, 62), lit ? Color.rgb(120, 70, 28) : Color.rgb(104, 58, 20), Shader.TileMode.CLAMP));
+        c.drawRoundRect(r, rad, rad, paint);
+        paint.setShader(null);
+        // End grain: the staves' joins.
+        int saved = c.save();
+        path.reset();
+        path.addRoundRect(r, rad, rad, Path.Direction.CW);
+        c.clipPath(path);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(unit * 0.003f);
+        paint.setColor(Color.argb(110, 60, 30, 8));
+        for (int i = 1; i < 5; i++) {
+            float x = r.left + r.width() * i / 5f;
+            c.drawLine(x, r.top, x, r.bottom, paint);
+        }
+        c.restoreToCount(saved);
+        // The iron hoop.
+        float hoop = r.height() * 0.07f;
+        tmp2.set(r.left + hoop / 2, r.top + hoop / 2, r.right - hoop / 2, r.bottom - hoop / 2);
+        paint.setStrokeWidth(hoop);
+        paint.setColor(Color.rgb(74, 74, 82));
+        c.drawRoundRect(tmp2, rad - hoop / 2, rad - hoop / 2, paint);
+        paint.setStrokeWidth(hoop * 0.3f);
+        paint.setColor(Color.argb(90, 255, 255, 255));
+        tmp2.set(r.left + hoop * 0.6f, r.top + hoop * 0.6f, r.right - hoop * 0.6f, r.bottom - hoop * 0.6f);
+        c.drawRoundRect(tmp2, rad - hoop * 0.6f, rad - hoop * 0.6f, paint);
+        paint.setStrokeWidth(unit * 0.004f);
+        paint.setColor(Color.rgb(32, 32, 36));
+        c.drawRoundRect(r, rad, rad, paint);
+        paint.setStyle(Paint.Style.FILL);
+    }
+
     /** A DK barrel (front view) filling r: bulging staves, two iron hoops. */
     private void barrel(Canvas c, RectF r, boolean lit, boolean locked, int litColor) {
         barrel(c, r, lit, locked, litColor, false);
@@ -1391,7 +1662,8 @@ public final class BottomScreenView extends View {
         }
         // Hoops.
         paint.setStrokeWidth(r.height() * 0.07f);
-        paint.setColor(locked ? Color.rgb(72, 72, 72) : Color.rgb(58, 58, 64));
+        // (Each Kong's barrel has hoops in its colour.)
+        paint.setColor(locked ? Color.rgb(72, 72, 72) : darker(litColor));
         float h1 = r.top + r.height() * 0.17f, h2 = r.bottom - r.height() * 0.17f;
         c.drawLine(r.left + bulge * 0.2f, h1, r.right - bulge * 0.2f, h1, paint);
         c.drawLine(r.left + bulge * 0.2f, h2, r.right - bulge * 0.2f, h2, paint);
@@ -1428,7 +1700,7 @@ public final class BottomScreenView extends View {
         int top = pressed ? Color.rgb(120, 200, 230) : Color.rgb(70, 150, 190);
         int bottom = pressed ? Color.rgb(40, 120, 160) : Color.rgb(24, 80, 120);
         paint.setAlpha(255);
-        paint.setShader(new LinearGradient(0, cy - r, 0, cy + r, top, bottom, Shader.TileMode.CLAMP));
+        paint.setShader(lg(0, cy - r, 0, cy + r, top, bottom));
         c.drawCircle(fpX, cy, r * 0.87f, paint);
         paint.setShader(null);
         paint.setColor(Color.argb(60, 255, 255, 255));
@@ -1551,6 +1823,14 @@ public final class BottomScreenView extends View {
     }
 
     /** Starts the animation when a watched value changes (not the first time it's seen). */
+    // Only when the value goes up (collecting one, not spending it).
+    private void watchUp(String key, int value, String animKey) {
+        Integer before = lastValue.put(key, value);
+        if (before != null && value > before) {
+            startAnim(animKey);
+        }
+    }
+
     private void watch(String key, int value, String animKey) {
         Integer before = lastValue.put(key, value);
         if (before != null && before != value) {
@@ -1758,7 +2038,7 @@ public final class BottomScreenView extends View {
         float br = unit * 0.02f;
         paint.setStyle(Paint.Style.FILL);
         paint.setAlpha(255);
-        paint.setShader(new LinearGradient(0, board.top, 0, board.bottom, Color.rgb(46, 26, 12), Color.rgb(70, 40, 18), Shader.TileMode.CLAMP));
+        paint.setShader(lg(0, board.top, 0, board.bottom, Color.rgb(46, 26, 12), Color.rgb(70, 40, 18)));
         c.drawRoundRect(board, br, br, paint);
         paint.setShader(null);
         paint.setStyle(Paint.Style.STROKE);
@@ -1803,14 +2083,20 @@ public final class BottomScreenView extends View {
             tag(c, tmp, value, complete);
             // Spins once (like the item in the game) when its count changes.
             String spinKey = "spin" + tab + r.label;
-            watch("row" + tab + ":" + shownLevel() + ":" + r.label, r.have, spinKey);
+            watchUp("row" + tab + ":" + shownLevel() + ":" + r.label, r.have, spinKey);
             float spin = animProgress(spinKey, SPIN_MS);
             if (spin >= 0) {
                 int saved = c.save();
-                float sx = (float) Math.cos(2 * Math.PI * spin);
                 float pop = 1f + 0.18f * (float) Math.sin(Math.PI * spin);
-                c.scale(Math.abs(sx) < 0.08f ? 0.08f : sx * pop, pop, bx, cy);
+                if (RomIcons.hasAnimation(r.icon)) {
+                    c.scale(pop, pop, bx, cy);   // the game's own spin frames (iconFrame)
+                } else {
+                    float sx = (float) Math.cos(2 * Math.PI * spin);
+                    c.scale(Math.abs(sx) < 0.08f ? 0.08f : sx * pop, pop, bx, cy);
+                }
+                iconSpin = spin;
                 badge(c, bx, cy, badgeR, r);
+                iconSpin = -1f;
                 c.restoreToCount(saved);
             } else {
                 badge(c, bx, cy, badgeR, r);
@@ -1823,8 +2109,26 @@ public final class BottomScreenView extends View {
         drawItemIcon(c, x, y, r, row);
     }
 
+    // Collecting one (the count going up): the whole spin, once (iconSpin = its progress, set
+    // around the draw; -1 otherwise). Otherwise, in game, a slow sway over a few frames either
+    // side of the front, each item a little out of step with the next, so they look solid.
+    private float iconSpin = -1f;
+
+    private Bitmap iconFrame(Row row) {
+        if (row.icon == null) {
+            return null;
+        }
+        if (state.inGame()) {
+            RomIcons.ensureAnimations();
+        }
+        if (iconSpin >= 0) {
+            return RomIcons.spin(row.icon, iconSpin);
+        }
+        return row.icon;   // (still between collections)
+    }
+
     private void drawItemIcon(Canvas c, float x, float y, float r, Row row) {
-        if (!RomIcons.draw(c, row.icon, x, y, r)) {
+        if (!RomIcons.draw(c, iconFrame(row), x, y, r)) {
             switch (row.fallback) {
                 case 0: DkIcons.banana(c, x, y, r * 0.85f); break;
                 case 1: DkIcons.coin(c, x, y, r * 0.8f); break;
@@ -1841,14 +2145,14 @@ public final class BottomScreenView extends View {
         c.drawCircle(x, y, r, paint);
         int base = row.color;
         paint.setAlpha(255);
-        paint.setShader(new LinearGradient(0, y - r, 0, y + r, lighten(base), base, Shader.TileMode.CLAMP));
+        paint.setShader(lg(0, y - r, 0, y + r, lighten(base), base));
         c.drawCircle(x, y, r * 0.86f, paint);
         paint.setShader(null);
         // Gloss.
         paint.setColor(Color.argb(70, 255, 255, 255));
         tmp2.set(x - r * 0.55f, y - r * 0.78f, x + r * 0.55f, y - r * 0.1f);
         c.drawOval(tmp2, paint);
-        if (!RomIcons.draw(c, row.icon, x, y, r * 0.62f)) {
+        if (!RomIcons.draw(c, iconFrame(row), x, y, r * 0.62f)) {
             switch (row.fallback) {
                 case 0: DkIcons.banana(c, x, y, r * 0.55f); break;
                 case 1: DkIcons.coin(c, x, y, r * 0.5f); break;
@@ -1895,7 +2199,7 @@ public final class BottomScreenView extends View {
         float rad = r.height() * 0.3f;
         paint.setStyle(Paint.Style.FILL);
         paint.setAlpha(255);
-        paint.setShader(new LinearGradient(0, r.top, 0, r.bottom, Color.rgb(240, 150, 50), Color.rgb(184, 96, 26), Shader.TileMode.CLAMP));
+        paint.setShader(lg(0, r.top, 0, r.bottom, Color.rgb(240, 150, 50), Color.rgb(184, 96, 26)));
         c.drawRoundRect(r, rad, rad, paint);
         paint.setShader(null);
         paint.setStyle(Paint.Style.STROKE);
@@ -1910,7 +2214,10 @@ public final class BottomScreenView extends View {
         float rad = r.height() * 0.3f;
         paint.setStyle(Paint.Style.FILL);
         paint.setAlpha(255);
-        paint.setShader(new LinearGradient(0, r.top, 0, r.bottom, Color.rgb(240, 150, 50), Color.rgb(184, 96, 26), Shader.TileMode.CLAMP));
+        // A pale tag (the DK numbers' red outline reads best on it); a little golden once complete.
+        paint.setShader(lg(0, r.top, 0, r.bottom,
+            complete ? Color.rgb(255, 236, 150) : Color.rgb(252, 240, 210),
+            complete ? Color.rgb(232, 196, 90) : Color.rgb(226, 204, 160)));
         c.drawRoundRect(r, rad, rad, paint);
         paint.setShader(null);
         paint.setStyle(Paint.Style.STROKE);
@@ -1925,7 +2232,7 @@ public final class BottomScreenView extends View {
         text.setTextAlign(Paint.Align.CENTER);
         float textLeft = r.left + r.height() * 0.55f;   // clear of the badge
         text.setTextSize(fitText(value, r.right - textLeft - rad, r.height() * 0.68f));
-        outlined(c, value, (textLeft + r.right) / 2, r.centerY() + text.getTextSize() * 0.36f, complete ? COMPLETE : CREAM);
+        dkNumber(c, value, (textLeft + r.right) / 2, r.centerY() + text.getTextSize() * 0.36f, complete);
     }
 
     private static int darker(int color) {
@@ -1959,6 +2266,37 @@ public final class BottomScreenView extends View {
 
     private static final long ICON_FLIP_MS = 420;
     private int flipFromKong = GameState.DK;
+
+    // The controller button each action is bound to (one press, Configure Inputs), shown in the
+    // button's corner as the in-game prompts draw it; nothing when it isn't bound. Re-read every
+    // 2 s (the menu can change it).
+    private String[] buttonIcons = { "", "", "", "", "", "" };
+    private long buttonIconsAt = -10000;
+
+    private String actionIcon(TouchMoves.Move move) {
+        long now = android.os.SystemClock.uptimeMillis();
+        if (now - buttonIconsAt > 2000) {
+            buttonIconsAt = now;
+            String[] g = GameState.buttonIcons();
+            if (!java.util.Arrays.equals(g, buttonIcons)) {
+                buttonIcons = g;
+                postInvalidate();
+            }
+        }
+        switch (move) {
+            case INSTRUMENT: return buttonIcons[2];
+            case CAMERA: return buttonIcons[3];
+            case WEAPON: return buttonIcons[4];
+            case ORANGE: return buttonIcons[5];
+            default: return "";
+        }
+    }
+
+    // The button picture in the button's top-right corner.
+    private void drawActionIcon(Canvas c, RectF r, String icon) {
+        float size = r.height() * 0.22f;
+        ButtonIcons.draw(c, getContext(), icon, r.right - size * 0.85f, r.top + size * 0.85f, size, 150);
+    }
 
     private void drawActions(Canvas c) {
         int kong = playingKong();
@@ -2009,20 +2347,24 @@ public final class BottomScreenView extends View {
             // Icon, with the count beside it.
             boolean hasCount = !counts[i].isEmpty();
             float iconR = Math.min(r.height() * 0.36f, r.width() * (hasCount ? 0.22f : 0.3f));
-            float iconX = hasCount ? r.left + r.width() * 0.1f + iconR : r.centerX();
-            float iconY = r.centerY();
-            // The icon sways for a moment when it's used (pressed, or its count changes).
+            float iconX = r.centerX();
+            float countSize = 0f, countGap = iconR * 0.3f;
             if (hasCount) {
-                watch("wigglecount" + move, parseCount(counts[i]), "wiggle" + move);
+                // The item and its count side by side, close together, centred on the button.
+                text.setTextAlign(Paint.Align.LEFT);
+                countSize = fitText("000", r.width() * 0.42f, r.height() * 0.36f);
+                text.setTextSize(countSize);
+                float group = iconR * 2f + countGap + textWidth(counts[i]);
+                iconX = r.centerX() - group / 2f + iconR;
+            }
+            float iconY = r.centerY();
+            // Picking more up (the count going up): the item spins once, like the collectibles
+            // (the game's own spin frames where it has them, otherwise a turn round).
+            if (hasCount) {
+                watchUp("spincount" + move, parseCount(counts[i]), "spin" + move);
             }
             int iconSaved = c.save();
-            float wiggle = animProgress("wiggle" + move, WIGGLE_MS);
-            if (wiggle >= 0) {
-                float fade = 1f - wiggle;
-                double t = 2 * Math.PI * wiggle * 2.5;
-                c.translate(0, -(float) Math.abs(Math.sin(t)) * iconR * 0.12f * fade);
-                c.rotate((float) Math.sin(t) * 10f * fade, iconX, iconY);
-            }
+            float spinMove = animProgress("spin" + move, SPIN_MS);
             int iconKong = kong;
             if (flip >= 0 && (move == TouchMoves.Move.WEAPON || move == TouchMoves.Move.INSTRUMENT)) {
                 // Turns edge-on, then the other Kong's side comes round.
@@ -2030,47 +2372,94 @@ public final class BottomScreenView extends View {
                 iconKong = flip < 0.5f ? flipFromKong : kong;
                 c.scale(Math.max(Math.abs(sx), 0.04f), 1f + 0.12f * (float) Math.sin(Math.PI * flip), iconX, iconY);
             }
+            Bitmap still;
+            switch (move) {
+                case WEAPON: still = RomIcons.of(RomIcons.weapon, iconKong); break;
+                case ORANGE: still = RomIcons.orange; break;
+                case INSTRUMENT: still = RomIcons.of(RomIcons.instrument, iconKong); break;
+                default: still = RomIcons.film; break;
+            }
+            Bitmap shown = still;
+            if (spinMove >= 0) {
+                float pop = 1f + 0.18f * (float) Math.sin(Math.PI * spinMove);
+                if (state.inGame()) {
+                    RomIcons.ensureAnimations();
+                }
+                if (RomIcons.hasAnimation(still)) {
+                    shown = RomIcons.spin(still, spinMove);
+                    c.scale(pop, pop, iconX, iconY);
+                } else {
+                    float sx = (float) Math.cos(2 * Math.PI * spinMove);
+                    c.scale(Math.abs(sx) < 0.08f ? 0.08f : sx * pop, pop, iconX, iconY);
+                }
+            }
             switch (move) {
                 case WEAPON:
-                    if (!RomIcons.draw(c, RomIcons.of(RomIcons.weapon, iconKong), iconX, iconY, iconR)) {
+                    if (!RomIcons.draw(c, shown, iconX, iconY, iconR)) {
                         DkIcons.weapon(c, iconKong, iconX, iconY, iconR);
                     }
                     break;
                 case ORANGE:
-                    if (!RomIcons.draw(c, RomIcons.orange, iconX, iconY, iconR)) {
+                    if (!RomIcons.draw(c, shown, iconX, iconY, iconR)) {
                         DkIcons.orange(c, iconX, iconY, iconR);
                     }
                     break;
                 case INSTRUMENT:
-                    if (!RomIcons.draw(c, RomIcons.of(RomIcons.instrument, iconKong), iconX, iconY, iconR)) {
+                    if (!RomIcons.draw(c, shown, iconX, iconY, iconR)) {
                         DkIcons.instrument(c, iconKong, iconX, iconY, iconR);
                     }
                     break;
                 default:
-                    if (!RomIcons.draw(c, RomIcons.film, iconX, iconY, iconR)) {
+                    if (!RomIcons.draw(c, shown, iconX, iconY, iconR)) {
                         DkIcons.camera(c, iconX, iconY, iconR);
                     }
                     break;
             }
             c.restoreToCount(iconSaved);
             if (hasCount) {
-                float countLeft = iconX + iconR * 1.2f;
-                float countRight = r.right - r.width() * 0.1f;
-                text.setTextAlign(Paint.Align.RIGHT);
-                text.setTextSize(fitText("000", countRight - countLeft, r.height() * 0.36f));
+                float countLeft = iconX + iconR + countGap;
+                text.setTextAlign(Paint.Align.LEFT);
+                text.setTextSize(countSize);
                 // The count bumps when it changes (an orange thrown, ammo used or picked up).
                 watch("count" + move, parseCount(counts[i]), "bump" + move);
                 float bump = animProgress("bump" + move, BUMP_MS);
                 int countSaved = c.save();
                 if (bump >= 0) {
                     float grow = 1f + 0.3f * (float) Math.sin(Math.PI * bump);
-                    c.scale(grow, grow, countRight - textWidth(counts[i]) / 2f, iconY);
+                    c.scale(grow, grow, countLeft + textWidth(counts[i]) / 2f, iconY);
                 }
-                outlined(c, counts[i], countRight, iconY + text.getTextSize() * 0.36f, BANANA);
+                dkNumber(c, tickedCount("tick" + move, counts[i]), countLeft, iconY + text.getTextSize() * 0.36f, false);
                 c.restoreToCount(countSaved);
             }
+            drawActionIcon(c, r, actionIcon(move));
             c.restoreToCount(saved);
         }
+    }
+
+    // Counts going up tick up a step at a time, like the game's own counters (about 25 steps a
+    // second, quicker for big jumps); going down they change at once.
+    private final java.util.HashMap<String, float[]> ticks = new java.util.HashMap<>();
+
+    private String tickedCount(String key, String count) {
+        int actual = parseCount(count);
+        if (actual < 0) {
+            ticks.remove(key);
+            return count;
+        }
+        long now = android.os.SystemClock.uptimeMillis();
+        float[] t = ticks.get(key);   // { shown, last time }
+        if (t == null || actual < t[0]) {
+            ticks.put(key, new float[] { actual, now });
+            return count;
+        }
+        if (t[0] < actual) {
+            float dt = Math.min(100f, now - t[1]);
+            float rate = Math.max(25f, (actual - t[0]) * 4f) / 1000f;   // steps per ms
+            t[0] = Math.min(actual, t[0] + dt * rate);
+            animating = true;
+        }
+        t[1] = now;
+        return String.valueOf((int) Math.floor(t[0]));
     }
 
     private static int parseCount(String s) {
@@ -2079,6 +2468,33 @@ public final class BottomScreenView extends View {
         } catch (NumberFormatException e) {
             return -1;
         }
+    }
+
+    // Two-colour vertical/horizontal gradients, kept and reused (the boards don't move, so the
+    // same ones come back every redraw) rather than made afresh each time (less garbage to collect).
+    private final android.util.LongSparseArray<LinearGradient> gradients = new android.util.LongSparseArray<>();
+
+    private static long mix(long h, int v) {
+        return (h ^ (v & 0xFFFFFFFFL)) * 1099511628211L;
+    }
+
+    private LinearGradient lg(float x0, float y0, float x1, float y1, int c0, int c1) {
+        long key = 1469598103934665603L;
+        key = mix(key, Float.floatToIntBits(x0));
+        key = mix(key, Float.floatToIntBits(y0));
+        key = mix(key, Float.floatToIntBits(x1));
+        key = mix(key, Float.floatToIntBits(y1));
+        key = mix(key, c0);
+        key = mix(key, c1);
+        LinearGradient g = gradients.get(key);
+        if (g == null) {
+            if (gradients.size() > 400) {
+                gradients.clear();   // (layout changed, or something sliding: start over)
+            }
+            g = new LinearGradient(x0, y0, x1, y1, c0, c1, Shader.TileMode.CLAMP);
+            gradients.put(key, g);
+        }
+        return g;
     }
 
     /** Largest text size up to {@code max} at which {@code s} fits in {@code width}. */
@@ -2150,8 +2566,11 @@ public final class BottomScreenView extends View {
         }
         for (int i = 0; i < 4; i++) {
             if (actionRects[i].contains(x, y) && (buttonsShown || slideIn[i + 1] > 0.6f)) {
-                if (owned(ACTIONS[i]) && moves.available(ACTIONS[i])) {
+                if (owned(ACTIONS[i]) && moves.available(ACTIONS[i]) && moves.running == null) {
                     doMove(ACTIONS[i]);
+                } else if (owned(ACTIONS[i]) && state.inGame() && !moves.greyed(ACTIONS[i])
+                        && (GameState.gameFeel() & GameState.FEEL_MOVEMENT_POLISH) != 0) {
+                    bufferMove(ACTIONS[i]);   // pressed mid-move: happens as soon as it can
                 }
                 return true;
             }

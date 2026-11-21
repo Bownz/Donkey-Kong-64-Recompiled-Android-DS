@@ -202,10 +202,38 @@ final class TouchMoves {
             return;
         }
 
+        if (move == Move.WEAPON && (GameState.fpStatus() & 1) != 0) {   // (out or away)
+            // Walk in First Person, pulling the gun out: Z, then Z + C-Left (the crouch is what
+            // takes C-Left as "draw"), staying in first person.
+            final int zz = TouchInput.N64_Z;
+            TouchInput.setN64Buttons(zz);
+            handler.postDelayed(() -> TouchInput.setN64Buttons(zz | TouchInput.N64_C_LEFT), Z_LEAD_MS);
+            handler.postDelayed(() -> TouchInput.setN64Buttons(zz), Z_LEAD_MS + C_HOLD_MS);
+            handler.postDelayed(() -> {
+                TouchInput.setN64Buttons(0);
+                running = null;
+                notifyListeners();
+            }, Z_LEAD_MS + C_HOLD_MS + Z_TAIL_MS);
+            return;
+        }
+        if (move == Move.WEAPON && state.firstPerson && (GameState.gameFeel() & GameState.FEEL_FP_WALK) != 0) {
+            // Walk in First Person: the gun comes out (or goes away) without leaving first person:
+            // C-Left on its own, which the game patch turns into the gun's draw / put away there.
+            TouchInput.setN64Buttons(TouchInput.N64_C_LEFT);
+            handler.postDelayed(() -> {
+                TouchInput.setN64Buttons(0);
+                running = null;
+                notifyListeners();
+            }, C_HOLD_MS);
+            return;
+        }
+
         final int z = TouchInput.N64_Z;
-        // Putting the gun away from first-person aiming: leave first person first (C-Up), then
-        // Z + C-Left as usual, so the view doesn't stay in first person without the gun.
-        final long lead = (move == Move.WEAPON && state.gunOut && state.firstPerson) ? C_HOLD_MS + 250 : 0;
+        // From first person (either way round with the gun): leave first person first (C-Up),
+        // then Z + C-Left as usual, so the view doesn't stay in first person without the gun.
+        // Pulling the gun out from first person goes back into first person (aiming) after.
+        final long lead = (move == Move.WEAPON && state.firstPerson) ? C_HOLD_MS + 250 : 0;
+        final boolean backToFirstPerson = false;
         if (lead > 0) {
             TouchInput.setN64Buttons(TouchInput.N64_C_UP);
             handler.postDelayed(() -> TouchInput.setN64Buttons(0), C_HOLD_MS);
@@ -213,11 +241,23 @@ final class TouchMoves {
         handler.postDelayed(() -> TouchInput.setN64Buttons(z), lead);                       // Z
         handler.postDelayed(() -> TouchInput.setN64Buttons(z | c), lead + Z_LEAD_MS);       // + C
         handler.postDelayed(() -> TouchInput.setN64Buttons(z), lead + Z_LEAD_MS + C_HOLD_MS);
+        final long done = lead + Z_LEAD_MS + C_HOLD_MS + Z_TAIL_MS;
+        if (backToFirstPerson) {
+            handler.postDelayed(() -> TouchInput.setN64Buttons(0), done);
+            // Once the gun's out (its animation), C-Up again: first person, aiming.
+            handler.postDelayed(() -> TouchInput.setN64Buttons(TouchInput.N64_C_UP), done + 600);
+            handler.postDelayed(() -> {
+                TouchInput.setN64Buttons(0);
+                running = null;
+                notifyListeners();
+            }, done + 600 + C_HOLD_MS);
+            return;
+        }
         handler.postDelayed(() -> {
             TouchInput.setN64Buttons(0);
             running = null;
             notifyListeners();
-        }, lead + Z_LEAD_MS + C_HOLD_MS + Z_TAIL_MS);
+        }, done);
     }
 
     /**
@@ -255,7 +295,8 @@ final class TouchMoves {
         }
         switch (move) {
             case FIRST_PERSON: return state.canFirstPerson || state.firstPerson || state.gunOut;
-            case WEAPON: return state.canZMoves || state.gunOut;
+            case WEAPON: return state.canZMoves || state.gunOut || state.firstPerson;
+            case CAMERA: return (state.canZMoves || state.underwater) && !state.gunOut;
             default: return state.canZMoves && !state.gunOut;
         }
     }
@@ -285,9 +326,12 @@ final class TouchMoves {
                 return state.swimming || state.climbing || (state.ammo <= 0 && state.homingAmmo <= 0);
             case ORANGE: return state.swimming || state.climbing || state.gunOut || state.oranges <= 0;
             // In first person (or the camera) Z + C-Up would just leave the view.
+            // (Walk in First Person too: fpStatus bit 1.)
             case INSTRUMENT: return state.swimming || state.climbing || state.gunOut || state.firstPerson || state.camera
+                || (GameState.fpStatus() & 1) != 0
                 || k.instrumentEnergy <= 0;
-            case CAMERA: return !state.camera && (state.swimming || state.climbing || state.gunOut || state.film <= 0);
+            // The camera works under the water, not swimming on the surface.
+            case CAMERA: return !state.camera && (state.surfaceSwimming || state.climbing || state.gunOut || state.film <= 0);
             default: return false;
         }
     }

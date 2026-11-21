@@ -33,7 +33,9 @@ final class GameState {
     static final int[][] KEY_FLAGS = {
         { 26 }, { 74 }, { 138 }, { 168 }, { 236 }, { 292 }, { 317 }, {}, { 380 },
     };
-    static final int[][] RAINBOW_COIN_FLAGS = {
+    // Rainbow Coins: replaced at run time by the game's own numbering (rainbowCoinsFromGame); this
+    // list is only used until the game has reported it.
+    static volatile int[][] RAINBOW_COIN_FLAGS = {
         { 0x2A6 }, { 0x2A7, 0x2AC }, { 0x2A8 }, { 0x2AF }, { 0x2AD, 0x2AE }, { 0x2B0 }, { 0x2B1 },
         { 0x2A9, 0x2AA, 0x2AB, 0x2B2, 0x2B3, 0x2B4, 0x2B5 }, {},
     };
@@ -74,7 +76,7 @@ final class GameState {
                 ids.add(blueprintFlag(k, level));
                 ids.add(medalFlag(k, level));
             }
-            for (int[][] list : new int[][][] { FAIRY_FLAGS, CROWN_FLAGS, KEY_FLAGS, RAINBOW_COIN_FLAGS }) {
+            for (int[][] list : new int[][][] { FAIRY_FLAGS, CROWN_FLAGS, KEY_FLAGS }) {
                 for (int f : list[level]) {
                     ids.add(f);
                 }
@@ -82,6 +84,13 @@ final class GameState {
         }
         for (int f : LEVEL_ENTERED_FLAGS) {
             ids.add(f);
+        }
+        // The flags the game gives the actors that spawn collectibles (dirt patches among them):
+        // from 0x26B, numbered at boot across all maps (func_global_asm_80688940).
+        for (int f = 0x26B; f <= 0x2C8; f++) {
+            if (!ids.contains(f)) {
+                ids.add(f);
+            }
         }
         ids.removeIf(f -> f < 0);
         flagIds = new int[ids.size()];
@@ -126,6 +135,44 @@ final class GameState {
 
     private static native boolean nativeRead(int[] out);
     private static native boolean nativeReadFlags(int[] ids, int[] out);
+    private static native int[] nativeRainbowCoins();
+    private static boolean rainbowCoinsKnown;
+
+    /** Takes the game's Rainbow Coin numbering once it has reported it (at boot). */
+    private static void rainbowCoinsFromGame() {
+        if (rainbowCoinsKnown) {
+            return;
+        }
+        int[] pairs;
+        try {
+            pairs = nativeRainbowCoins();
+        } catch (UnsatisfiedLinkError e) {
+            return;
+        }
+        if (pairs == null || pairs.length < 2) {
+            return;
+        }
+        java.util.List<java.util.List<Integer>> byLevel = new java.util.ArrayList<>();
+        for (int l = 0; l < LEVELS; l++) {
+            byLevel.add(new java.util.ArrayList<>());
+        }
+        for (int i = 0; i + 1 < pairs.length; i += 2) {
+            int level = pairs[i];
+            if (level >= 0 && level < LEVELS) {
+                byLevel.get(level).add(pairs[i + 1]);
+            }
+        }
+        int[][] coins = new int[LEVELS][];
+        for (int l = 0; l < LEVELS; l++) {
+            coins[l] = new int[byLevel.get(l).size()];
+            for (int j = 0; j < coins[l].length; j++) {
+                coins[l][j] = byLevel.get(l).get(j);
+            }
+        }
+        RAINBOW_COIN_FLAGS = coins;
+        rainbowCoinsKnown = true;
+        android.util.Log.i("DK64Recomp", "Bottom screen: " + (pairs.length / 2) + " Rainbow Coins from the game");
+    }
     private static native int nativeKongSwap();
     private static native int nativeFrameCount();
     private static native void nativeSetTagTarget(int kong);
@@ -176,6 +223,65 @@ final class GameState {
         } catch (UnsatisfiedLinkError e) {
             return true;
         }
+    }
+
+    private static native int nativeGameFeel();
+    private static native String nativeButtonGlyphs();
+    private static native int nativeFpStatus();
+
+    /** Walk in First Person: 1 = on, 2 = the gun's out. */
+    static int fpStatus() {
+        try {
+            return nativeFpStatus();
+        } catch (UnsatisfiedLinkError e) {
+            return 0;
+        }
+    }
+
+    /** Game feel option flags (Input): 2048 = Walk in First Person. */
+    static final int FEEL_FP_WALK = 2048;
+    static final int FEEL_MOVEMENT_POLISH = 8;
+
+    static int gameFeel() {
+        try {
+            return nativeGameFeel();
+        } catch (UnsatisfiedLinkError e) {
+            return 0;
+        }
+    }
+
+    /**
+     * The controller buttons that press N64 B and N64 R (PromptFont glyphs; "" when not bound),
+     * as {B, R}.
+     */
+    static String[] buttonGlyphs() {
+        try {
+            String s = nativeButtonGlyphs();
+            String[] parts = (s == null ? "\n" : s).split("\n", -1);
+            return new String[] { parts.length > 0 ? parts[0] : "", parts.length > 1 ? parts[1] : "" };
+        } catch (UnsatisfiedLinkError e) {
+            return new String[] { "", "" };
+        }
+    }
+
+    private static native String nativeButtonIcons();
+
+    /**
+     * The button pictures (ButtonIcons names; "" when not bound or no controller) for what
+     * presses N64 B, N64 R, and the one-press Instrument, Fairy Camera, Gun and Orange.
+     */
+    static String[] buttonIcons() {
+        String[] out = { "", "", "", "", "", "" };
+        try {
+            String s = nativeButtonIcons();
+            String[] parts = (s == null ? "" : s).split("\n", -1);
+            for (int i = 0; i < out.length && i < parts.length; i++) {
+                out[i] = parts[i];
+            }
+        } catch (UnsatisfiedLinkError e) {
+            // none
+        }
+        return out;
     }
 
     static int bottomButtonsMode() {
@@ -279,6 +385,8 @@ final class GameState {
     /** A save file is being played (not the title screen or file select). */
     boolean fileLoaded;
     /** Swimming (on the surface or underwater). */
+    boolean underwater;   // swimming under the surface (not on it)
+    boolean surfaceSwimming;   // swimming on the water's surface
     boolean swimming;
     /** Hanging on a vine, or climbing a tree or pole. */
     boolean climbing;
@@ -319,6 +427,7 @@ final class GameState {
     boolean refresh() {
         boolean ok;
         try {
+            rainbowCoinsFromGame();
             ok = nativeRead(raw);
             if (!nativeReadFlags(flagIds, flagValues)) {
                 Arrays.fill(flagValues, 0);
@@ -378,6 +487,8 @@ final class GameState {
         inputSet = (raw[COUNT - 1] >> 16) & 0xFF;
         onFeet = (raw[COUNT - 1] & (1 << 24)) != 0;
         camera = (raw[COUNT - 1] & (1 << 25)) != 0;
+        underwater = (raw[COUNT - 1] & (1 << 27)) != 0;
+        surfaceSwimming = (raw[COUNT - 1] & (1 << 28)) != 0;
         cutscene = (raw[COUNT - 1] & (1 << 26)) != 0;
         for (int k = 0; k < KONG_COUNT; k++) {
             for (int l = 0; l < LEVELS; l++) {

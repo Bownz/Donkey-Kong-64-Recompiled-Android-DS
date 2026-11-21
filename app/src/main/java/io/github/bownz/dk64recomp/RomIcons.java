@@ -229,6 +229,40 @@ final class RomIcons {
         return frames[(int) ((timeMs * fps / 1000) % frames.length)];
     }
 
+    /**
+     * A gentle turn back and forth over the few frames either side of the front (the still),
+     * slowly (a 3 s sway), so the sprite looks solid rather than flat. {@code phaseMs} offsets
+     * one item from the next.
+     */
+    static Bitmap wobble(Bitmap still, long timeMs, long phaseMs) {
+        if (still == null) {
+            return null;
+        }
+        Bitmap[] frames = animations.get(still);
+        if (frames == null) {
+            return still;
+        }
+        int n = frames.length;
+        // Just one frame either side, briskly: enough that the icon doesn't look flat.
+        int w = 1;
+        double s = Math.sin(2 * Math.PI * (((timeMs + phaseMs) % 1200) / 1200.0));
+        int p = (int) Math.round(s * w);
+        return frames[((p % n) + n) % n];
+    }
+
+    /** The whole spin once: the frame at {@code progress} (0..1) of it (the still if none). */
+    static Bitmap spin(Bitmap still, float progress) {
+        if (still == null) {
+            return null;
+        }
+        Bitmap[] frames = animations.get(still);
+        if (frames == null) {
+            return still;
+        }
+        int i = (int) (progress * frames.length);
+        return frames[Math.max(0, Math.min(frames.length - 1, i))];
+    }
+
     static boolean hasAnimation(Bitmap still) {
         return still != null && animations.containsKey(still);
     }
@@ -284,6 +318,10 @@ final class RomIcons {
                 animate(key, KEY, -1);
                 animate(rainbowCoin, RAINBOW_COIN, -1);
                 animate(fairy, FAIRY, -1);
+                // The action buttons' items spin once when picked up (BottomScreenView), with their
+                // own sprite frames where the game has them.
+                animate(orange, ORANGE, -1);
+                animate(film, FILM, -1);
                 int[] medalPixels = pixels(f, MEDAL);
                 int found = count(melon, orange, film, goldenBanana, medal, blueprint, crown, key, rainbowCoin, fairy, crosshair, crystal);
                 for (int k = 0; k < 5; k++) {
@@ -309,6 +347,8 @@ final class RomIcons {
                     found += count(blueprintByKong[k]);
                     weapon[k] = load(f, WEAPON[k]);
                     instrument[k] = load(f, INSTRUMENT[k]);
+                    animate(weapon[k], WEAPON[k], -1);
+                    animate(instrument[k], INSTRUMENT[k], -1);
                     face[k] = loadFace(f, FACE_HALVES[k]);
                     found += count(banana[k], weapon[k], instrument[k], face[k]);
                 }
@@ -407,15 +447,23 @@ final class RomIcons {
         return argb == null ? null : Bitmap.createBitmap(argb, spec.width, spec.height, Bitmap.Config.ARGB_8888);
     }
 
-    /** Of {@code frames} consecutive sprite frames, the one with the most visible pixels. */
+    /**
+     * Of {@code frames} consecutive sprite frames, the one with the most visible pixels (the
+     * face-on one). All the frames become its animation (starting from it), for the spin when
+     * one is collected.
+     */
     private static Bitmap loadWidestFrame(RandomAccessFile f, int first, int frames, int w, int h) {
-        int[] best = null;
+        Bitmap[] all = new Bitmap[frames];
+        int best = -1;
         int bestCount = 0;
         for (int i = 0; i < frames; i++) {
-            int[] argb = pixels(f, new Spec(TEXTURES_UNCOMPRESSED, first + i, w, h, true));
+            Spec spec = new Spec(TEXTURES_UNCOMPRESSED, first + i, w, h, true);
+            spec.lenient = true;   // edge-on frames are mostly empty
+            int[] argb = pixels(f, spec);
             if (argb == null) {
                 continue;
             }
+            all[i] = Bitmap.createBitmap(argb, w, h, Bitmap.Config.ARGB_8888);
             int n = 0;
             for (int p : argb) {
                 if ((p >>> 24) != 0) {
@@ -424,10 +472,22 @@ final class RomIcons {
             }
             if (n > bestCount) {
                 bestCount = n;
-                best = argb;
+                best = i;
             }
         }
-        return best == null ? null : Bitmap.createBitmap(best, w, h, Bitmap.Config.ARGB_8888);
+        if (best < 0) {
+            return null;
+        }
+        boolean complete = true;
+        Bitmap[] spin = new Bitmap[frames];
+        for (int i = 0; i < frames; i++) {
+            spin[i] = all[(best + i) % frames];
+            complete &= spin[i] != null;
+        }
+        if (complete) {
+            animations.put(all[best], spin);
+        }
+        return all[best];
     }
 
     /**

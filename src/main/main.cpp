@@ -927,7 +927,7 @@ static bool ask_for_experience() {
         "Modern: Analog Camera on the right stick, gyro aiming, sharp full-resolution graphics "
         "with anti-aliasing, and quick Kong swapping. "
         "Classic: the N64 as it was, with the original controls, camera and resolution. "
-        "You can change this, or any single option, in Settings > General.",
+        "You can change this later in Settings > Gameplay > Choose Experience, or any single option on its own.",
         "Modern",
         "Classic",
         []() { dk64_android_apply_experience(1); },
@@ -1156,6 +1156,12 @@ int main(int argc, char** argv) {
     REGISTER_FUNC(recomp_get_tag_target);
     REGISTER_FUNC(recomp_fill_button_icon);
     REGISTER_FUNC(recomp_touch_camera_get);
+    REGISTER_FUNC(recomp_haptic_pulse);
+    REGISTER_FUNC(recomp_get_gun_button);
+    REGISTER_FUNC(recomp_get_game_feel);
+    REGISTER_FUNC(recomp_set_fp_status);
+    REGISTER_FUNC(recomp_report_rainbow_coin);
+    REGISTER_FUNC(recomp_get_extra_actions);
     REGISTER_FUNC(recomp_get_mouse_deltas);
     REGISTER_FUNC(recomp_get_inverted_axes);
     REGISTER_FUNC(recomp_get_analog_inverted_axes);

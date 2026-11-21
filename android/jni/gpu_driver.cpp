@@ -183,6 +183,11 @@ namespace dk64::android {
         call_activity("changeStorageLocation", "()Ljava/lang/String;", nullptr);
     }
 
+    void phone_haptic_pulse(float strength, int ms) {
+        const std::string arg = std::to_string(ms) + "," + std::to_string(static_cast<int>(strength * 255.0f));
+        call_activity("hapticPulse", "(Ljava/lang/String;)Ljava/lang/String;", &arg);
+    }
+
     std::string storage_description() {
         return call_activity("getStorageDescription", "()Ljava/lang/String;", nullptr);
     }

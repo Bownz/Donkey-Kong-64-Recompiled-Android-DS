@@ -10,6 +10,7 @@
 #include "librecomp/config.hpp"
 #if defined(__ANDROID__)
 #include <fstream>
+#include <array>
 #include "recompinput/profiles.h"
 #include "librecomp/game.hpp"
 #endif
@@ -148,12 +149,13 @@ static void add_general_options(recomp::config::Config &config) {
         {dk64::CameraTypeMode::Free, "Free", "Free Cam"},
         {dk64::CameraTypeMode::Follow, "Follow", "Follow Cam"},
         {dk64::CameraTypeMode::BetterFree, "BetterFree", "Better Free Cam"},
-        {dk64::CameraTypeMode::Analog, "Analog", "Analog Camera"}
+        {dk64::CameraTypeMode::Analog, "Analog", "Analog Camera"},
+        {dk64::CameraTypeMode::Modern, "Modern", "Modern Camera"}
     };
     config.add_enum_option(
         dk64::configkeys::general::camera_type,
         "Camera Type",
-        "Changes the camera behavior.<br /><recomp-color primary>Free Cam</recomp-color>: Camera can be controlled via pressing C-Left and C-Right. The camera does not try to push itself behind the player.<br /><recomp-color primary>Follow Cam</recomp-color>: Similar to <recomp-color secondary>Free Cam</recomp-color>, but the camera tries to push itself behind the player.<br /><recomp-color primary>Better Free Cam</recomp-color>: Similar to <recomp-color secondary>Free Cam</recomp-color>, but instead of a button press turning the camera 45 degrees, holding the button moves the camera at 5 degrees per frame.<br /><recomp-color primary>Analog Camera</recomp-color>: Control of the camera is controlled by your right analogue stick. It is advised that C-Up is remapped to something outside your right analogue stick in order to have a good time with this.",
+        "Changes the camera behavior.<br /><recomp-color primary>Free Cam</recomp-color>: Camera can be controlled via pressing C-Left and C-Right. The camera does not try to push itself behind the player.<br /><recomp-color primary>Follow Cam</recomp-color>: Similar to <recomp-color secondary>Free Cam</recomp-color>, but the camera tries to push itself behind the player.<br /><recomp-color primary>Better Free Cam</recomp-color>: Similar to <recomp-color secondary>Free Cam</recomp-color>, but instead of a button press turning the camera 45 degrees, holding the button moves the camera at 5 degrees per frame.<br /><recomp-color primary>Analog Camera</recomp-color>: Control of the camera is controlled by your right analogue stick. It is advised that C-Up is remapped to something outside your right analogue stick in order to have a good time with this.<br /><recomp-color primary>Modern Camera</recomp-color>: Right stick camera that feels like recent 3D platformers: smooth turning, up/down tilts the camera, L swings it behind your Kong, and it drifts gently back behind you while you run. It also eases out of the game's fixed-camera spots instead of cutting, pulls back out from walls smoothly, widens the view a little at full speed, and coasts to a stop when you let go of the stick.",
         camera_type_options,
         dk64::CameraTypeMode::Free
     );
@@ -161,7 +163,8 @@ static void add_general_options(recomp::config::Config &config) {
     // The touch controls show a second (camera) stick while the Analog Camera is selected.
     config.add_option_change_callback(dk64::configkeys::general::camera_type,
         [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext) {
-            dk64_android_analog_camera.store(std::get<uint32_t>(cur) == static_cast<uint32_t>(dk64::CameraTypeMode::Analog));
+            dk64_android_analog_camera.store(std::get<uint32_t>(cur) == static_cast<uint32_t>(dk64::CameraTypeMode::Analog) ||
+                std::get<uint32_t>(cur) == static_cast<uint32_t>(dk64::CameraTypeMode::Modern));
         });
 #endif
     config.add_number_option(
@@ -355,9 +358,98 @@ static void add_gpu_driver_option(recomp::config::Config &config) {
 #if defined(__ANDROID__)
 // Android: the "Dual Screen" tab (the bottom screen on handhelds with two screens).
 extern "C" void dk64_android_set_touch_controls_mode(int mode);
+void dk64_android_choose_experience();   // (below)
 extern "C" void dk64_android_set_button_icons(int enabled);
 extern "C" int dk64_android_has_second_screen();
 extern "C" void dk64_android_edit_touch_layout();
+
+// Combined options (see add_dual_screen_options): an option made of a few others.
+struct CombinedOption {
+    const char *id;
+    const char *name;
+    const char *desc;
+    std::vector<recomp::config::ConfigOptionEnumOption> choices;   // the last one: Custom
+    std::vector<std::string> parts;                               // the options it sets
+    std::vector<std::vector<uint32_t>> sets;                       // their values, per choice
+    bool second_screen_only;
+};
+static bool combined_syncing = false;
+
+static const std::vector<CombinedOption> &combined_options() {
+    static const std::vector<CombinedOption> list = {
+        { "android_bottom_layout", "Bottom Screen",
+          "What the second screen shows: <recomp-color primary>Info only</recomp-color> (health, Kongs and collectibles), "
+          "<recomp-color primary>Info + Buttons</recomp-color> (also the oranges, gun, instrument, camera and first person buttons), "
+          "or <recomp-color primary>Buttons on Z</recomp-color> (the buttons slide in while you hold Z). Off leaves the second screen free.",
+          { {0u, "Off", "Off"}, {1u, "Info", "Info only"}, {2u, "Buttons", "Info + Buttons"}, {3u, "OnZ", "Buttons on Z"}, {4u, "Custom", "Custom"} },
+          { "android_bottom_screen", "android_bottom_buttons", "android_bottom_first_person" },
+          { {0u, 1u, 1u}, {1u, 0u, 0u}, {1u, 1u, 1u}, {1u, 2u, 1u} }, true },
+        { "android_touch_feedback_level", "Touch Feedback",
+          "A short vibration when you press a touch button, and how strong.",
+          { {0u, "Off", "Off"}, {1u, "Light", "Light"}, {2u, "Medium", "Medium"}, {3u, "Strong", "Strong"}, {4u, "Custom", "Custom"} },
+          { "android_touch_feedback", "android_touch_feedback_strength" },
+          { {0u, 2u}, {1u, 1u}, {1u, 2u}, {1u, 3u} }, false },
+        { "android_feel_rumbles", "Feel Rumbles",
+          "Small rumbles for game feel, like recent 3D platformers: landings, skids, each banana and coin, a Golden Banana, "
+          "shots and oranges, getting hurt, running into walls, playing an instrument, and your hits landing. On your controller, or the phone with touch controls; as strong as Rumble Strength.",
+          { {0u, "Off", "Off"}, {1u, "On", "On"}, {2u, "Custom", "Custom"} },
+          { "android_haptic_feedback", "android_hit_feel" },
+          { {0u, 0u}, {1u, 1u} }, false },
+        { "android_first_person_mode", "First Person",
+          "<recomp-color primary>Classic</recomp-color>: as on the N64. "
+          "<recomp-color primary>Right Stick Looks</recomp-color>: the game's own view, looking with the right stick. "
+          "<recomp-color primary>Modern</recomp-color>: walk with the left stick and look with the right (in the water too), "
+          "ZR shoots, B leaves, with smoother looking, a kick when you shoot and a dip when you land.",
+          { {0u, "Classic", "Classic"}, {1u, "RightStick", "Right Stick Looks"}, {2u, "Modern", "Modern"}, {3u, "Custom", "Custom"} },
+          { "android_fp_right_stick", "android_fp_walk", "android_fp_polish" },
+          { {0u, 0u, 0u}, {1u, 0u, 0u}, {1u, 1u, 1u} }, false },
+        { "android_jump_help", "Jump Help",
+          "<recomp-color primary>Jump Assist</recomp-color>: a jump pressed just before landing, or just after running off a ledge, still happens. "
+          "<recomp-color primary>Full</recomp-color>: also steer much more in mid-air (pulling back brakes instead of flipping round).",
+          { {0u, "Off", "Off"}, {1u, "Assist", "Jump Assist"}, {2u, "Full", "Full"}, {3u, "Custom", "Custom"} },
+          { "android_jump_assist", "android_air_control" },
+          { {0u, 0u}, {1u, 0u}, {1u, 1u} }, false },
+        { "android_movement", "Movement",
+          "<recomp-color primary>Modern</recomp-color>: Odyssey-style running. Speed builds and eases off smoothly, "
+          "reversing gives a quick skid turn, running feels more responsive, and you can jump straight out of a punch or a roll, keeping its speed.",
+          { {0u, "Classic", "Classic"}, {1u, "Modern", "Modern"}, {2u, "Custom", "Custom"} },
+          { "android_quick_turn", "android_smooth_running", "android_movement_polish", "android_move_chaining" },
+          { {0u, 0u, 0u, 0u}, {1u, 1u, 1u, 1u} }, false },
+    };
+    return list;
+}
+
+// Sets each combined option from the options it's made of (Custom if they match none of its
+// choices). Called once the settings are loaded, and after the Experience changes them.
+void dk64_sync_combined_options() {
+    recomp::config::Config &dual = recompui::config::get_config("dual_screen");
+    combined_syncing = true;
+    for (const CombinedOption &co : combined_options()) {
+        uint32_t found = static_cast<uint32_t>(co.sets.size());   // Custom
+        for (size_t c = 0; c < co.sets.size() && found == co.sets.size(); c++) {
+            bool match = true;
+            for (size_t i = 0; i < co.parts.size(); i++) {
+                const auto v = dual.get_option_value(co.parts[i]);
+                // Off for the bottom screen / touch feedback: the others don't matter.
+                if ((i > 0) && (c == 0) && (co.sets[0][0] == 0u) &&
+                    (std::string(co.id) == "android_bottom_layout" || std::string(co.id) == "android_touch_feedback_level")) {
+                    continue;
+                }
+                if (std::get<uint32_t>(v) != co.sets[c][i]) {
+                    match = false;
+                    break;
+                }
+            }
+            if (match) {
+                found = static_cast<uint32_t>(c);
+            }
+        }
+        if (std::get<uint32_t>(dual.get_option_value(co.id)) != found) {
+            dual.update_option_value(co.id, found);
+        }
+    }
+    combined_syncing = false;
+}
 
 static void add_dual_screen_options(recomp::config::Config &config) {
     using EnumOptionVector = const std::vector<recomp::config::ConfigOptionEnumOption>;
@@ -536,6 +628,170 @@ static void add_dual_screen_options(recomp::config::Config &config) {
             }
         });
 
+    // Which button fires the gun (while it's out): B as on the N64, ZR, or either.
+    static const std::string gun_button_option = "android_gun_button";
+    static EnumOptionVector gun_button_options = {
+        {0u, "B", "B"},
+        {1u, "ZR", "ZR"},
+        {2u, "Both", "B and ZR"},
+    };
+    config.add_enum_option(
+        gun_button_option,
+        "Shoot Gun With",
+        "Which button fires the gun while it's out. <recomp-color primary>B</recomp-color>: as on the N64. "
+        "<recomp-color primary>ZR</recomp-color>: the right trigger (the N64's R) instead, and B puts the gun away (with on-screen prompts). "
+        "<recomp-color primary>B and ZR</recomp-color>: either.",
+        gun_button_options,
+        0u
+    );
+    config.add_option_change_callback(gun_button_option,
+        [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
+            dk64::android::set_gun_button(static_cast<int>(std::get<uint32_t>(cur)));
+            if (context == recomp::config::OptionChangeContext::Permanent) {
+                recompui::config::get_config("dual_screen").save_config();
+            }
+        });
+
+    // Jump Assist: a jump pressed just before landing still happens on landing, and one pressed
+    // just after running off a ledge still jumps (patches/game_feel_patches.c).
+    static const std::string jump_assist_option = "android_jump_assist";
+    static EnumOptionVector on_off_options = {
+        {0u, "Off", "Off"},
+        {1u, "On", "On"},
+    };
+    config.add_enum_option(
+        jump_assist_option,
+        "Jump Assist",
+        "Like recent 3D platformers: a jump pressed a moment before landing happens as soon as you "
+        "land, and one pressed a moment after running off a ledge still jumps.",
+        on_off_options,
+        1u
+    );
+    config.add_option_change_callback(jump_assist_option,
+        [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
+            dk64::android::set_jump_assist(std::get<uint32_t>(cur) == 1u);
+            if (context == recomp::config::OptionChangeContext::Permanent) {
+                recompui::config::get_config("dual_screen").save_config();
+            }
+        });
+
+    // Quick Turn: no long skid when reversing direction while running.
+    static const std::string quick_turn_option = "android_quick_turn";
+    config.add_enum_option(
+        quick_turn_option,
+        "Quick Turn",
+        "Reversing direction while running gives a quick skid (with its dust) and the Kong is off the "
+        "other way, instead of the N64's long slide.",
+        on_off_options,
+        1u
+    );
+    config.add_option_change_callback(quick_turn_option,
+        [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
+            dk64::android::set_quick_turn(std::get<uint32_t>(cur) == 1u);
+            if (context == recomp::config::OptionChangeContext::Permanent) {
+                recompui::config::get_config("dual_screen").save_config();
+            }
+        });
+
+    // Smooth Running: speed builds up and runs down over a few frames (patches/game_feel_patches.c).
+    static const std::string smooth_running_option = "android_smooth_running";
+    config.add_enum_option(
+        smooth_running_option,
+        "Smooth Running",
+        "Running builds up to full speed over about a third of a second and slows to a stop over a "
+        "few frames when you let go, for a little weight, instead of starting and stopping at once.",
+        on_off_options,
+        1u
+    );
+    config.add_option_change_callback(smooth_running_option,
+        [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
+            dk64::android::set_smooth_running(std::get<uint32_t>(cur) == 1u);
+            if (context == recomp::config::OptionChangeContext::Permanent) {
+                recompui::config::get_config("dual_screen").save_config();
+            }
+        });
+
+    // Movement Polish: lean into turns, landing squash, momentum jumps (patches/game_feel_patches.c).
+    static const std::string movement_polish_option = "android_movement_polish";
+    config.add_enum_option(
+        movement_polish_option,
+        "Movement Polish",
+        "Small touches from recent 3D platformers: the Kong leans into tight turns while running, "
+        "squashes a little when landing from a big fall, and a jump from a full run carries a bit further.",
+        on_off_options,
+        1u
+    );
+    config.add_option_change_callback(movement_polish_option,
+        [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
+            dk64::android::set_movement_polish(std::get<uint32_t>(cur) == 1u);
+            if (context == recomp::config::OptionChangeContext::Permanent) {
+                recompui::config::get_config("dual_screen").save_config();
+            }
+        });
+
+    // More modern-platformer options (patches/game_feel_patches.c), each a bit of the game feel flags.
+    struct GameFeelOption { const char *id; const char *name; const char *desc; int bit; };
+    static const GameFeelOption game_feel_options[] = {
+        { "android_move_chaining", "Move Chaining",
+          "Jump straight out of a punch or a running attack, keeping its speed (a roll into a jump goes further).", 32 },
+        { "android_air_control", "Air Control",
+          "Steer much more in mid-air; pulling back brakes the jump instead of flipping round.", 64 },
+        { "android_hit_feel", "Hit Feel",
+          "Hits land with weight: a small camera punch (Modern Camera) and a rumble.", 128 },
+        { "android_fast_transitions", "Fast Transitions",
+          "Fades to and from black through loading zones and doors are almost twice as fast.", 256 },
+        { "android_fp_right_stick", "First Person: Right Stick Looks",
+          "In first person view (C-Up), look around with the right stick (the left stick still looks too, "
+          "unless Walk in First Person is on).", 1024 },
+        { "android_fp_walk", "First Person: Walk",
+          "In first person view, walk with the left stick (forward, back and sideways) and look with the "
+          "right stick. Walls and ledges stop you.", 2048 },
+        { "android_camera_polish", "Camera Polish",
+          "Modern Camera extras: the camera eases out of the game's fixed-camera areas instead of cutting, "
+          "pulls back out from walls smoothly, widens the view a little at full speed, coasts to a stop when "
+          "you let go of the stick, and the Kong turns see-through when the camera's squeezed right up to it.", 8192 },
+        { "android_fp_polish", "First Person Polish",
+          "First person extras: smoother right-stick looking (the gyro stays direct), a small kick when you "
+          "shoot and a dip in the view when you land.", 16384 },
+    };
+    for (const auto &opt : game_feel_options) {
+        config.add_enum_option(opt.id, opt.name, opt.desc, on_off_options, 1u);
+        const int bit = opt.bit;
+        config.add_option_change_callback(opt.id,
+            [bit](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
+                dk64::android::set_game_feel_bit(bit, std::get<uint32_t>(cur) == 1u);
+                if (context == recomp::config::OptionChangeContext::Permanent) {
+                    recompui::config::get_config("dual_screen").save_config();
+                }
+            });
+    }
+
+    // Small rumbles for game feel, like Odyssey: landings (stronger the longer the fall, and for
+    // the Simian Slam) and skidding round. On the controller, or the phone with touch controls.
+    static const std::string haptic_feedback_option = "android_haptic_feedback";
+    static EnumOptionVector haptic_feedback_options = {
+        {0u, "Off", "Off"},
+        {1u, "On", "On"},
+    };
+    config.add_enum_option(
+        haptic_feedback_option,
+        "Haptic Feedback",
+        "Small rumbles for game feel, like recent 3D platformers: landing (stronger after a long fall "
+        "or a Simian Slam) and skidding round when you turn sharply while running. "
+        "Also: a soft tap for each banana and coin, a strong one for a Golden Banana, a tick for each "
+        "shot and orange, a thump when you're hurt, a bump when you run into a wall, and a beat while playing an instrument. "
+        "On your controller, or the phone when you play with the touch controls. The strength follows Rumble Strength.",
+        haptic_feedback_options,
+        1u
+    );
+    config.add_option_change_callback(haptic_feedback_option,
+        [](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
+            dk64::android::set_haptic_feedback(std::get<uint32_t>(cur) == 1u);
+            if (context == recomp::config::OptionChangeContext::Permanent) {
+                recompui::config::get_config("dual_screen").save_config();
+            }
+        });
+
     // A little vibration when a touch button is pressed, and how strong it is.
     static const std::string touch_feedback_option = "android_touch_feedback";
     static EnumOptionVector touch_feedback_options = {
@@ -576,6 +832,32 @@ static void add_dual_screen_options(recomp::config::Config &config) {
                 recompui::config::get_config("dual_screen").save_config();
             }
         });
+
+    // ---- Combined options --------------------------------------------------------------------
+    // Each sets a few of the options above (which stay, unlisted, and keep their saved values).
+    // They show "Custom" when those have been mixed some other way (by an older version, or a
+    // future Advanced list). Their own values are only derived (dk64_sync_combined_options).
+    for (const CombinedOption &co : combined_options()) {
+        config.add_enum_option(co.id, co.name, co.desc, co.choices, 0u, co.second_screen_only && one_screen);
+        const CombinedOption *opt = &co;
+        config.add_option_change_callback(co.id,
+            [opt](recomp::config::ConfigValueVariant cur, recomp::config::ConfigValueVariant, recomp::config::OptionChangeContext context) {
+                if ((context == recomp::config::OptionChangeContext::Load) || combined_syncing) {
+                    return;
+                }
+                const uint32_t choice = std::get<uint32_t>(cur);
+                if (choice >= opt->sets.size()) {
+                    return;   // Custom: leave them as they are
+                }
+                recomp::config::Config &dual = recompui::config::get_config("dual_screen");
+                for (size_t i = 0; i < opt->parts.size(); i++) {
+                    dual.update_option_value(opt->parts[i], opt->sets[choice][i]);
+                }
+                if (context == recomp::config::OptionChangeContext::Permanent) {
+                    dual.save_config();
+                }
+            });
+    }
 }
 #endif
 
@@ -762,6 +1044,14 @@ static void set_control_defaults() {
 }
 
 static void set_control_descriptions() {
+    recompinput::set_game_input_description(recompinput::GameInput::INSTRUMENT, "Plays your Kong's instrument in one press (the same as Z + C Up).");
+    recompinput::set_game_input_description(recompinput::GameInput::Z_INSTRUMENT, "While holding Z, plays your Kong's instrument (the N64's Z + C Up). On its own this button does whatever else it's set to (the right stick: the camera).");
+    recompinput::set_game_input_description(recompinput::GameInput::Z_FAIRY_CAMERA, "While holding Z, takes out the fairy camera (the N64's Z + C Down).");
+    recompinput::set_game_input_description(recompinput::GameInput::Z_GUN, "While holding Z, takes out (or puts away) your Kong's gun (the N64's Z + C Left).");
+    recompinput::set_game_input_description(recompinput::GameInput::Z_ORANGE, "While holding Z, throws an orange (the N64's Z + C Right).");
+    recompinput::set_game_input_description(recompinput::GameInput::GUN, "Takes out your Kong's gun in one press (the same as Z + C Left), or puts it away.");
+    recompinput::set_game_input_description(recompinput::GameInput::ORANGE, "Throws an orange in one press (the same as Z + C Right).");
+    recompinput::set_game_input_description(recompinput::GameInput::FAIRY_CAMERA, "Takes out the fairy camera in one press (the same as Z + C Down). Press it again, or B, to put it away.");
     recompinput::set_game_input_description(recompinput::GameInput::Y_AXIS_POS, "Used to move and for steering while swimming. Axis inversion for swimming can be configured in the General tab.");
     recompinput::set_game_input_description(recompinput::GameInput::Y_AXIS_NEG, "Used to move and for steering while swimming. Axis inversion for swimming can be configured in the General tab.");
     recompinput::set_game_input_description(recompinput::GameInput::X_AXIS_NEG, "Used to move and for steering while swimming. Axis inversion for swimming can be configured in the General tab.");
@@ -829,26 +1119,30 @@ void dk64::init_config() {
             configure,
             option(g, gopts::joystick_deadzone),
             option(g, gopts::rumble_strength),
-            option(g, keys::swimming_invert_mode),
             option(d, "android_button_icons"),
-            header("Touch"),
-            option(d, "android_touch_controls"),
-            edit_touch,
-            option(d, "android_bottom_screen"),
-            option(d, "android_bottom_buttons"),
-            option(d, "android_bottom_first_person"),
-            option(d, "android_drag_camera"),
-            option(d, "android_touch_kong_swap"),
-            option(d, "android_touch_feedback"),
-            option(d, "android_touch_feedback_strength"),
             header("Camera"),
             option(g, keys::camera_type),
             option(g, keys::analog_camera_sensitivity),
             option(g, keys::third_person_camera_invert_mode),
+            header("First Person"),
+            option(d, "android_first_person_mode"),
+            option(d, "android_gun_button"),
             option(g, keys::first_person_invert_mode),
             header("Gyro"),
             option(g, gopts::gyro_sensitivity),
             option(g, keys::gyro_invert_mode),
+            header("Swimming"),
+            option(g, keys::swimming_invert_mode),
+        }, { g, d });
+
+        recompui::config::create_layout_tab("Touch", "touch", {
+            option(d, "android_touch_controls"),
+            edit_touch,
+            option(d, "android_drag_camera"),
+            option(d, "android_touch_feedback_level"),
+            header("Bottom Screen"),
+            option(d, "android_bottom_layout"),
+            option(d, "android_touch_kong_swap"),
         }, { g, d });
 
         auto &sound_config = recompui::config::create_sound_tab("Audio");
@@ -875,14 +1169,27 @@ void dk64::init_config() {
             dk64::android::change_storage_location();
         };
 
+        // Experience: a button rather than a list, so changing it is a deliberate choice:
+        // pick Modern or Classic, then confirm, and the app restarts with it applied.
+        Entry experience; experience.kind = Kind::Button; experience.text = "Choose Experience";
+        experience.description = "Set up the whole game at once, the modern way or as it was on the N64. "
+            "You pick one, confirm, and the app restarts with it applied. Any single option can still be changed afterwards.";
+        experience.on_press = []() { dk64_android_choose_experience(); };
+
         recompui::config::create_layout_tab("Gameplay", "gameplay", {
-            option(g, "android_experience"),
+            experience,
+            header("Game Feel"),
+            option(d, "android_movement"),
+            option(d, "android_jump_help"),
+            option(d, "android_feel_rumbles"),
+            option(d, "android_fast_transitions"),
+            header("Story"),
             option(g, keys::story_skip),
-            option(g, keys::lightning_flashes),
             option(g, keys::skip_launcher),
+            option(g, keys::lightning_flashes),
             header("Storage"),
             files,
-        }, { g });
+        }, { g, d });
     }
 
     set_control_defaults();
@@ -919,6 +1226,7 @@ void dk64::init_config() {
     recompui::config::finalize();
 
 #if defined(__ANDROID__)
+    dk64_sync_combined_options();   // the combined options from what was loaded
     // Once: set-ups from before B backed out of menus get Back (Menu) on B.
     {
         const std::filesystem::path marker = recomp::get_config_path() / "menu_back_b.txt";
@@ -958,28 +1266,197 @@ static std::filesystem::path control_preset_marker() {
     return recomp::get_config_path() / "controls_preset.txt";
 }
 
+// (Read once, then kept: the game asks every frame.)
+static std::atomic<int> control_preset_cached{-2};
 extern "C" int dk64_android_control_preset() {
+    int cached = control_preset_cached.load(std::memory_order_relaxed);
+    if (cached != -2) {
+        return cached;
+    }
     std::ifstream in{ control_preset_marker() };
     std::string value;
-    if (!(in >> value)) {
-        return -1;   // not chosen yet
+    cached = !(in >> value) ? -1 : (value == "modern" ? 1 : 0);   // -1: not chosen yet
+    control_preset_cached.store(cached, std::memory_order_relaxed);
+    return cached;
+}
+
+
+// Configure Inputs with the Modern layout: each row named by what it does in the game (the
+// Classic layout shows the N64 buttons' own names). Null: keep the usual name.
+extern "C" const char *dk64_android_control_action_name(int input) {
+    using GI = recompinput::GameInput;
+    switch (static_cast<GI>(input)) {
+        case GI::A: return "Jump";
+        case GI::B: return "Attack";
+        case GI::Z: return "Crouch (Z)";
+        case GI::L: return "Camera Behind";
+        case GI::R: return "Shoot / Take Photo";
+        case GI::START: return "Pause";
+        case GI::C_UP: return "First Person";
+        case GI::C_DOWN: return "Camera Zoom";
+        case GI::INSTRUMENT: return "Instrument (one press)";
+        case GI::FAIRY_CAMERA: return "Fairy Camera (one press)";
+        case GI::Z_INSTRUMENT: return "Instrument";
+        case GI::Z_FAIRY_CAMERA: return "Fairy Camera";
+        case GI::Z_GUN: return "Gun";
+        case GI::Z_ORANGE: return "Orange";
+        case GI::C_LEFT: return "C Left";
+        case GI::C_RIGHT: return "C Right";
+        case GI::GUN: return "Gun (one press)";
+        case GI::ORANGE: return "Orange (one press)";
+        case GI::DPAD_UP: return "Arcade Up";
+        case GI::DPAD_DOWN: return "Arcade Down";
+        case GI::DPAD_LEFT: return "Previous Kong";
+        case GI::DPAD_RIGHT: return "Next Kong";
+        case GI::Y_AXIS_POS: return "Move Forward";
+        case GI::Y_AXIS_NEG: return "Move Back";
+        case GI::X_AXIS_NEG: return "Move Left";
+        case GI::X_AXIS_POS: return "Move Right";
+        default: return nullptr;
     }
-    return value == "modern" ? 1 : 0;
+}
+
+// Each layout keeps your own bindings: switching saves the one you're leaving (controls_<layout>.txt
+// in the config folder) and brings back the other's, if you've used it before.
+static std::filesystem::path dk64_layout_bindings_path(int modern) {
+    return recomp::get_config_path() / (modern ? "controls_modern.txt" : "controls_classic.txt");
+}
+static void dk64_save_layout_bindings(int profile, int modern) {
+    using namespace recompinput;
+    std::ofstream out{ dk64_layout_bindings_path(modern) };
+    for (int i = 0; i < static_cast<int>(GameInput::COUNT); i++) {
+        const GameInput input = static_cast<GameInput>(i);
+        if (get_game_input_is_menu(input)) {
+            continue;
+        }
+        out << get_game_input_enum_name(input);
+        for (size_t b = 0; b < num_bindings_per_input; b++) {
+            const InputField f = profiles::get_input_binding(profile, input, b);
+            out << ' ' << static_cast<int>(f.input_type) << ' ' << f.input_id;
+        }
+        out << '\n';
+    }
+}
+static bool dk64_load_layout_bindings(int profile, int modern) {
+    using namespace recompinput;
+    std::ifstream in{ dk64_layout_bindings_path(modern) };
+    if (!in) {
+        return false;
+    }
+    std::string name;
+    bool any = false;
+    while (in >> name) {
+        int found = -1;
+        for (int i = 0; i < static_cast<int>(GameInput::COUNT); i++) {
+            if (get_game_input_enum_name(static_cast<GameInput>(i)) == name) {
+                found = i;
+                break;
+            }
+        }
+        for (size_t b = 0; b < num_bindings_per_input; b++) {
+            int type = 0, id = 0;
+            in >> type >> id;
+            if (found >= 0 && type >= 0 && type <= static_cast<int>(InputType::ControllerAnalog)) {
+                profiles::set_input_binding(profile, static_cast<GameInput>(found), b, InputField{ static_cast<InputType>(type), id });
+                any = true;
+            }
+        }
+    }
+    return any;
+}
+
+// The shipped bindings for each layout (set up on the AYN Thor, 2026-11-20).
+static void dk64_apply_layout_table(int profile, int modern) {
+    using namespace recompinput;
+    static const std::pair<GameInput, std::array<InputField, 2>> modern_table[] = {
+        { GameInput::Y_AXIS_POS, {{ InputField::controller_analog(SDL_CONTROLLER_AXIS_LEFTY, false), InputField{} }} },
+        { GameInput::Y_AXIS_NEG, {{ InputField::controller_analog(SDL_CONTROLLER_AXIS_LEFTY, true), InputField{} }} },
+        { GameInput::X_AXIS_NEG, {{ InputField::controller_analog(SDL_CONTROLLER_AXIS_LEFTX, false), InputField{} }} },
+        { GameInput::X_AXIS_POS, {{ InputField::controller_analog(SDL_CONTROLLER_AXIS_LEFTX, true), InputField{} }} },
+        { GameInput::A, {{ InputField::controller_digital(SDL_CONTROLLER_BUTTON_A), InputField{} }} },
+        { GameInput::B, {{ InputField::controller_digital(SDL_CONTROLLER_BUTTON_B), InputField{} }} },
+        { GameInput::Z, {{ InputField::controller_analog(SDL_CONTROLLER_AXIS_TRIGGERLEFT, true), InputField{} }} },
+        { GameInput::L, {{ InputField::controller_digital(SDL_CONTROLLER_BUTTON_LEFTSHOULDER), InputField{} }} },
+        { GameInput::R, {{ InputField::controller_analog(SDL_CONTROLLER_AXIS_TRIGGERRIGHT, true), InputField{} }} },
+        { GameInput::START, {{ InputField::controller_digital(SDL_CONTROLLER_BUTTON_START), InputField{} }} },
+        { GameInput::C_UP, {{ InputField::controller_digital(SDL_CONTROLLER_BUTTON_RIGHTSTICK), InputField{} }} },
+        { GameInput::C_DOWN, {{ InputField{}, InputField{} }} },
+        { GameInput::C_LEFT, {{ InputField{}, InputField{} }} },
+        { GameInput::C_RIGHT, {{ InputField{}, InputField{} }} },
+        { GameInput::DPAD_UP, {{ InputField::controller_digital(SDL_CONTROLLER_BUTTON_DPAD_UP), InputField{} }} },
+        { GameInput::DPAD_DOWN, {{ InputField::controller_digital(SDL_CONTROLLER_BUTTON_DPAD_DOWN), InputField{} }} },
+        { GameInput::DPAD_LEFT, {{ InputField::controller_digital(SDL_CONTROLLER_BUTTON_DPAD_LEFT), InputField{} }} },
+        { GameInput::DPAD_RIGHT, {{ InputField::controller_digital(SDL_CONTROLLER_BUTTON_DPAD_RIGHT), InputField{} }} },
+        { GameInput::INSTRUMENT, {{ InputField{}, InputField{} }} },
+        { GameInput::FAIRY_CAMERA, {{ InputField{}, InputField{} }} },
+        { GameInput::GUN, {{ InputField::controller_digital(SDL_CONTROLLER_BUTTON_Y), InputField{} }} },
+        { GameInput::ORANGE, {{ InputField::controller_digital(SDL_CONTROLLER_BUTTON_X), InputField{} }} },
+        { GameInput::Z_INSTRUMENT, {{ InputField::controller_analog(SDL_CONTROLLER_AXIS_RIGHTY, false), InputField{} }} },
+        { GameInput::Z_FAIRY_CAMERA, {{ InputField::controller_analog(SDL_CONTROLLER_AXIS_RIGHTY, true), InputField{} }} },
+        { GameInput::Z_GUN, {{ InputField::controller_analog(SDL_CONTROLLER_AXIS_RIGHTX, false), InputField{} }} },
+        { GameInput::Z_ORANGE, {{ InputField::controller_analog(SDL_CONTROLLER_AXIS_RIGHTX, true), InputField{} }} },
+    };
+    static const std::pair<GameInput, std::array<InputField, 2>> classic_table[] = {
+        { GameInput::Y_AXIS_POS, {{ InputField::controller_analog(SDL_CONTROLLER_AXIS_LEFTY, false), InputField{} }} },
+        { GameInput::Y_AXIS_NEG, {{ InputField::controller_analog(SDL_CONTROLLER_AXIS_LEFTY, true), InputField{} }} },
+        { GameInput::X_AXIS_NEG, {{ InputField::controller_analog(SDL_CONTROLLER_AXIS_LEFTX, false), InputField{} }} },
+        { GameInput::X_AXIS_POS, {{ InputField::controller_analog(SDL_CONTROLLER_AXIS_LEFTX, true), InputField{} }} },
+        { GameInput::A, {{ InputField::controller_digital(SDL_CONTROLLER_BUTTON_A), InputField{} }} },
+        { GameInput::B, {{ InputField::controller_digital(SDL_CONTROLLER_BUTTON_B), InputField{} }} },
+        { GameInput::Z, {{ InputField::controller_analog(SDL_CONTROLLER_AXIS_TRIGGERLEFT, true), InputField::controller_analog(SDL_CONTROLLER_AXIS_TRIGGERRIGHT, true) }} },
+        { GameInput::L, {{ InputField::controller_digital(SDL_CONTROLLER_BUTTON_LEFTSHOULDER), InputField{} }} },
+        { GameInput::R, {{ InputField::controller_digital(SDL_CONTROLLER_BUTTON_RIGHTSHOULDER), InputField{} }} },
+        { GameInput::START, {{ InputField::controller_digital(SDL_CONTROLLER_BUTTON_START), InputField{} }} },
+        { GameInput::C_UP, {{ InputField::controller_analog(SDL_CONTROLLER_AXIS_RIGHTY, false), InputField{} }} },
+        { GameInput::C_DOWN, {{ InputField::controller_analog(SDL_CONTROLLER_AXIS_RIGHTY, true), InputField{} }} },
+        { GameInput::C_LEFT, {{ InputField::controller_analog(SDL_CONTROLLER_AXIS_RIGHTX, false), InputField{} }} },
+        { GameInput::C_RIGHT, {{ InputField::controller_analog(SDL_CONTROLLER_AXIS_RIGHTX, true), InputField{} }} },
+        { GameInput::DPAD_UP, {{ InputField::controller_digital(SDL_CONTROLLER_BUTTON_DPAD_UP), InputField{} }} },
+        { GameInput::DPAD_DOWN, {{ InputField::controller_digital(SDL_CONTROLLER_BUTTON_DPAD_DOWN), InputField{} }} },
+        { GameInput::DPAD_LEFT, {{ InputField::controller_digital(SDL_CONTROLLER_BUTTON_DPAD_LEFT), InputField{} }} },
+        { GameInput::DPAD_RIGHT, {{ InputField::controller_digital(SDL_CONTROLLER_BUTTON_DPAD_RIGHT), InputField{} }} },
+        { GameInput::INSTRUMENT, {{ InputField{}, InputField{} }} },
+        { GameInput::FAIRY_CAMERA, {{ InputField{}, InputField{} }} },
+        { GameInput::GUN, {{ InputField{}, InputField{} }} },
+        { GameInput::ORANGE, {{ InputField{}, InputField{} }} },
+        { GameInput::Z_INSTRUMENT, {{ InputField{}, InputField{} }} },
+        { GameInput::Z_FAIRY_CAMERA, {{ InputField{}, InputField{} }} },
+        { GameInput::Z_GUN, {{ InputField{}, InputField{} }} },
+        { GameInput::Z_ORANGE, {{ InputField{}, InputField{} }} },
+    };
+    if (modern) {
+        for (const auto &row : modern_table) {
+            for (size_t b = 0; b < 2 && b < num_bindings_per_input; b++) {
+                profiles::set_input_binding(profile, row.first, b, row.second[b]);
+            }
+        }
+    } else {
+        for (const auto &row : classic_table) {
+            for (size_t b = 0; b < 2 && b < num_bindings_per_input; b++) {
+                profiles::set_input_binding(profile, row.first, b, row.second[b]);
+            }
+        }
+    }
 }
 
 extern "C" void dk64_android_apply_control_preset(int modern) {
     using namespace recompinput;
     const int profile = profiles::get_sp_controller_profile_index();
     if (profile >= 0) {
+        const int leaving = dk64_android_control_preset();
+        if (leaving == 0 || leaving == 1) {
+            dk64_save_layout_bindings(profile, leaving);
+        }
         profiles::reset_profile_bindings(profile, InputDevice::Controller);
         if (modern) {
-            // The right stick keeps C Down / Left / Right; only C Up (first person) comes off it,
-            // so pushing the camera up doesn't drop into first person. C Up is R3.
-            for (GameInput input : { GameInput::C_UP }) {
+            // The right stick is only the camera: the C buttons come off it. C Up (first person)
+            // is pressing it in; C Down, Left and Right aren't used - with Z held, the stick's
+            // four directions are the Z moves instead (Z_INSTRUMENT... below).
+            for (GameInput input : { GameInput::C_UP, GameInput::C_DOWN, GameInput::C_LEFT, GameInput::C_RIGHT }) {
                 for (size_t b = 0; b < num_bindings_per_input; b++) {
                     if (profiles::get_input_binding(profile, input, b).input_type == InputType::ControllerAnalog) {
-                        // Pressing the right stick in is C Up instead (X still is too).
-                        profiles::set_input_binding(profile, input, b, InputField::controller_digital(SDL_CONTROLLER_BUTTON_RIGHTSTICK));
+                        profiles::set_input_binding(profile, input, b, input == GameInput::C_UP
+                            ? InputField::controller_digital(SDL_CONTROLLER_BUTTON_RIGHTSTICK) : InputField{});
                     }
                 }
             }
@@ -1001,13 +1478,40 @@ extern "C" void dk64_android_apply_control_preset(int modern) {
                     }
                 }
             }
+            // ...which the gun (X) and oranges (Y) take: one press each instead of Z + C Left /
+            // Z + C Right. (Instrument and Fairy Camera start unassigned.)
+            for (size_t b = 0; b < num_bindings_per_input; b++) {
+                for (GameInput shortcut : { GameInput::INSTRUMENT, GameInput::FAIRY_CAMERA, GameInput::GUN, GameInput::ORANGE,
+                                            GameInput::Z_INSTRUMENT, GameInput::Z_FAIRY_CAMERA, GameInput::Z_GUN, GameInput::Z_ORANGE }) {
+                    profiles::set_input_binding(profile, shortcut, b, InputField{});
+                }
+            }
+            profiles::set_input_binding(profile, GameInput::GUN, 0, x);
+            profiles::set_input_binding(profile, GameInput::ORANGE, 0, y);
+            // Z moves: hold Z and push the right stick (up: instrument, down: fairy camera,
+            // left: gun, right: orange), as the N64's Z + C buttons were.
+            profiles::set_input_binding(profile, GameInput::Z_INSTRUMENT, 0, InputField::controller_analog(SDL_CONTROLLER_AXIS_RIGHTY, false));
+            profiles::set_input_binding(profile, GameInput::Z_FAIRY_CAMERA, 0, InputField::controller_analog(SDL_CONTROLLER_AXIS_RIGHTY, true));
+            profiles::set_input_binding(profile, GameInput::Z_GUN, 0, InputField::controller_analog(SDL_CONTROLLER_AXIS_RIGHTX, false));
+            profiles::set_input_binding(profile, GameInput::Z_ORANGE, 0, InputField::controller_analog(SDL_CONTROLLER_AXIS_RIGHTX, true));
+        } else {
+            for (size_t b = 0; b < num_bindings_per_input; b++) {
+                for (GameInput shortcut : { GameInput::INSTRUMENT, GameInput::FAIRY_CAMERA, GameInput::GUN, GameInput::ORANGE,
+                                            GameInput::Z_INSTRUMENT, GameInput::Z_FAIRY_CAMERA, GameInput::Z_GUN, GameInput::Z_ORANGE }) {
+                    profiles::set_input_binding(profile, shortcut, b, InputField{});
+                }
+            }
         }
+        dk64_apply_layout_table(profile, modern ? 1 : 0);
+        // Your own bindings for this layout, if you've set it up before (on top of the defaults).
+        dk64_load_layout_bindings(profile, modern ? 1 : 0);
         profiles::save_controls_config(recomp::get_config_path() / (recompui::config::controls::id + ".json"));
     }
 
     recomp::config::Config &general = recompui::config::get_general_config();
     general.update_option_value(dk64::configkeys::general::camera_type,
-        static_cast<uint32_t>(modern ? dk64::CameraTypeMode::Analog : dk64::CameraTypeMode::Free));
+        static_cast<uint32_t>(modern ? dk64::CameraTypeMode::Modern : dk64::CameraTypeMode::Free));
+    // (Modern layout: the Modern Camera; Classic: Free Cam. Still yours to change after.)
     // Analog Camera speed: the turn rate scales with this (patches/sound_options_patches.c).
     // Modern: 4 (tried on the Thor - a bit quicker than the default 3 felt right).
     general.update_option_value(dk64::configkeys::general::analog_camera_sensitivity, modern ? 4.0 : 3.0);
@@ -1027,8 +1531,19 @@ extern "C" void dk64_android_apply_control_preset(int modern) {
     if (general.has_option(recompui::config::general::options::gyro_sensitivity)) {
         general.update_option_value(recompui::config::general::options::gyro_sensitivity, modern ? 25.0 : 0.0);
     }
+    // First Person: Modern with the Modern layout (walk, look with the right stick, ZR shoots),
+    // Classic (as on the N64) with Classic. Still yours to change after.
+    {
+        recomp::config::Config &dual = recompui::config::get_config("dual_screen");
+        for (const char *id : { "android_fp_right_stick", "android_fp_walk", "android_fp_polish" }) {
+            dual.update_option_value(id, static_cast<uint32_t>(modern ? 1u : 0u));
+        }
+        dk64_sync_combined_options();
+        dual.save_config();
+    }
     general.save_config();
 
+    control_preset_cached.store(modern ? 1 : 0, std::memory_order_relaxed);
     std::ofstream out{ control_preset_marker() };
     out << (modern ? "modern" : "classic") << "\n";
 }
@@ -1073,12 +1588,45 @@ extern "C" void dk64_android_apply_experience(int modern) {
         static_cast<uint32_t>(modern ? ultramodern::renderer::AspectRatio::Expand : ultramodern::renderer::AspectRatio::Original));
     graphics.update_option_value(recompui::config::graphics::options::hr_option,
         static_cast<uint32_t>(modern ? ultramodern::renderer::HUDRatioMode::Clamp16x9 : ultramodern::renderer::HUDRatioMode::Original));
+    // Classic: the cutscene borders and the original draw distance; Modern: no borders, and
+    // things stay drawn a bit further away.
+    graphics.update_option_value(dk64::configkeys::graphics::cutscene_borders,
+        static_cast<uint32_t>(modern ? dk64::CutsceneBordersMode::Off : dk64::CutsceneBordersMode::On));
+    graphics.update_option_value(dk64::configkeys::graphics::draw_distance, modern ? 30.0 : 0.0);
     graphics.save_config();
+
+    // Camera: Modern Camera, or the original's own (Free Cam); lightning flashes as in the
+    // original, or toned down.
+    {
+        recomp::config::Config &gen = recompui::config::get_general_config();
+        gen.update_option_value(dk64::configkeys::general::camera_type,
+            static_cast<uint32_t>(modern ? dk64::CameraTypeMode::Modern : dk64::CameraTypeMode::Free));
+        gen.update_option_value(dk64::configkeys::general::lightning_flashes,
+            static_cast<uint32_t>(modern ? dk64::LightningFlashMode::Reduced : dk64::LightningFlashMode::Vanilla));
+        gen.save_config();
+    }
 
     recomp::mods::enable_mod("dk64_tag_anywhere", modern != 0);
     recomp::config::Config &dual = recompui::config::get_config("dual_screen");
     dual.update_option_value("android_touch_kong_swap", static_cast<uint32_t>(modern ? 1u : 0u));
     dual.update_option_value("android_button_icons", static_cast<uint32_t>(modern ? 1u : 0u));
+    dual.update_option_value("android_haptic_feedback", static_cast<uint32_t>(modern ? 1u : 0u));
+    dual.update_option_value("android_jump_assist", static_cast<uint32_t>(modern ? 1u : 0u));
+    dual.update_option_value("android_gun_button", static_cast<uint32_t>(modern ? 1u : 0u));   // ZR shoots, B puts it away
+    dual.update_option_value("android_quick_turn", static_cast<uint32_t>(modern ? 1u : 0u));
+    dual.update_option_value("android_smooth_running", static_cast<uint32_t>(modern ? 1u : 0u));
+    dual.update_option_value("android_movement_polish", static_cast<uint32_t>(modern ? 1u : 0u));
+    // Bottom screen: Modern has the touch action buttons and the first person button; Classic
+    // shows the info only (no buttons).
+    dual.update_option_value("android_bottom_buttons", static_cast<uint32_t>(modern ? 1u : 0u));
+    dual.update_option_value("android_bottom_first_person", static_cast<uint32_t>(modern ? 1u : 0u));
+    for (const char *id : { "android_move_chaining", "android_air_control",
+                            "android_hit_feel", "android_fast_transitions",
+                            "android_fp_right_stick", "android_fp_walk",
+                            "android_fp_polish" }) {
+        dual.update_option_value(id, static_cast<uint32_t>(modern ? 1u : 0u));
+    }
+    dk64_sync_combined_options();
     dual.save_config();
 
     recomp::config::Config &general = recompui::config::get_general_config();
@@ -1088,6 +1636,38 @@ extern "C" void dk64_android_apply_experience(int modern) {
     std::ofstream out{ experience_marker() };
     out << (modern ? "modern" : "classic") << "\n";
     applying_experience = false;
+}
+
+extern "C" void dk64_android_restart_to_launcher();
+
+// Settings > Gameplay > Choose Experience: one prompt with both choices and Cancel; picking one
+// applies it and restarts the app (to the main menu) so everything starts fresh with it.
+// (A second, confirming prompt can't be opened from a prompt's button: the prompt code would
+// call back into the first one while holding its lock, and freeze.)
+void dk64_android_choose_experience() {
+    const std::string unsaved = ultramodern::is_game_started()
+        ? " Anything since your last save will be lost." : "";
+    recompui::open_choice_prompt(
+        "Choose Your Experience",
+        "Modern: the Modern Camera, walking in first person, smoother movement, jump help and feel rumbles, "
+        "sharp widescreen graphics and quick Kong swapping.\n\n"
+        "Classic: as close to the original N64 game as possible.\n\n"
+        "The app restarts to apply your choice." + unsaved,
+        "Modern",
+        "Cancel",
+        []() {
+            dk64_android_apply_experience(1);
+            dk64_android_restart_to_launcher();
+        },
+        []() {},
+        recompui::ButtonStyle::Primary,
+        recompui::ButtonStyle::Tertiary,
+        true
+    );
+    recompui::set_prompt_extra_button("Classic", []() {
+        dk64_android_apply_experience(0);
+        dk64_android_restart_to_launcher();
+    }, recompui::ButtonStyle::Secondary);
 }
 
 namespace recompui::config {
@@ -1104,7 +1684,8 @@ namespace recompui::config {
             "<recomp-color primary>Classic</recomp-color>: the N64 as it was. Classic controls (the right stick works the C buttons), "
             "Free Cam, no gyro, the original resolution, no anti-aliasing and the N64 button icons.<br />"
             "<recomp-color primary>Modern</recomp-color>: Analog Camera on the right stick, gyro aiming, the device's resolution, "
-            "anti-aliasing, quick Kong swapping (Tag Anywhere and Touch Kong Swap) and button icons that match your controller.<br />"
+            "anti-aliasing, quick Kong swapping (Tag Anywhere and Touch Kong Swap), button icons that match your controller "
+            "and haptic feedback.<br />"
             "<recomp-color primary>Custom</recomp-color>: keeps whatever you've set yourself.<br />"
             "Each option can still be changed afterwards.",
             experience_options,

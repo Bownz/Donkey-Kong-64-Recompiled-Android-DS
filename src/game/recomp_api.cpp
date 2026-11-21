@@ -210,6 +210,30 @@ namespace {
 }
 #endif
 
+#if defined(__ANDROID__)
+// The button icon (assets/button_icons/<name>.rgba, as the in-game prompts draw) for the first
+// controller button bound to a game input; "" with no controller or nothing bound. Used by the
+// Android bottom screen and first person prompts (android/jni/game_state.cpp).
+std::string dk64_android_input_icon_name(int game_input) {
+    if (game_input < 0 || game_input >= static_cast<int>(recompinput::GameInput::COUNT)
+            || recompinput::connected_controller_name().empty()) {
+        return "";
+    }
+    const int profile = recompinput::profiles::get_sp_controller_profile_index();
+    if (profile < 0) {
+        return "";
+    }
+    for (size_t b = 0; b < recompinput::num_bindings_per_input; b++) {
+        std::string name = icon_name_for(recompinput::profiles::get_input_binding(profile,
+            static_cast<recompinput::GameInput>(game_input), b), recompinput::get_face_button_style());
+        if (!name.empty()) {
+            return name;
+        }
+    }
+    return "";
+}
+#endif
+
 extern "C" void recomp_fill_button_icon(uint8_t* rdram, recomp_context* ctx) {
 #if defined(__ANDROID__)
     PTR(u8) request = _arg<0, PTR(u8)>(rdram, ctx);
@@ -404,6 +428,9 @@ extern "C" void recomp_get_camera_type(uint8_t* rdram, recomp_context* ctx) {
         case dk64::CameraTypeMode::Analog:
             _return(ctx, 3);
             return;
+        case dk64::CameraTypeMode::Modern:
+            _return(ctx, 4);
+            return;
     }
 }
 
@@ -589,11 +616,83 @@ extern "C" void recomp_get_mouse_inverted_axes(uint8_t* rdram, recomp_context* c
 
 #if defined(__ANDROID__)
 #include "../../android/jni/gpu_driver.h"
+#include "recompui/config.h"
 extern "C" bool dk64_android_take_camera_drag(float* dx, float* dy); // android/jni/touch_controller.cpp
 #endif
 
 // patches/sound_options_patches.c: the touch-drag camera turn since the last frame, in the
 // camera's own units: x is added to its angle (4096 per full turn), y to its distance.
+// Haptic Feedback (Input): a short rumble for game feel (patches/sound_options_patches.c,
+// modern_haptics_update), on top of the game's own; the phone's vibrator when no controller can
+// rumble (touch play). Strength 0-1, scaled by Rumble Strength.
+extern "C" void recomp_haptic_pulse(uint8_t* rdram, recomp_context* ctx) {
+    float strength = _arg<0, float>(rdram, ctx);
+    int32_t ms = _arg<1, int32_t>(rdram, ctx);
+#if defined(__ANDROID__)
+    if (!dk64::android::haptic_feedback_enabled() || ms <= 0 || strength <= 0.0f) {
+        return;
+    }
+    if (!recompinput::pulse_rumble(strength, static_cast<uint32_t>(ms))) {
+        const float scale = static_cast<float>(recompui::config::general::get_rumble_strength()) / 100.0f;
+        if (scale > 0.0f) {
+            dk64::android::phone_haptic_pulse(std::min(1.0f, strength * scale), ms);
+        }
+    }
+#else
+    (void)strength;
+    (void)ms;
+#endif
+}
+
+// Game feel options (Input): bit 0 Jump Assist, bit 1 Quick Turn (patches/game_feel_patches.c).
+extern "C" void recomp_get_game_feel(uint8_t* rdram, recomp_context* ctx) {
+#if defined(__ANDROID__)
+    _return<int32_t>(ctx, dk64::android::game_feel_flags());
+#else
+    _return<int32_t>(ctx, 15 | 16 | 32 | 64 | 128 | 256 | 1024 | 2048);
+#endif
+}
+
+// Walk in First Person: whether it's on (1) and the gun's out (2), each frame, for the app's
+// button prompts (patches/sound_options_patches.c, fp_update).
+// At boot: a Rainbow Coin dirt patch's level slot and flag, as the game numbers them
+// (patches/sound_options_patches.c, func_global_asm_80688940), for the bottom screen.
+extern "C" void recomp_report_rainbow_coin(uint8_t* rdram, recomp_context* ctx) {
+#if defined(__ANDROID__)
+    dk64::android::report_rainbow_coin(_arg<0, int32_t>(rdram, ctx), _arg<1, int32_t>(rdram, ctx));
+#endif
+}
+
+// The DK64 shortcut inputs held (1 Instrument, 2 Fairy Camera; Configure Inputs, Modern).
+extern "C" int dk64_android_control_preset();   // config.cpp: 0 Classic, 1 Modern, -1 not chosen
+extern "C" void recomp_get_extra_actions(uint8_t* rdram, recomp_context* ctx) {
+#if defined(__ANDROID__)
+    // 64: the Modern layout (anything but Classic).
+    // 2048: swimming on the water's surface (no fairy camera there; under the water it works).
+    _return<int32_t>(ctx, dk64::android::extra_actions() | (dk64_android_control_preset() != 0 ? 64 : 0) |
+        (dk64::android::water_mode(rdram) == 1 ? 2048 : 0) |
+        // 4096: the on-screen touch controller is in use (B shoots, no first person prompts).
+        (dk64_android_touch_overlay_active() ? 4096 : 0));
+#else
+    _return<int32_t>(ctx, 0);
+#endif
+}
+
+extern "C" void recomp_set_fp_status(uint8_t* rdram, recomp_context* ctx) {
+#if defined(__ANDROID__)
+    dk64::android::set_fp_status(_arg<0, int32_t>(rdram, ctx));
+#endif
+}
+
+// Shoot Gun With (Input): 0 B, 1 ZR, 2 B and ZR (patches/sound_options_patches.c).
+extern "C" void recomp_get_gun_button(uint8_t* rdram, recomp_context* ctx) {
+#if defined(__ANDROID__)
+    _return<int32_t>(ctx, dk64::android::gun_button());
+#else
+    _return<int32_t>(ctx, 0);
+#endif
+}
+
 extern "C" void recomp_touch_camera_get(uint8_t* rdram, recomp_context* ctx) {
     float* x_out = _arg<0, float*>(rdram, ctx);
     float* y_out = _arg<1, float*>(rdram, ctx);

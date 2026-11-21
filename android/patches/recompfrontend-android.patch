@@ -1,8 +1,47 @@
+diff --git a/recompinput/include/recompinput/input_state.h b/recompinput/include/recompinput/input_state.h
+index 1961e29..8193aae 100644
+--- a/recompinput/include/recompinput/input_state.h
++++ b/recompinput/include/recompinput/input_state.h
+@@ -30,6 +30,9 @@ namespace recompinput {
+     void poll_inputs();
+     void set_rumble(int controller_num, bool on);
+     void update_rumble();
++    // A short extra rumble (strength 0-1, scaled by the Rumble Strength setting) on top of the
++    // game's own, for small game feel effects. Returns false if no controller can rumble.
++    bool pulse_rumble(float strength, uint32_t duration_ms);
+     bool should_override_keystate(SDL_Scancode key, SDL_Keymod mod);
+     float get_input_analog(int controller_num, const InputField& field);
+     float get_input_analog(int controller_num, const std::span<const InputField> fields);
 diff --git a/recompinput/include/recompinput/input_types.h b/recompinput/include/recompinput/input_types.h
-index f5ed6c0..1bff207 100644
+index f5ed6c0..917eceb 100644
 --- a/recompinput/include/recompinput/input_types.h
 +++ b/recompinput/include/recompinput/input_types.h
-@@ -68,6 +68,13 @@ namespace recompinput {
+@@ -37,10 +37,23 @@ namespace recompinput {
+         DEFINE_INPUT(TAB_LEFT_MENU, 0, "Tab Left (Menu)") \
+         DEFINE_INPUT(TAB_RIGHT_MENU, 0, "Tab Right (Menu)")
+ 
++    // Android (DK64): single-button shortcuts for Z + C moves, bound in the Modern layout; the
++    // game turns them into Z, then Z + C (see dk64_android_report_extra_actions).
++    #define DEFINE_DK64_ACTION_INPUTS() \
++        DEFINE_INPUT(INSTRUMENT, 0, "Instrument") \
++        DEFINE_INPUT(FAIRY_CAMERA, 0, "Fairy Camera") \
++        DEFINE_INPUT(GUN, 0, "Gun") \
++        DEFINE_INPUT(ORANGE, 0, "Orange") \
++        DEFINE_INPUT(Z_INSTRUMENT, 0, "Instrument (with Z)") \
++        DEFINE_INPUT(Z_FAIRY_CAMERA, 0, "Fairy Camera (with Z)") \
++        DEFINE_INPUT(Z_GUN, 0, "Gun (with Z)") \
++        DEFINE_INPUT(Z_ORANGE, 0, "Orange (with Z)")
++
+     #define DEFINE_ALL_INPUTS() \
+         DEFINE_N64_AXIS_INPUTS() \
+         DEFINE_N64_BUTTON_INPUTS() \
+-        DEFINE_RECOMP_UI_INPUTS()
++        DEFINE_RECOMP_UI_INPUTS() \
++        DEFINE_DK64_ACTION_INPUTS()
+ 
+     #define DEFINE_INPUT(name, value, readable) name,
+     // - Enum containing every recomp input.
+@@ -68,6 +81,13 @@ namespace recompinput {
  
      
      // A single input. Combines the source of the input (see InputType) and a specific key/button/axis.
@@ -107,6 +146,58 @@ index c76a1dc..fae66f0 100644
              // constexpr float gyro_threshold = 0.05f;
              // Convert rotational velocity to degrees per second.
              constexpr float rad_to_deg = 180.0f / M_PI;
+diff --git a/recompinput/src/input_state.cpp b/recompinput/src/input_state.cpp
+index 03ed871..11e478f 100644
+--- a/recompinput/src/input_state.cpp
++++ b/recompinput/src/input_state.cpp
+@@ -1,3 +1,4 @@
++#include <chrono>
+ #include <algorithm>
+ #include <mutex>
+ #include <span>
+@@ -68,6 +69,31 @@ void recompinput::poll_inputs() {
+     }
+ }
+ 
++static std::atomic<float> rumble_pulse_strength{0.0f};
++static std::atomic<uint64_t> rumble_pulse_until{0};
++
++static uint64_t rumble_now_ms() {
++    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
++        std::chrono::steady_clock::now().time_since_epoch()).count());
++}
++
++bool recompinput::pulse_rumble(float strength, uint32_t duration_ms) {
++    const uint64_t now = rumble_now_ms();
++    // A stronger pulse replaces a weaker one; otherwise the longer one wins.
++    if (now >= rumble_pulse_until.load() || strength >= rumble_pulse_strength.load()) {
++        rumble_pulse_strength.store(strength);
++        rumble_pulse_until.store(now + duration_ms);
++    }
++    std::lock_guard lock{ InputState.controllers_mutex };
++    for (const auto &controller : InputState.detected_controllers) {
++        SDL_Joystick* joystick = SDL_GameControllerGetJoystick(controller);
++        if (joystick != nullptr && !InputState.controller_states[SDL_JoystickInstanceID(joystick)].rumble_failed) {
++            return true;
++        }
++    }
++    return false;
++}
++
+ void recompinput::set_rumble(int controller_num, bool on) {
+     InputState.rumble_active[controller_num] = on;
+ }
+@@ -115,6 +141,10 @@ void recompinput::update_rumble() {
+         }
+         float smooth_rumble = smoothstep(0, 1, InputState.cur_rumble[i]);
+ 
++        // Plus any short pulse (pulse_rumble) still running.
++        if ((i == 0) && (rumble_now_ms() < rumble_pulse_until.load())) {
++            smooth_rumble = std::max(smooth_rumble, rumble_pulse_strength.load());
++        }
+         uint16_t rumble_strength = smooth_rumble * (recompui::config::general::get_rumble_strength() * 0xFFFF / 100);
+         uint32_t duration = 1000000; // Dummy duration value that lasts long enough to matter as the game will reset rumble on its own.
+         {
 diff --git a/recompinput/src/input_types.cpp b/recompinput/src/input_types.cpp
 index c6786e6..73eda2e 100644
 --- a/recompinput/src/input_types.cpp
@@ -253,10 +344,10 @@ index c6786e6..73eda2e 100644
      default:
          return recompinput::unknown_device_input;
 diff --git a/recompinput/src/profiles.cpp b/recompinput/src/profiles.cpp
-index c89956e..75f2a3e 100644
+index c89956e..3ff72de 100644
 --- a/recompinput/src/profiles.cpp
 +++ b/recompinput/src/profiles.cpp
-@@ -371,6 +371,18 @@ namespace recompinput {
+@@ -371,6 +371,21 @@ namespace recompinput {
          return "SERIAL_" + guid.serial + "_VID_" + std::to_string(guid.vendor) + "_PID_" + std::to_string(guid.product) +"_VERSION_" + std::to_string(guid.version) +"_CRC16_" + std::to_string(guid.crc16);
      }
  
@@ -267,6 +358,9 @@ index c89956e..75f2a3e 100644
 +    // Told player 1's own N64 buttons (from the controller/keyboard, before the on-screen
 +    // ones are added), e.g. so a toggle that holds Z can hand over to a real Z press.
 +    extern "C" void dk64_android_report_physical_n64_buttons(uint16_t buttons) __attribute__((weak));
++    // Told which of the DK64 shortcut inputs are held (1 Instrument, 2 Fairy Camera, 4 Gun, 8 Orange; 32 R3;
++    // 128, 256, 512, 1024: the same four, with Z held).
++    extern "C" void dk64_android_report_extra_actions(uint32_t actions) __attribute__((weak));
 +#endif
 +
 +    static bool menu_was_open[4] = {};
@@ -275,10 +369,33 @@ index c89956e..75f2a3e 100644
      bool profiles::get_n64_input(int player_index, uint16_t* buttons_out, float* x_out, float* y_out) {
          uint16_t cur_buttons = 0;
          float cur_x = 0.0f;
-@@ -402,9 +414,32 @@ namespace recompinput {
+@@ -401,10 +416,55 @@ namespace recompinput {
+             int profile_index_kb = players::is_single_player_mode() ? profiles::get_sp_keyboard_profile_index() : players_input_profile_indices[player_index].second;
              check_buttons(profile_index_cont);
              check_buttons(profile_index_kb);
- 
++#ifdef __ANDROID__
++            if (player_index == 0 && dk64_android_report_extra_actions != nullptr) {
++                uint32_t actions = 0;
++                for (int profile_index : { profile_index_cont, profile_index_kb }) {
++                    if (profile_index < 0) {
++                        continue;
++                    }
++                    const input_mapping_array &mappings = input_profiles[profile_index].mappings;
++                    actions |= recompinput::get_input_digital(player_index, mappings[(size_t)GameInput::INSTRUMENT]) ? 1u : 0u;
++                    actions |= recompinput::get_input_digital(player_index, mappings[(size_t)GameInput::FAIRY_CAMERA]) ? 2u : 0u;
++                    actions |= recompinput::get_input_digital(player_index, mappings[(size_t)GameInput::GUN]) ? 4u : 0u;
++                    actions |= recompinput::get_input_digital(player_index, mappings[(size_t)GameInput::ORANGE]) ? 8u : 0u;
++                    actions |= recompinput::get_input_digital(player_index, mappings[(size_t)GameInput::Z_INSTRUMENT]) ? 128u : 0u;
++                    actions |= recompinput::get_input_digital(player_index, mappings[(size_t)GameInput::Z_FAIRY_CAMERA]) ? 256u : 0u;
++                    actions |= recompinput::get_input_digital(player_index, mappings[(size_t)GameInput::Z_GUN]) ? 512u : 0u;
++                    actions |= recompinput::get_input_digital(player_index, mappings[(size_t)GameInput::Z_ORANGE]) ? 1024u : 0u;
++                }
++                // 32: the right stick pressed in (R3) itself, whatever it's bound to.
++                actions |= recompinput::get_input_digital(player_index, InputField::controller_digital(SDL_CONTROLLER_BUTTON_RIGHTSTICK)) ? 32u : 0u;
++                dk64_android_report_extra_actions(actions);
++            }
++#endif
++
 +            // Buttons still held from a menu (e.g. A pressed on the menu bar's X to close it)
 +            // don't reach the game until they're let go, so it doesn't see a fresh press.
 +            if (player_index >= 0 && player_index < 4) {
@@ -289,7 +406,7 @@ index c89956e..75f2a3e 100644
 +                held_from_menu[player_index] &= cur_buttons;
 +                cur_buttons &= ~held_from_menu[player_index];
 +            }
-+
+ 
              check_joystick(profile_index_cont);
              recompinput::apply_joystick_deadzone(cur_x, cur_y, &cur_x, &cur_y);
              check_joystick(profile_index_kb);
@@ -1715,7 +1832,7 @@ index 0561657..06088b1 100644
  
      std::string_view get_type_name() override { return "ConfigOptionEnum"; }
 diff --git a/recompui/src/config/ui_config_page_controls.cpp b/recompui/src/config/ui_config_page_controls.cpp
-index f379a6f..926d336 100644
+index f379a6f..89f77e3 100644
 --- a/recompui/src/config/ui_config_page_controls.cpp
 +++ b/recompui/src/config/ui_config_page_controls.cpp
 @@ -1,4 +1,5 @@
@@ -1732,7 +1849,52 @@ index f379a6f..926d336 100644
  
  namespace recompui {
  
-@@ -114,6 +116,18 @@ GameInputRow::GameInputRow(
+@@ -62,12 +64,44 @@ GameInputRow::GameInputRow(
+ 
+     set_debug_id("GameInputRow (" + input_ctx.name + ")");
+ 
++#ifdef __ANDROID__
++    // "Name (detail)": the name on top, the detail smaller and dimmer under it, so long names
++    // (First Person, with what Z does) stay on two tidy lines instead of wrapping into the next row.
++    {
++        std::string main_text = input_ctx.name, sub_text;
++        const size_t open = main_text.find(" (");
++        if (open != std::string::npos && main_text.back() == ')') {
++            sub_text = main_text.substr(open + 2, main_text.size() - open - 3);
++            main_text = main_text.substr(0, open);
++        }
++        Element *names = context.create_element<Element>(this, 0, "div", false);
++        names->set_display(Display::Flex);
++        names->set_flex_direction(FlexDirection::Column);
++        names->set_justify_content(JustifyContent::Center);
++        names->set_flex_grow(2.0f);
++        names->set_flex_shrink(1.0f);
++        names->set_flex_basis(300.0f);
++        auto label = context.create_element<Label>(names, main_text, theme::Typography::LabelMD);
++        label->set_height_auto();
++        label->set_text_transform(TextTransform::Uppercase);
++        label->set_font_weight(700);
++        label->set_color(Color{255, 244, 214, 255});
++        if (!sub_text.empty()) {
++            auto sub = context.create_element<Label>(names, sub_text, theme::Typography::LabelSM);
++            sub->set_height_auto();
++            sub->set_font_size(17.0f);
++            sub->set_color(Color{232, 213, 168, 170});
++            sub->set_margin_top(2.0f);
++        }
++    }
++#else
+     auto label = context.create_element<Label>(this, input_ctx.name, theme::Typography::LabelMD);
+     label->set_flex_grow(2.0f);
+     label->set_flex_shrink(1.0f);
+     label->set_flex_basis(300.0f);
+     label->set_height_auto();
+     // TODO: whitespace nowrap impl
++#endif
+ 
+     auto bindings_container = context.create_element<Element>(this, 0, "div", false);
+     {
+@@ -114,6 +148,15 @@ GameInputRow::GameInputRow(
      }
  
      scroll_buffer = context.create_element<ScrollBuffer>(this, 16.0f);
@@ -1744,14 +1906,31 @@ index f379a6f..926d336 100644
 +    set_padding_right(14.0f);
 +    active_style.set_background_color(Color{96, 62, 28, 230});
 +    active_style.set_border_color(Color{249, 214, 72, 255});
-+    label->set_text_transform(TextTransform::Uppercase);
-+    label->set_font_weight(700);
-+    label->set_color(Color{255, 244, 214, 255});
 +#endif
  }
  
  GameInputRow::~GameInputRow() {
-@@ -204,6 +218,30 @@ void ConfigPageControls::create_game_input_contexts() {
+@@ -186,6 +229,19 @@ ConfigPageControls::~ConfigPageControls() {
+     controls_page = nullptr;
+ }
+ 
++#ifdef __ANDROID__
++// Implemented in the game (src/game/config.cpp).
++extern "C" int dk64_android_control_preset() __attribute__((weak));
++extern "C" const char *dk64_android_control_action_name(int input) __attribute__((weak));
++// Modern layout: the rows are named by what they do (Jump, Attack...); Classic: by the N64
++// button (A, B...), with an N64 controller picture.
++static bool controls_show_actions() {
++    // (Everything but an explicit Classic: Modern, or a layout of your own.)
++    return dk64_android_control_preset != nullptr && dk64_android_control_preset() != 0 &&
++        dk64_android_control_action_name != nullptr;
++}
++#endif
++
+ void ConfigPageControls::create_game_input_contexts() {
+     game_input_sections.n64.contexts.clear();
+     game_input_sections.menu.contexts.clear();
+@@ -204,6 +260,53 @@ void ConfigPageControls::create_game_input_contexts() {
              recompinput::get_game_input_clearable(input)
          };
  
@@ -1759,11 +1938,34 @@ index f379a6f..926d336 100644
 +        // Android: grouped like the controller - Buttons, C Buttons, Stick, D-Pad, Menu.
 +        {
 +            using GI = recompinput::GameInput;
-+            static const char *names[] = { "Buttons", "C Buttons", "Stick", "D-Pad", "Menu" };
++            // Classic: the N64 buttons. Modern: what things do - the C buttons aren't listed;
++            // instead, what each Z move is on (pressed while holding Z), and one-press moves.
++            static const char *names[] = { "Buttons", "C Buttons", "Stick", "D-Pad", "Z Moves", "One-Press Moves", "Menu" };
++            static const char *action_names[] = { "Actions", "View", "Move", "Kong Swap and Extras", "Z Moves (hold Z and press)", "One-Press Moves", "Menu" };
++            const bool actions = controls_show_actions();
++            if (actions) {
++                const char *action = dk64_android_control_action_name(static_cast<int>(input));
++                if (action != nullptr) {
++                    input_ctx.name = action;
++                }
++            }
 +            int group;
-+            if (recompinput::get_game_input_is_menu(input)) {
++            if (input == GI::Z_INSTRUMENT || input == GI::Z_FAIRY_CAMERA || input == GI::Z_GUN || input == GI::Z_ORANGE) {
++                if (!actions) {
++                    continue;   // Classic: Z + the C buttons, as on the N64
++                }
 +                group = 4;
++            } else if (input == GI::INSTRUMENT || input == GI::FAIRY_CAMERA || input == GI::GUN || input == GI::ORANGE) {
++                if (!actions) {
++                    continue;   // Classic: no one-press moves (Z + the C buttons, as on the N64)
++                }
++                group = 5;
++            } else if (recompinput::get_game_input_is_menu(input)) {
++                group = 6;
 +            } else if (input == GI::C_UP || input == GI::C_DOWN || input == GI::C_LEFT || input == GI::C_RIGHT) {
++                if (actions && input != GI::C_UP) {
++                    continue;   // Modern: the right stick is the camera; Z moves are listed above
++                }
 +                group = 1;
 +            } else if (input == GI::X_AXIS_NEG || input == GI::X_AXIS_POS || input == GI::Y_AXIS_NEG || input == GI::Y_AXIS_POS) {
 +                group = 2;
@@ -1772,8 +1974,8 @@ index f379a6f..926d336 100644
 +            } else {
 +                group = 0;
 +            }
-+            while (game_input_sections.other.size() < 5) {
-+                game_input_sections.other.emplace_back(names[game_input_sections.other.size()]);
++            while (game_input_sections.other.size() < 7) {
++                game_input_sections.other.emplace_back((actions ? action_names : names)[game_input_sections.other.size()]);
 +            }
 +            game_input_sections.other[group].contexts.push_back(input_ctx);
 +            continue;
@@ -1782,7 +1984,7 @@ index f379a6f..926d336 100644
          if (recompinput::get_game_input_is_menu(input)) {
              game_input_sections.menu.contexts.push_back(input_ctx);
          } else {
-@@ -229,6 +267,9 @@ void ConfigPageControls::process_event(const Event &e) {
+@@ -229,6 +332,9 @@ void ConfigPageControls::process_event(const Event &e) {
              last_update_index = update_index;
              render_all();
          }
@@ -1792,7 +1994,7 @@ index f379a6f..926d336 100644
          queue_update();
          break;
      default:
-@@ -357,6 +398,17 @@ void ConfigPageControls::render_body_mappings() {
+@@ -357,6 +463,17 @@ void ConfigPageControls::render_body_mappings() {
          body->get_right()->clear_children();
          description_container = context.create_element<Element>(body->get_right(), 0, "p", true);
          description_container->set_text("");
@@ -1810,7 +2012,7 @@ index f379a6f..926d336 100644
      }
  }
  
-@@ -460,6 +512,12 @@ void ConfigPageControls::on_edit_player_profile(int player_index) {
+@@ -460,6 +577,12 @@ void ConfigPageControls::on_edit_player_profile(int player_index) {
      }
  }
  
@@ -1823,7 +2025,7 @@ index f379a6f..926d336 100644
  void ConfigPageControls::render_footer() {
      if (multiplayer_enabled && !multiplayer_view_mappings) {
          hide_footer();
-@@ -473,7 +531,17 @@ void ConfigPageControls::render_footer() {
+@@ -473,7 +596,17 @@ void ConfigPageControls::render_footer() {
      {
          auto footer_left = footer->get_left();
          footer_left->clear_children();
@@ -1841,7 +2043,7 @@ index f379a6f..926d336 100644
              keyboard_toggle = context.create_element<IconToggle>(footer_left, "icons/Cont.svg", "icons/Keyboard.svg", ToggleSize::Large);
              keyboard_toggle->set_checked(single_player_show_keyboard_mappings);
              keyboard_toggle->add_checked_callback([this](bool checked) {
-@@ -520,6 +588,58 @@ void ConfigPageControls::render_control_mappings() {
+@@ -520,6 +653,59 @@ void ConfigPageControls::render_control_mappings() {
  
          game_input_rows.clear();
  
@@ -1885,12 +2087,13 @@ index f379a6f..926d336 100644
 +                    dk64_android_apply_control_preset(dk64_android_control_preset() == 1 ? 0 : 1);
 +                    layout_row->set_value_text(preset_name());
 +                    this->update_control_mappings();
++                    this->force_update();   // the rows' names and the controller picture follow
 +                });
 +                layout_row->set_focus_callback([this](bool active) {
 +                    if (active && description_container != nullptr) {
 +                        description_container->set_text(
-+                            "Classic: the right stick works the C buttons, like the N64. "
-+                            "Modern: the right stick turns the camera, with gyro aiming on.");
++                            "Classic: the N64's own buttons, as on the N64 controller (the right stick works the C buttons). "
++                            "Modern: what each button does on your controller (the right stick turns the camera, with gyro aiming on).");
 +                    }
 +                });
 +            }
@@ -1900,7 +2103,7 @@ index f379a6f..926d336 100644
          create_game_input_contexts();
          set_current_profile_index();
  
-@@ -669,7 +789,204 @@ void ConfigPageControls::on_option_hover(recompinput::GameInput input_id) {
+@@ -669,7 +855,330 @@ void ConfigPageControls::on_option_hover(recompinput::GameInput input_id) {
              description_container->set_text("");
          }
      }
@@ -1952,6 +2155,11 @@ index f379a6f..926d336 100644
 +    recompui::ContextId context = get_current_context();
 +    pad_parts.clear();
 +    stick_dots[0] = stick_dots[1] = nullptr;
++    n64_stick_dot = nullptr;
++    if (dk64_android_control_preset != nullptr && dk64_android_control_preset() == 0) {
++        render_n64_picture(parent);
++        return;
++    }
 +
 +    const recompinput::FaceButtonStyle style = recompinput::get_face_button_style();
 +    const bool nin = style == recompinput::FaceButtonStyle::Nintendo;
@@ -1987,7 +2195,7 @@ index f379a6f..926d336 100644
 +        l->set_font_weight(400);
 +        l->set_font_size(font);
 +        l->set_padding_top(ps && type == 0 && id <= SDL_CONTROLLER_BUTTON_Y ? 0.0f : 4.0f);
-+        pad_parts.push_back({ e, l, type, id, false, -1 });
++        pad_parts.push_back({ e, l, type, id, false, -1, part_idle });
 +        return e;
 +    };
 +
@@ -2038,12 +2246,114 @@ index f379a6f..926d336 100644
 +    highlight_face_buttons(recompinput::GameInput::COUNT);
 +}
 +
++// Classic: an N64 controller (our own drawing): its three prongs, L, R and Z, the D-Pad, the
++// stick, Start, A and B, and the four C buttons. A button lights up while whatever you've bound
++// to it is pressed; the row you're on outlines its button.
++void ConfigPageControls::render_n64_picture(Element *parent) {
++    recompui::ContextId context = get_current_context();
++    using GI = recompinput::GameInput;
++    Element *pad = context.create_element<Element>(parent, 0, "div", false);
++    pad->set_position(Position::Relative);
++    pad->set_width(460.0f);
++    pad->set_height(300.0f);
++    pad->set_margin_top(8.0f);
++    pad->set_flex_shrink(0.0f);
++    pad->set_margin_left_auto();
++    pad->set_margin_right_auto();
++
++    auto box = [&](Element *in, float x, float y, float w, float h, float radius) {
++        Element *e = context.create_element<Element>(in, 0, "div", false);
++        e->set_position(Position::Absolute);
++        e->set_left(x);
++        e->set_top(y);
++        e->set_width(w);
++        e->set_height(h);
++        e->set_border_radius(radius);
++        return e;
++    };
++    auto shell = [&](float x, float y, float w, float h, float radius) {
++        Element *e = box(pad, x, y, w, h, radius);
++        e->set_background_color(pad_body);
++        e->set_border_width(3.0f);
++        e->set_border_color(pad_edge);
++        return e;
++    };
++    auto part = [&](float x, float y, float w, float h, float radius, const std::string &text, GI input, Color idle, float font) {
++        Element *e = box(pad, x, y, w, h, radius);
++        e->set_border_width(3.0f);
++        e->set_display(Display::Flex);
++        e->set_align_items(AlignItems::Center);
++        e->set_justify_content(JustifyContent::Center);
++        Label *l = context.create_element<Label>(e, text, theme::Typography::LabelSM);
++        l->set_font_family("Luckiest Guy");
++        l->set_font_weight(400);
++        l->set_font_size(font);
++        l->set_padding_top(4.0f);
++        pad_parts.push_back({ e, l, 3, static_cast<int>(input), false, -1, idle });
++        return e;
++    };
++
++    // Shoulders, and Z on the back of the middle prong.
++    part(34.0f, 0.0f, 110.0f, 30.0f, 12.0f, "L", GI::L, part_idle, 18.0f);
++    part(316.0f, 0.0f, 110.0f, 30.0f, 12.0f, "R", GI::R, part_idle, 18.0f);
++    part(195.0f, 0.0f, 70.0f, 30.0f, 12.0f, "Z", GI::Z, part_idle, 18.0f);
++    // The three prongs, then the top of the body over them.
++    shell(20.0f, 130.0f, 120.0f, 160.0f, 56.0f);
++    shell(170.0f, 150.0f, 120.0f, 150.0f, 56.0f);
++    shell(320.0f, 130.0f, 120.0f, 160.0f, 56.0f);
++    shell(0.0f, 40.0f, 460.0f, 150.0f, 75.0f);
++
++    // D-Pad (left), Start (middle), the stick (on the middle prong).
++    part(74.0f, 70.0f, 28.0f, 28.0f, 5.0f, "", GI::DPAD_UP, part_idle, 12.0f);
++    part(74.0f, 126.0f, 28.0f, 28.0f, 5.0f, "", GI::DPAD_DOWN, part_idle, 12.0f);
++    part(46.0f, 98.0f, 28.0f, 28.0f, 5.0f, "", GI::DPAD_LEFT, part_idle, 12.0f);
++    part(102.0f, 98.0f, 28.0f, 28.0f, 5.0f, "", GI::DPAD_RIGHT, part_idle, 12.0f);
++    part(210.0f, 96.0f, 40.0f, 40.0f, 20.0f, "S", GI::START, Color{150, 30, 26, 255}, 16.0f);
++    {
++        Element *ring = box(pad, 195.0f, 176.0f, 70.0f, 70.0f, 35.0f);
++        ring->set_background_color(part_idle);
++        ring->set_border_width(3.0f);
++        ring->set_border_color(part_edge);
++        Element *dot = box(ring, 17.0f, 17.0f, 30.0f, 30.0f, 15.0f);
++        dot->set_background_color(part_edge);
++        n64_stick_dot = dot;
++    }
++    // B and A, then the C buttons (top right).
++    part(290.0f, 100.0f, 40.0f, 40.0f, 20.0f, "B", GI::B, Color{40, 132, 56, 255}, 20.0f);
++    part(320.0f, 138.0f, 46.0f, 46.0f, 23.0f, "A", GI::A, Color{44, 90, 196, 255}, 22.0f);
++    const Color c_yellow{214, 168, 22, 255};
++    part(378.0f, 52.0f, 30.0f, 30.0f, 15.0f, "", GI::C_UP, c_yellow, 12.0f);
++    part(378.0f, 112.0f, 30.0f, 30.0f, 15.0f, "", GI::C_DOWN, c_yellow, 12.0f);
++    part(348.0f, 82.0f, 30.0f, 30.0f, 15.0f, "", GI::C_LEFT, c_yellow, 12.0f);
++    part(408.0f, 82.0f, 30.0f, 30.0f, 15.0f, "", GI::C_RIGHT, c_yellow, 12.0f);
++    Label *cl = context.create_element<Label>(pad, "C", theme::Typography::LabelSM);
++    cl->set_position(Position::Absolute);
++    cl->set_left(386.0f);
++    cl->set_top(86.0f);
++    cl->set_font_family("Luckiest Guy");
++    cl->set_font_size(16.0f);
++    cl->set_color(part_text);
++
++    Label *caption = context.create_element<Label>(parent, "Press a button to see which N64 button it is", theme::Typography::LabelMD);
++    caption->set_display(Display::Block);
++    caption->set_text_align(TextAlign::Center);
++    caption->set_margin_top(14.0f);
++    caption->set_font_weight(700);
++    caption->set_color(Color{232, 213, 168, 200});
++    highlight_face_buttons(recompinput::GameInput::COUNT);
++}
++
 +void ConfigPageControls::highlight_face_buttons(recompinput::GameInput input_id) {
 +    for (auto &p : pad_parts) {
 +        p.bound = false;
 +    }
 +    if (input_id == recompinput::GameInput::COUNT || selected_profile_index < 0) {
 +        return;
++    }
++    for (auto &p : pad_parts) {
++        if (p.type == 3 && p.id == static_cast<int>(input_id)) {
++            p.bound = true;
++        }
 +    }
 +    for (int j = 0; j < recompinput::num_bindings_per_input; j++) {
 +        recompinput::InputField field = recompinput::profiles::get_input_binding(selected_profile_index, input_id, j);
@@ -2068,10 +2378,29 @@ index f379a6f..926d336 100644
 +        return;
 +    }
 +    SDL_GameController *c = first_controller();
++    if ((n64_stick_dot != nullptr) && (c != nullptr)) {
++        // The N64 stick: wherever the left stick is.
++        const float x = SDL_GameControllerGetAxis(c, SDL_CONTROLLER_AXIS_LEFTX) / 32768.0f;
++        const float y = SDL_GameControllerGetAxis(c, SDL_CONTROLLER_AXIS_LEFTY) / 32768.0f;
++        n64_stick_dot->set_left(17.0f + x * 16.0f);
++        n64_stick_dot->set_top(17.0f + y * 16.0f);
++    }
 +    for (auto &p : pad_parts) {
 +        bool pressed = false;
 +        if (c != nullptr) {
-+            if (p.type == 0) {
++            if (p.type == 3) {
++                for (int j = 0; j < recompinput::num_bindings_per_input && !pressed && selected_profile_index >= 0; j++) {
++                    recompinput::InputField f = recompinput::profiles::get_input_binding(selected_profile_index,
++                        static_cast<recompinput::GameInput>(p.id), j);
++                    if (f.input_type == recompinput::InputType::ControllerDigital) {
++                        pressed = SDL_GameControllerGetButton(c, static_cast<SDL_GameControllerButton>(f.input_id)) != 0;
++                    } else if (f.input_type == recompinput::InputType::ControllerAnalog) {
++                        const int axis = std::abs(f.input_id) - 1;
++                        const int v = SDL_GameControllerGetAxis(c, static_cast<SDL_GameControllerAxis>(axis));
++                        pressed = f.input_id > 0 ? v > 12000 : v < -12000;
++                    }
++                }
++            } else if (p.type == 0) {
 +                pressed = SDL_GameControllerGetButton(c, static_cast<SDL_GameControllerButton>(p.id)) != 0;
 +            } else if (p.type == 1) {
 +                pressed = SDL_GameControllerGetAxis(c, static_cast<SDL_GameControllerAxis>(p.id)) > 12000;
@@ -2093,7 +2422,7 @@ index f379a6f..926d336 100644
 +            continue;
 +        }
 +        p.last_state = state;
-+        p.el->set_background_color(pressed ? lit_fill : part_idle);
++        p.el->set_background_color(pressed ? lit_fill : p.idle);
 +        p.el->set_border_color(p.bound ? lit_fill : part_edge);
 +        p.label->set_color(pressed ? lit_text : (p.bound ? lit_fill : part_text));
 +        if (p.type == 2 && stick_dots[p.id] != nullptr) {
@@ -2106,7 +2435,7 @@ index f379a6f..926d336 100644
  
  } // namespace recompui
 diff --git a/recompui/src/config/ui_config_page_controls.h b/recompui/src/config/ui_config_page_controls.h
-index dd8ff24..7ba89cd 100644
+index dd8ff24..f7a9267 100644
 --- a/recompui/src/config/ui_config_page_controls.h
 +++ b/recompui/src/config/ui_config_page_controls.h
 @@ -82,6 +82,15 @@ public:
@@ -2125,7 +2454,7 @@ index dd8ff24..7ba89cd 100644
          }
      }
  };
-@@ -152,6 +161,22 @@ protected:
+@@ -152,6 +161,25 @@ protected:
      std::vector<GameInputRow*> game_input_rows;
      IconToggle *keyboard_toggle;
      Element *description_container = nullptr;
@@ -2134,14 +2463,17 @@ index dd8ff24..7ba89cd 100644
 +    struct PadPart {
 +        Element *el;
 +        Label *label;
-+        int type;        // 0 button (SDL button), 1 trigger (SDL axis), 2 stick (0 left, 1 right)
++        int type;        // 0 button (SDL button), 1 trigger (SDL axis), 2 stick (0 left, 1 right), 3 N64 button (GameInput)
 +        int id;
 +        bool bound;
 +        int last_state;
++        Color idle;      // its colour when not pressed
 +    };
 +    std::vector<PadPart> pad_parts;
 +    Element *stick_dots[2] = {};
++    Element *n64_stick_dot = nullptr;
 +    void render_face_buttons(Element *parent);
++    void render_n64_picture(Element *parent);
 +    void highlight_face_buttons(recompinput::GameInput input_id);
 +    void update_controller_picture();
 +#endif

@@ -5,6 +5,9 @@
 // addresses (US 1.0) and patches/patches_ui.c for the PlayerProgress / CharacterProgress
 // structures.
 
+#include <cstdio>
+#include <cstring>
+#include <mutex>
 #include <android/log.h>
 #include <jni.h>
 
@@ -35,6 +38,7 @@ namespace {
     std::atomic<bool> g_show_fps{false};
     std::atomic<bool> g_show_area{false};
     std::atomic<int32_t> g_tag_target{-1};
+    std::atomic<int64_t> g_tag_target_set_at{0};
     constexpr const char* kTagAnywhereModId = "dk64_tag_anywhere";
 
     // N64 virtual addresses (KSEG0) for the US 1.0 release.
@@ -450,6 +454,15 @@ Java_io_github_bownz_dk64recomp_GameState_nativeRead(JNIEnv* env, jclass, jintAr
             if (control_state == 0x3C) {
                 bits |= (1 << 24) | 4; // crouching: Z + C moves come from here
             }
+            // Bit 27: under the water; bit 28: swimming on the surface (water_mode).
+            {
+                const int w = dk64::android::water_mode(rdram);
+                if (w == 2) {
+                    bits |= 1 << 27;
+                } else if (w == 1) {
+                    bits |= 1 << 28;
+                }
+            }
         }
         values[kCount - 1] = bits;
     }
@@ -481,6 +494,24 @@ Java_io_github_bownz_dk64recomp_GameState_nativeReadFlags(JNIEnv* env, jclass, j
     env->ReleaseIntArrayElements(ids, flags, JNI_ABORT);
     env->ReleaseIntArrayElements(out, result, 0);
     return JNI_TRUE;
+}
+
+// 0 not swimming, 1 swimming on the surface, 2 under the water: the Kong's control state, as
+// the game uses them (code_D78D0.c: 0x4E, swimming on the surface, becomes 0x4F once the Kong
+// dives more than 10 below it). Standing in shallow water is neither (the land states).
+int dk64::android::water_mode(const uint8_t* rdram) {
+    const uint32_t player = read_u32(rdram, kPlayerPointer);
+    if (player < 0x80000000u || player >= 0x80800000u - 0x300) {
+        return 0;
+    }
+    const uint8_t state = read_u8(rdram, player + kPlayerControlState);
+    if (state == 0x4E) {
+        return 1;
+    }
+    if (state == 0x4F) {
+        return 2;
+    }
+    return 0;
 }
 
 void dk64::android::set_touch_kong_swap(bool enabled) {
@@ -699,12 +730,25 @@ void dk64::android::set_show_area(bool enabled) {
 }
 
 // Touch Kong Swap: the Kong the bottom screen is taking the player to (-1: none).
+// The swap takes a few hundred ms at most; a target older than 2 s is stale (e.g. the swap was
+// interrupted without being cleared) and no longer counts, so it can't leave the other Kongs
+// looking un-freed.
 extern "C" int32_t dk64_android_tag_target() {
-    return g_tag_target.load(std::memory_order_relaxed);
+    const int32_t target = g_tag_target.load(std::memory_order_relaxed);
+    if (target >= 0) {
+        const auto set_at = g_tag_target_set_at.load(std::memory_order_relaxed);
+        if (std::chrono::steady_clock::now().time_since_epoch().count() - set_at >
+            std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::seconds(2)).count()) {
+            g_tag_target.store(-1, std::memory_order_relaxed);
+            return -1;
+        }
+    }
+    return target;
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_io_github_bownz_dk64recomp_GameState_nativeSetTagTarget(JNIEnv*, jclass, jint kong) {
+    g_tag_target_set_at.store(std::chrono::steady_clock::now().time_since_epoch().count(), std::memory_order_relaxed);
     g_tag_target.store(kong >= 0 && kong < 5 ? kong : -1, std::memory_order_relaxed);
 }
 
@@ -743,4 +787,85 @@ Java_io_github_bownz_dk64recomp_GameState_nativeFontMetrics(JNIEnv* env, jclass,
     }
     env->SetByteArrayRegion(out, 0, kCount, bytes);
     return JNI_TRUE;
+}
+
+// ---- Walk in First Person: button prompts -------------------------------------------------
+// The game feel option flags (touch_controller.cpp), for the app's first person prompts.
+extern "C" JNIEXPORT jint JNICALL
+Java_io_github_bownz_dk64recomp_GameState_nativeGameFeel(JNIEnv*, jclass) {
+    return dk64::android::game_feel_flags();
+}
+
+// Walk in First Person's state (1 on, 2 gun out), for the app's button prompts.
+extern "C" JNIEXPORT jint JNICALL
+Java_io_github_bownz_dk64recomp_GameState_nativeFpStatus(JNIEnv*, jclass) {
+    return dk64::android::fp_status();
+}
+
+#include "recompinput/profiles.h"
+
+// The controller buttons (PromptFont glyphs, as the controls menu shows them) that press N64 B
+// and N64 R for player 1, then the one-press Instrument, Fairy Camera, Gun and Orange buttons
+// (Configure Inputs, Modern), one per line; an empty line for one that isn't bound.
+extern "C" JNIEXPORT jstring JNICALL
+Java_io_github_bownz_dk64recomp_GameState_nativeButtonGlyphs(JNIEnv* env, jclass) {
+    std::string out;
+    const int profile = recompinput::profiles::get_input_profile_for_player(0, recompinput::InputDevice::Controller);
+    for (recompinput::GameInput input : { recompinput::GameInput::B, recompinput::GameInput::R,
+            recompinput::GameInput::INSTRUMENT, recompinput::GameInput::FAIRY_CAMERA,
+            recompinput::GameInput::GUN, recompinput::GameInput::ORANGE }) {
+        std::string glyph;
+        if (profile >= 0) {
+            for (size_t i = 0; i < recompinput::num_bindings_per_input && glyph.empty(); i++) {
+                glyph = recompinput::profiles::get_input_binding(profile, input, i).to_string();
+            }
+        }
+        out += glyph;
+        out += '\n';
+    }
+    return env->NewStringUTF(out.c_str());
+}
+
+// The button pictures (assets/button_icons, as the in-game prompts draw them) for what presses
+// N64 B, N64 R, and the one-press Instrument, Fairy Camera, Gun and Orange, one name per line;
+// an empty line for one with no controller button (or no controller).
+std::string dk64_android_input_icon_name(int game_input);   // src/game/recomp_api.cpp
+extern "C" JNIEXPORT jstring JNICALL
+Java_io_github_bownz_dk64recomp_GameState_nativeButtonIcons(JNIEnv* env, jclass) {
+    std::string out;
+    for (recompinput::GameInput input : { recompinput::GameInput::B, recompinput::GameInput::R,
+            recompinput::GameInput::INSTRUMENT, recompinput::GameInput::FAIRY_CAMERA,
+            recompinput::GameInput::GUN, recompinput::GameInput::ORANGE }) {
+        out += dk64_android_input_icon_name(static_cast<int>(input));
+        out += '\n';
+    }
+    return env->NewStringUTF(out.c_str());
+}
+
+// Rainbow Coins: each dirt patch's level slot and flag, as the game numbers them at boot
+// (recomp_report_rainbow_coin). Read by the bottom screen (GameState.rainbowCoinFlags).
+namespace {
+    std::mutex g_coins_mutex;
+    std::vector<int32_t> g_coins;   // level, flag, level, flag...
+}
+
+void dk64::android::report_rainbow_coin(int level, int flag) {
+    std::lock_guard<std::mutex> lock(g_coins_mutex);
+    for (size_t i = 0; i + 1 < g_coins.size(); i += 2) {
+        if (g_coins[i + 1] == flag) {
+            return;
+        }
+    }
+    g_coins.push_back(level);
+    g_coins.push_back(flag);
+}
+
+extern "C" JNIEXPORT jintArray JNICALL
+Java_io_github_bownz_dk64recomp_GameState_nativeRainbowCoins(JNIEnv* env, jclass) {
+    std::lock_guard<std::mutex> lock(g_coins_mutex);
+    jintArray out = env->NewIntArray(static_cast<jsize>(g_coins.size()));
+    if (out != nullptr && !g_coins.empty()) {
+        env->SetIntArrayRegion(out, 0, static_cast<jsize>(g_coins.size()), g_coins.data());
+    }
+    return out;
 }

@@ -165,6 +165,86 @@ void dk64::android::set_drag_camera(bool enabled) {
     }
 }
 
+static std::atomic<int> gun_button_mode{0};
+
+void dk64::android::set_gun_button(int mode) {
+    gun_button_mode.store(mode, std::memory_order_relaxed);
+}
+
+int dk64::android::gun_button() {
+    return gun_button_mode.load(std::memory_order_relaxed);
+}
+
+static std::atomic<bool> jump_assist{true};
+static std::atomic<bool> quick_turn{true};
+static std::atomic<bool> smooth_running{true};
+static std::atomic<bool> movement_polish{true};
+
+void dk64::android::set_movement_polish(bool enabled) {
+    movement_polish.store(enabled, std::memory_order_relaxed);
+}
+
+void dk64::android::set_smooth_running(bool enabled) {
+    smooth_running.store(enabled, std::memory_order_relaxed);
+}
+
+void dk64::android::set_jump_assist(bool enabled) {
+    jump_assist.store(enabled, std::memory_order_relaxed);
+}
+
+void dk64::android::set_quick_turn(bool enabled) {
+    quick_turn.store(enabled, std::memory_order_relaxed);
+}
+
+static std::atomic<int> game_feel_extra{16 | 32 | 64 | 128 | 256 | 1024 | 2048 | 8192 | 16384};
+
+void dk64::android::set_game_feel_bit(int bit, bool enabled) {
+    if (enabled) {
+        game_feel_extra.fetch_or(bit, std::memory_order_relaxed);
+    } else {
+        game_feel_extra.fetch_and(~bit, std::memory_order_relaxed);
+    }
+}
+
+int dk64::android::game_feel_flags() {
+    // 8192: Camera Polish, part of the Modern Camera itself now (it only applies with it).
+    return game_feel_extra.load(std::memory_order_relaxed) | 8192 | (jump_assist.load(std::memory_order_relaxed) ? 1 : 0) | (quick_turn.load(std::memory_order_relaxed) ? 2 : 0) |
+        (smooth_running.load(std::memory_order_relaxed) ? 4 : 0) |
+        (movement_polish.load(std::memory_order_relaxed) ? 8 : 0) |
+        // 4096: the touch buttons are pressing a C button right now (so first person lets it
+        // through: the first person button, the gun button...).
+        ((direct_n64_buttons.load(std::memory_order_relaxed) & 0x000F) != 0 ? 4096 : 0);
+}
+
+static std::atomic<int> fp_status_value{0};
+
+// The DK64 shortcut inputs held (1 Instrument, 2 Fairy Camera), from recompinput each poll.
+static std::atomic<uint32_t> extra_actions_value{0};
+extern "C" void dk64_android_report_extra_actions(uint32_t actions) {
+    extra_actions_value.store(actions, std::memory_order_relaxed);
+}
+int dk64::android::extra_actions() {
+    return static_cast<int>(extra_actions_value.load(std::memory_order_relaxed));
+}
+
+void dk64::android::set_fp_status(int status) {
+    fp_status_value.store(status, std::memory_order_relaxed);
+}
+
+int dk64::android::fp_status() {
+    return fp_status_value.load(std::memory_order_relaxed);
+}
+
+static std::atomic<bool> haptic_feedback{true};
+
+void dk64::android::set_haptic_feedback(bool enabled) {
+    haptic_feedback.store(enabled, std::memory_order_relaxed);
+}
+
+bool dk64::android::haptic_feedback_enabled() {
+    return haptic_feedback.load(std::memory_order_relaxed);
+}
+
 bool dk64::android::drag_camera_enabled() {
     return drag_camera.load(std::memory_order_relaxed);
 }
