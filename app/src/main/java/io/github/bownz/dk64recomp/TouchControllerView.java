@@ -167,6 +167,10 @@ public final class TouchControllerView extends View {
     private static final float FLOATING_RADIUS = 0.11f;   // in units of the shorter side
     private boolean floatingStick = false;
     private boolean stickFloating = false;
+    // The camera stick floats too (Analog / Modern Camera): touching anywhere on the right half,
+    // away from the buttons, brings the camera stick under the thumb (instead of dragging).
+    private boolean camFloating = false;
+    private float camHomeX, camHomeY, camHomeR;
     // Double-tap the control stick for Z (a toggle in the layout editor): a quick tap, then a
     // second touch soon after holds Z for as long as that touch lasts (the stick still works).
     private static final String KEY_DOUBLE_TAP_Z = "double_tap_z";
@@ -922,7 +926,7 @@ public final class TouchControllerView extends View {
             canvas.drawColor(Color.argb(150, 0, 0, 0));
         }
         for (Control c : controls) {
-            boolean floatingNow = stickFloating && c.group.equals("stick");
+            boolean floatingNow = (stickFloating && c.group.equals("stick")) || (camFloating && c.group.equals("camera"));
             if (!c.shown && !floatingNow) {
                 continue;
             }
@@ -1151,12 +1155,14 @@ public final class TouchControllerView extends View {
                 float x = event.getX(index), y = event.getY(index);
                 Control stick = null;
                 for (Control s : sticks) {
-                    if (s.shown && s.pointerId == -1 && !(stickFloating && s.group.equals("stick")) && s.hit(x, y, s.captureSlack)) {
+                    if (s.shown && s.pointerId == -1 && !(stickFloating && s.group.equals("stick")) &&
+                            !(camFloating && s.group.equals("camera")) && s.hit(x, y, s.captureSlack)) {
                         stick = s;
                         break;
                     }
                 }
                 Control left = floatingStick ? leftStick() : null;
+                Control cam = analogMode ? cameraStick() : null;
                 if (stick != null) {
                     stick.pointerId = pointerId;
                     stickDown(stick);
@@ -1175,8 +1181,20 @@ public final class TouchControllerView extends View {
                     left.pointerId = pointerId;
                     stickDown(left);
                     updateStick(left, x, y);
-                } else if (dragCamera && cameraPointer == -1) {
-                    // Away from the buttons: this finger turns the camera (Drag to Move Camera).
+                } else if (cam != null && cam.pointerId == -1 && x >= getWidth() / 2f) {
+                    // The right half: the camera stick comes to the thumb, centred under it.
+                    camHomeX = cam.cx;
+                    camHomeY = cam.cy;
+                    camHomeR = cam.r;
+                    camFloating = true;
+                    cam.cx = x;
+                    cam.cy = y;
+                    cam.r = FLOATING_RADIUS * unit;
+                    cam.pointerId = pointerId;
+                    updateStick(cam, x, y);
+                } else if (dragCamera && cameraPointer == -1 && !analogMode) {
+                    // Away from the buttons: this finger turns the camera (Drag to Move Camera;
+                    // with the Analog / Modern Camera the floating camera stick does this).
                     cameraPointer = pointerId;
                     cameraLastX = x;
                     cameraLastY = y;
@@ -1254,6 +1272,16 @@ public final class TouchControllerView extends View {
         return x < getWidth() / 2f && y > getHeight() / 3f;
     }
 
+    /** The camera (right) stick. */
+    private Control cameraStick() {
+        for (Control s : sticks) {
+            if (s.group.equals("camera")) {
+                return s;
+            }
+        }
+        return null;
+    }
+
     /** The left (control) stick. */
     private Control leftStick() {
         for (Control s : sticks) {
@@ -1314,6 +1342,12 @@ public final class TouchControllerView extends View {
 
     /** Puts a floating stick back in its place once the thumb lifts. */
     private void stickReleased(Control s) {
+        if (camFloating && s.group.equals("camera")) {
+            camFloating = false;
+            s.cx = camHomeX;
+            s.cy = camHomeY;
+            s.r = camHomeR;
+        }
         if (stickFloating && s.group.equals("stick")) {
             stickFloating = false;
             s.cx = stickHomeX;
