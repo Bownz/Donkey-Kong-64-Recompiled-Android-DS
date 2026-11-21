@@ -2128,6 +2128,16 @@ RECOMP_PATCH u16 func_global_asm_806DFF34(u16 arg0, u16 *arg1) {
     static s32 call = 0;
     static s32 lastActions = 0;
     u16 result = dk_map_buttons(arg0, arg1);
+    // With Z held, C-Up only counts from the right stick pushed up (the instrument), not from
+    // pressing the stick in (R3, First Person in the Modern layout), so Z then R3 doesn't play the
+    // instrument. The touch buttons (game feel bit 4096) and the Instrument shortcut still do.
+    if ((result & Z_TRIG) && (result & U_CBUTTONS) && !(recomp_get_game_feel() & 4096)) {
+        f32 rx, ry;
+        recomp_get_right_analog_inputs(&rx, &ry);
+        if (ry > -0.6f) {
+            result &= ~U_CBUTTONS;
+        }
+    }
     if (D_global_asm_80767CC0 != frame) {
         frame = D_global_asm_80767CC0;
         call = 0;
