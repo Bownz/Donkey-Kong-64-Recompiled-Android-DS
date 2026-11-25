@@ -1640,6 +1640,11 @@ static void modern_camera_frame_inner(Actor *camera, CameraPaad *AAD, f32 *eyeX,
             frameTarget = ledge;
         }
     }
+    // Launched high (a mushroom or spring bounce): never let the Kong get more than 70 units
+    // above the framed height, so the top of the bounce stays in view.
+    if ((mc_air_frames > 0) && !modern_camera_free_state(target) && (kongY > frameTarget + 70.0f)) {
+        frameTarget = kongY - 70.0f;
+    }
 
     // Landing on a higher (or lower) ledge, the whole view, camera and focus together, eases to
     // the new height (speeding up gently, then settling over about two thirds of a second), like
@@ -1658,8 +1663,12 @@ static void modern_camera_frame_inner(Actor *camera, CameraPaad *AAD, f32 *eyeX,
         mc_frame_speed = 0.0f;
     } else {
         f32 gap = frameTarget - mc_frame_y;
-        mc_frame_speed += ((gap * 0.16f) - mc_frame_speed) * 0.25f;
-        mc_frame_speed = mc_clamp(mc_frame_speed, -8.0f, 8.0f);
+        f32 top = 8.0f;
+        if ((mc_air_frames > 0) && (gap > 30.0f)) {
+            top = 8.0f + ((gap - 30.0f) * 0.3f);   // a fast launch: keep up with it
+        }
+        mc_frame_speed += ((gap * 0.16f) - mc_frame_speed) * ((gap > 30.0f) && (mc_air_frames > 0) ? 0.5f : 0.25f);
+        mc_frame_speed = mc_clamp(mc_frame_speed, -8.0f, top);
         mc_frame_y += mc_frame_speed;
         if ((mc_abs(gap) < 0.5f) && (mc_abs(mc_frame_speed) < 0.5f)) {
             mc_frame_y = frameTarget;
